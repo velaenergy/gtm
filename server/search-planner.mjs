@@ -43,7 +43,7 @@ export function buildSearchPlanRequest(brief, model = "gpt-5.4-mini") {
   return {
     model,
     store: false,
-    instructions: `You are Vela Energy's GTM research agent. Convert a prospecting brief into 2-4 focused people-search strategies. Prioritize direct operating responsibility, relevant infrastructure or energy exposure, and enough specificity to avoid generic results. Each strategy needs a concise LinkedIn keyword query and ContactOut People Search filters. Only include companies or locations explicitly stated by the user; otherwise use empty arrays. Seniority values must be plain career levels such as manager, director, vice president, c-suite, or owner. Explain the strategy in plain language.`,
+    instructions: `You are Vela Energy's GTM research agent. Convert a prospecting brief into 2-4 focused people-search strategies. Prioritize direct operating responsibility, relevant infrastructure or energy exposure, and enough specificity to avoid generic results. Each strategy needs a concise LinkedIn keyword query and ContactOut People Search filters. Only include companies or locations explicitly stated by the user; otherwise use empty arrays. Seniority accepts only these exact values: Owner / Founder, CXO, Partner, VP, Head, Director, Manager, Senior, Entry, Intern. Use only values from that list. Explain the strategy in plain language.`,
     input: String(brief || "").trim(),
     max_output_tokens: 900,
     text: { format: { type: "json_schema", name: "vela_search_plan", strict: true, schema: SEARCH_PLAN_SCHEMA } },

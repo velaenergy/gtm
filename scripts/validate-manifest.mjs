@@ -10,11 +10,17 @@ assert.equal(manifest.action.default_popup, "popup.html", "The toolbar action mu
 assert.ok(manifest.permissions.includes("storage"), "Storage permission is required for settings and drafts.");
 assert.ok(manifest.permissions.includes("activeTab"), "activeTab is required for the current LinkedIn profile.");
 assert.ok(manifest.permissions.includes("identity"), "identity is required for Gmail OAuth.");
+assert.ok(manifest.permissions.includes("identity.email"), "identity.email is required to label the primary Google account.");
 assert.ok(manifest.permissions.includes("tabs"), "tabs is required for sequential queue research.");
 assert.ok(manifest.host_permissions.includes("https://gmail.googleapis.com/*"), "Gmail API origin is required.");
+assert.ok(manifest.host_permissions.includes("https://sheets.googleapis.com/*"), "Google Sheets API origin is required.");
 assert.ok(manifest.host_permissions.includes("https://api.contactout.com/*"), "ContactOut API origin is required.");
 assert.equal(manifest.background.service_worker, "background.js");
-assert.deepEqual(manifest.oauth2.scopes, ["https://www.googleapis.com/auth/gmail.compose"]);
+assert.deepEqual(manifest.oauth2.scopes, [
+  "https://www.googleapis.com/auth/gmail.compose",
+  "https://www.googleapis.com/auth/spreadsheets",
+]);
+assert.match(manifest.oauth2.client_id, /^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/, "Gmail OAuth client ID must use Google's Chrome extension client format.");
 assert.ok(manifest.content_scripts.some((script) => script.matches.includes("https://www.linkedin.com/in/*")));
 const linkedinScript = manifest.content_scripts.find((script) => script.matches.includes("https://www.linkedin.com/in/*"));
 assert.deepEqual(
@@ -44,5 +50,5 @@ await Promise.all(["popup.js", "popup.css"].map((file) => access(resolve(root, f
 const dashboardHtml = await readFile(resolve(root, "dashboard.html"), "utf8");
 assert.match(dashboardHtml, /src="dashboard\.js"/);
 assert.match(dashboardHtml, /href="dashboard\.css"/);
-await Promise.all(["dashboard.js", "dashboard.css", "lib/queue.js", "lib/gmail.js"].map((file) => access(resolve(root, file))));
+await Promise.all(["dashboard.js", "dashboard.css", "lib/queue.js", "lib/gmail.js", "lib/google-account-picker.js", "lib/google-sheets.js"].map((file) => access(resolve(root, file))));
 console.log(`Manifest valid: ${referencedFiles.length} referenced files found.`);

@@ -70,6 +70,10 @@
               <small>Search planning and personalized drafts.</small>
             </label>
           </div>
+          <div class="provider-actions">
+            <button id="testContactOutButton" class="provider-test" type="button">Test ContactOut API</button>
+            <span id="contactOutApiState" class="permission-state">Not tested</span>
+          </div>
           <p class="security-note"><strong>No local server required.</strong> Keys are stored in this Chrome profile and read only by Vela GTM’s background worker—not LinkedIn. A production deployment should move them to Vela’s secret manager.</p>
           <label class="switch-row">
             <span><strong>Reveal phone numbers</strong><small>Optional. Uses ContactOut phone credits when a number is found.</small></span>
@@ -151,12 +155,16 @@
           <div class="section-heading inline-heading">
             <div>
               <h2 id="gmailHeading">Gmail drafts</h2>
-              <p>Compose-only access. Vela creates drafts but never sends them.</p>
+              <p>Choose the exact Google account used for Gmail drafts and Sheets exports. Vela never sends automatically.</p>
             </div>
             <span id="gmailState" class="permission-state">Not connected</span>
           </div>
           <p class="security-note gmail-note">Chrome extension ID: <code id="extensionId">preview</code>. Create a Google OAuth client for this ID, place it in <code>manifest.json</code>, then reload Vela GTM.</p>
-          <button id="connectGmailButton" class="gmail-connect" type="button">Connect Gmail</button>
+          <p id="gmailAccountDetail" class="security-note gmail-account-detail">No Google account selected.</p>
+          <div class="gmail-actions">
+            <button id="connectGmailButton" class="gmail-connect" type="button">Connect Gmail</button>
+            <button id="disconnectGmailButton" class="gmail-disconnect" type="button" hidden>Disconnect</button>
+          </div>
         </section>
 
         <section class="settings-section" aria-labelledby="senderHeading">
@@ -182,6 +190,15 @@
         </div>
       </form>
     </main>
+    <dialog id="googleAccountDialog" class="account-dialog">
+      <form method="dialog" class="account-card">
+        <header><div><span>Google connection</span><h2>Choose an account</h2></div><button type="submit" value="cancel" aria-label="Close account chooser">×</button></header>
+        <p>Vela requests Gmail draft and Google Sheets access for the account you select.</p>
+        <div id="googleAccountList" class="google-account-list"></div>
+        <small>To use another address, sign it into this Chrome profile first, then reopen this chooser.</small>
+        <footer><button type="submit" value="cancel">Cancel</button></footer>
+      </form>
+    </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script type="module" src="options.js"></script>

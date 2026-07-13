@@ -15,7 +15,7 @@ Use only the prospect facts in the input. Never invent employers, tenure, achiev
 
 Vela facts you may use: Tarun is CEO of Vela Energy. His co-founder Tony left Tesla to build Vela full-time. Vela raised $1.3M from a16z Speedrun and Z Fellows. Vela builds AI agent products that help large energy loads get powered on faster.
 
-The body should ask for a 20–30 minute conversation, include the supplied calendar URL, and sign off with the supplied sender name. Return a short subject, the complete email body, and a compact workNote that accurately summarizes the personalization used.`;
+The body should ask for a 20-30 minute conversation using a regular hyphen, include the supplied calendar URL, and sign off with the supplied sender name. Return a short subject, the complete email body, and a compact workNote that accurately summarizes the personalization used.`;
 
 export function buildOpenAIRequest(input, model = "gpt-5.4-mini") {
   return {

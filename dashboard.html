@@ -44,6 +44,10 @@
               <span>Gmail drafts</span><b id="navDrafted">0</b>
             </button>
           </div>
+          <div class="nav-group campaign-nav-group">
+            <div class="nav-label-row"><p class="nav-label">Campaigns</p><button id="newCampaignButton" type="button" aria-label="Create campaign" title="Create campaign">+</button></div>
+            <div id="campaignNav" class="campaign-nav"></div>
+          </div>
           <div class="nav-group">
             <p class="nav-label">Sources</p>
             <button id="captureSearchButton" class="nav-item" type="button">
@@ -74,12 +78,12 @@
           <div class="crumb"><span>Vela Energy</span><i>/</i><strong>GTM</strong></div>
           <div class="top-actions">
             <button id="copySheetButton" class="button button-ghost" type="button">
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6.5 3.5h10v10h-10zM3.5 6.5v10h10"/></svg>
-              Copy for Sheets
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h12v13H4zM4 8h12M8 3.5v13"/></svg>
+              Export to Sheets
             </button>
             <button id="exportButton" class="button button-outline" type="button">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9M6.5 8.5 10 12l3.5-3.5M3.5 14v2.5h13V14"/></svg>
-              Export CSV
+              <span id="exportButtonLabel">Export CSV</span>
             </button>
             <span class="avatar-user" aria-label="Tarun">TR</span>
           </div>
@@ -89,10 +93,10 @@
           <section class="hero" aria-labelledby="pageTitle">
             <div class="hero-heading">
               <p class="eyebrow"><span></span>Agent workspace</p>
-              <h1 id="pageTitle">Turn a market into<br /><em>conversations.</em></h1>
-              <p>Describe who matters. Vela plans the search, researches the people, and prepares the work for your review.</p>
+              <h1 id="pageTitle">Vela GTM agents</h1>
+              <p>Find the right people, verify their contact details, and prepare drafts for review.</p>
             </div>
-            <div class="activity-note"><span class="activity-pulse"></span><div><strong>Agent ready</strong><small>6 sources available</small></div></div>
+            <div class="activity-note"><span class="activity-pulse"></span><div><strong>Ready</strong><small>Sources connected</small></div></div>
           </section>
 
           <section class="agent-panel" aria-label="Vela agent search">
@@ -107,6 +111,15 @@
             <div class="agent-footer">
               <div class="agent-tools"><button type="button" data-prompt="Find VP and director-level data center operators focused on power and critical infrastructure">Data center operators</button><button type="button" data-prompt="Find energy procurement and utility strategy leaders at large industrial loads">Energy buyers</button><button type="button" data-prompt="Find site selection leaders at AI infrastructure and colocation companies">Site selection</button></div>
               <span><kbd>⌘</kbd><kbd>↵</kbd> to run</span>
+            </div>
+            <div id="agentActivity" class="agent-activity" hidden aria-live="polite">
+              <div class="agent-activity-copy"><span class="agent-spinner"></span><div><strong id="agentActivityTitle">Working</strong><small id="agentActivityDetail">Preparing the next step</small></div></div>
+              <div class="agent-steps" aria-label="Agent tools">
+                <span data-agent-step="plan">Plan</span>
+                <span data-agent-step="source">Find sources</span>
+                <span data-agent-step="research">Research</span>
+                <span data-agent-step="draft">Draft</span>
+              </div>
             </div>
             <div id="searchPlan" class="search-plan" hidden>
               <div class="plan-head"><span>Vela’s plan</span><p id="searchStrategy"></p></div>
@@ -125,6 +138,7 @@
             <div class="queue-titlebar">
               <div><h2 id="queueHeading">All prospects</h2><p id="queueDescription">Every prospect across research, review, and Gmail.</p></div>
               <div class="queue-actions">
+                <button id="newCampaignButtonTop" class="button button-ghost" type="button">+ Campaign</button>
                 <button id="draftReadyButton" class="button button-outline" type="button">Create Gmail drafts</button>
                 <button id="processButton" class="button button-primary" type="button">
                   <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m10 2 .9 3.1L14 6l-3.1.9L10 10l-.9-3.1L6 6l3.1-.9zM15.5 11l.6 2.4 2.4.6-2.4.6-.6 2.4-.6-2.4-2.4-.6 2.4-.6zM5 11.5l.7 2.1 2.1.7-2.1.7-.7 2.1-.7-2.1-2.1-.7 2.1-.7z"/></svg>
@@ -174,18 +188,36 @@
     </div>
 
     <div id="drawerBackdrop" class="drawer-backdrop" hidden></div>
-    <aside id="reviewDrawer" class="review-drawer" aria-labelledby="drawerTitle" aria-hidden="true">
+    <aside id="reviewDrawer" class="review-drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" aria-hidden="true" inert>
       <header class="drawer-header">
         <div><p>Draft review</p><h2 id="drawerTitle">Review prospect</h2></div>
         <button id="closeDrawerButton" class="icon-button" type="button" aria-label="Close review panel"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg></button>
       </header>
       <div class="drawer-content">
-        <div class="prospect-summary"><span id="drawerAvatar" class="person-avatar">VG</span><div><strong id="drawerName">Prospect</strong><p id="drawerHeadline"></p><a id="drawerLinkedIn" href="#" target="_blank" rel="noreferrer">View LinkedIn ↗</a></div></div>
+        <div class="prospect-summary"><span id="drawerAvatar" class="person-avatar">VG</span><div><strong id="drawerName">Prospect</strong><p id="drawerHeadline"></p><p id="drawerLocation" class="prospect-location"></p><a id="drawerLinkedIn" href="#" target="_blank" rel="noreferrer">Live page ↗</a></div></div>
         <div class="review-status"><span><i></i>Human review required</span><small>Nothing is sent from this screen</small></div>
-        <label class="field"><span>Personalization note</span><textarea id="drawerWorkNote" rows="3"></textarea></label>
-        <label class="field"><span>To</span><input id="drawerEmail" type="email" /></label>
+
+        <section class="drawer-section email-review" aria-labelledby="emailReviewTitle">
+          <div class="drawer-section-head"><div><p class="section-kicker">Email</p><h3 id="emailReviewTitle">Choose a recipient</h3><small id="drawerEmailSource">Contact details found during research</small></div><span id="drawerEmailStatus" class="verification-pill">Found</span></div>
+          <div id="drawerEmailChoices" class="email-choices"></div>
+          <div class="email-actions"><button id="copyDrawerEmail" type="button">Copy selected</button><button id="retryDrawerLookup" type="button">Retry lookup</button></div>
+          <label class="field compact-field"><span>Selected recipient</span><input id="drawerEmail" type="email" autocomplete="off" /></label>
+        </section>
+
+        <section class="drawer-section">
+          <div class="drawer-section-head"><div><p class="section-kicker">Personalization note</p><h3>Used in the email draft</h3></div></div>
+          <label class="field"><span class="sr-only">Personalization note</span><textarea id="drawerWorkNote" rows="3"></textarea></label>
+        </section>
+
+        <section class="drawer-section" aria-labelledby="workHistoryTitle">
+          <div class="drawer-section-head"><div><p class="section-kicker">Work history</p><h3 id="workHistoryTitle">Roles visible on this profile</h3></div><span id="drawerExperienceCount" class="section-count">0 found</span></div>
+          <div id="drawerExperienceList" class="experience-list"></div>
+        </section>
+
+        <div class="message-fields">
         <label class="field"><span>Subject</span><input id="drawerSubject" type="text" /></label>
         <label class="field"><span>Message</span><textarea id="drawerBody" rows="13"></textarea></label>
+        </div>
       </div>
       <footer class="drawer-footer">
         <button id="saveReviewButton" class="button button-outline" type="button">Save changes</button>
@@ -202,6 +234,30 @@
           <span id="importHint">Duplicates are merged automatically using the LinkedIn URL.</span>
         </div>
         <footer><button class="button button-ghost" value="cancel">Cancel</button><button id="importButton" class="button button-primary" type="button">Add to workspace</button></footer>
+      </form>
+    </dialog>
+
+    <dialog id="campaignDialog" class="modal campaign-modal">
+      <form id="campaignForm" class="modal-card">
+        <header><div><p class="eyebrow">Organize outreach</p><h2>Create campaign</h2></div><button id="closeCampaignDialog" class="icon-button" type="button" aria-label="Close campaign dialog"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg></button></header>
+        <div class="modal-body">
+          <p>Campaigns collect prospects without duplicating their research or personalization notes.</p>
+          <label class="field"><span>Campaign name</span><input id="campaignName" type="text" maxlength="70" autocomplete="off" placeholder="Data center operators" /></label>
+          <label class="field"><span>Description <em>Optional</em></span><input id="campaignDescription" type="text" maxlength="140" autocomplete="off" placeholder="Leaders to contact before the infrastructure summit" /></label>
+        </div>
+        <footer><button id="cancelCampaignButton" class="button button-ghost" type="button">Cancel</button><button class="button button-primary" type="submit">Create campaign</button></footer>
+      </form>
+    </dialog>
+
+    <dialog id="googleAccountDialog" class="modal google-account-modal">
+      <form method="dialog" class="modal-card">
+        <header><div><p class="eyebrow">Google connection</p><h2>Choose an account</h2></div><button class="icon-button" value="cancel" aria-label="Close account chooser"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg></button></header>
+        <div class="modal-body">
+          <p>Vela will create Gmail drafts and mail-merge spreadsheets in the account you choose. Nothing is sent automatically.</p>
+          <div id="googleAccountList" class="google-account-list"></div>
+          <span>To use a different address, sign it into this Chrome profile first, then reopen this chooser.</span>
+        </div>
+        <footer><button class="button button-ghost" value="cancel">Cancel</button></footer>
       </form>
     </dialog>
 

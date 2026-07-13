@@ -194,7 +194,18 @@ form { display: grid; gap: 16px; }
 .security-note strong { color: var(--text-secondary); font-weight: 500; }
 .security-note code { font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; }
 .gmail-note { margin-top: 0; padding-top: 0; border-top: 0; }
-.gmail-connect { margin-top: 16px; height: 36px; padding: 0 13px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--text); color: var(--bg); font-size: 10px; cursor: pointer; }
+.gmail-actions { display: flex; gap: 8px; margin-top: 16px; }
+.gmail-account-detail{margin-top:10px}.account-dialog{width:min(500px,calc(100vw - 28px));padding:0;border:0;border-radius:12px;background:transparent;color:var(--text);box-shadow:0 22px 60px rgba(0,0,0,.3)}.account-dialog::backdrop{background:rgba(4,8,6,.52);backdrop-filter:blur(3px)}.account-card{padding:0;border:1px solid var(--border);border-radius:12px;background:var(--surface);overflow:hidden}.account-card header{display:flex;align-items:center;justify-content:space-between;padding:18px;border-bottom:1px solid var(--border)}.account-card header span{color:var(--text-secondary);font-size:10px;text-transform:uppercase}.account-card header h2{margin:4px 0 0}.account-card header button{border:0;background:none;color:var(--text-secondary);font-size:22px;cursor:pointer}.account-card>p,.account-card>small{display:block;margin:0;padding:16px 18px 0;color:var(--text-secondary);font-size:11px;line-height:1.5}.account-card>small{padding:10px 18px 16px}.account-card footer{display:flex;justify-content:flex-end;padding:12px 18px;border-top:1px solid var(--border)}.account-card footer button{padding:8px 13px;border:1px solid var(--border-strong);border-radius:7px;background:var(--surface);color:var(--text);cursor:pointer}.google-account-list{display:grid;gap:8px;padding:16px 18px 0}.google-account-option{display:flex;flex-direction:column;gap:4px;padding:13px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);text-align:left;cursor:pointer}.google-account-option:hover,.google-account-option:focus-visible{border-color:var(--text);outline:none}.google-account-option strong{font-size:12px}.google-account-option span{color:var(--text-secondary);font-size:10px}
+.gmail-connect,
+.gmail-disconnect { height: 36px; padding: 0 13px; border: 1px solid var(--border-strong); border-radius: 7px; font-size: 10px; cursor: pointer; }
+.gmail-connect { background: var(--text); color: var(--bg); }
+.gmail-disconnect { background: var(--surface); color: var(--text-secondary); }
+.gmail-connect:disabled,
+.gmail-disconnect:disabled { cursor: wait; opacity: .55; }
+.provider-actions { display:flex; align-items:center; gap:8px; margin-top:14px; }
+.provider-test { height:34px; padding:0 12px; border:1px solid var(--border-strong); border-radius:7px; background:var(--surface); color:var(--text-secondary); font-size:10px; cursor:pointer; }
+.provider-test:hover { background:var(--surface-hover); color:var(--text); }
+.provider-test:disabled { cursor:wait; opacity:.55; }
 
 .theme-options {
   display: grid;

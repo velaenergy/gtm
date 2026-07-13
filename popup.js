@@ -12,6 +12,13 @@ import {
 } from "./lib/message.js";
 import { buildWriterRequest, normalizeWriterResponse } from "./lib/ai-writer.js";
 import { QUEUE_STORAGE_KEY, upsertProspects } from "./lib/queue.js";
+import {
+  CAMPAIGNS_STORAGE_KEY,
+  addProspectToCampaign,
+  campaignsForProspect,
+  createCampaign,
+  normalizeCampaigns,
+} from "./lib/campaigns.js";
 
 const DEMO_PROFILE = {
   name: "Joshua Rivera",
@@ -35,6 +42,8 @@ const elements = Object.fromEntries(
     "avatar", "profileName", "profileHeadline", "profileLocationText", "emailSource", "emailConfidence", "emailInput",
     "findEmailButton", "copyEmailButton", "contactDetails", "workNote", "signalCount", "experienceList", "templateSelect",
     "templateEyebrow", "generateEmailButton", "subjectInput", "bodyInput", "wordCount", "copyDraftButton", "openGmailButton", "toast",
+    "addToCampaignButton", "campaignDialog", "closeCampaignDialog", "campaignList", "createCampaignForm", "newCampaignName",
+    "createCampaignButton", "openCampaignWorkspace",
   ].map((id) => [id, document.getElementById(id)]),
 );
 
@@ -43,12 +52,14 @@ const state = {
   settings: { ...DEFAULT_SETTINGS },
   email: "",
   emailSource: "",
-  contactDetails: { emails: [], phones: [], emailStatus: "" },
+  contactDetails: { emails: [], phones: [], emailStatus: "", emailStatuses: {}, error: "" },
   confidence: null,
   note: "",
   templateId: TEMPLATES[0].id,
   subject: "",
   body: "",
+  campaigns: [],
+  lastCampaignId: "",
   composerDirty: false,
   draftTimer: null,
   toastTimer: null,
@@ -306,7 +317,7 @@ function setFindEmailLoading(loading, label = "Retry lookup") {
   elements.findEmailButton.querySelector("span").textContent = label;
 }
 
-async function enrichProfile({ requestPermission = true, manageButton = true, openSettingsWhenMissing = true, silent = false } = {}) {
+async function enrichProfile({ requestPermission = true, manageButton = true, openSettingsWhenMissing = true, silent = false, replaceProviderResult = false } = {}) {
   if (!state.profile) return;
   const direct = Boolean(state.settings.contactOutApiKey && globalThis.chrome?.runtime?.sendMessage);
   if (!direct && !state.settings.endpointUrl) {
@@ -318,6 +329,14 @@ async function enrichProfile({ requestPermission = true, manageButton = true, op
   }
 
   try {
+    const priorProviderEmail = /^ContactOut\b/i.test(state.emailSource || "")
+      || (state.contactDetails.emails || []).includes(state.email);
+    if (replaceProviderResult && priorProviderEmail) {
+      state.email = "";
+      state.emailSource = "Checking ContactOut…";
+      state.contactDetails = { emails: [], phones: [], emailStatus: "", emailStatuses: {}, error: "" };
+      renderEmail();
+    }
     if (manageButton) setFindEmailLoading(true, "Searching");
     let payload;
     if (direct) {
@@ -342,7 +361,7 @@ async function enrichProfile({ requestPermission = true, manageButton = true, op
       state.emailSource = result.emailSource || "Enrichment service";
       state.confidence = result.confidence;
     }
-    state.contactDetails = { emails: result.emails, phones: result.phones, emailStatus: result.emailStatus };
+    state.contactDetails = { emails: result.emails, phones: result.phones, emailStatus: result.emailStatus, emailStatuses: result.emailStatuses, error: "" };
     if (result.note) {
       state.note = result.note;
       elements.workNote.value = state.note;
@@ -353,7 +372,11 @@ async function enrichProfile({ requestPermission = true, manageButton = true, op
     if (!silent) showToast(result.email ? "Email found and added to the draft." : "Research note refreshed.");
     return Boolean(result.email || result.note);
   } catch (error) {
-    if (!silent) showToast(error instanceof Error ? error.message : "Enrichment failed. Check Settings.");
+    const message = error instanceof Error ? error.message : "Enrichment failed. Check Settings.";
+    state.emailSource = message;
+    state.contactDetails = { ...state.contactDetails, error: message };
+    renderEmail();
+    if (!silent) showToast(message);
     return false;
   } finally {
     if (manageButton) setFindEmailLoading(false);
@@ -376,6 +399,7 @@ async function findProspectEmail({ automatic = false } = {}) {
           manageButton: false,
           openSettingsWhenMissing: false,
           silent: automatic,
+          replaceProviderResult: !automatic,
         });
         if (found && state.email) return;
       } else {
@@ -488,25 +512,107 @@ function openSettings() {
   else window.open("options.html", "_blank", "noopener,noreferrer");
 }
 
-async function addCurrentToQueue() {
-  if (state.profile) {
-    const saved = await storage.get([QUEUE_STORAGE_KEY]);
-    const queue = upsertProspects(saved[QUEUE_STORAGE_KEY] || [], [{
-      url: state.profile.url,
-      name: state.profile.name,
-      headline: state.profile.headline,
-      location: state.profile.location,
-      email: state.email,
-      emailSource: state.emailSource,
-      workNote: state.note,
-      subject: state.subject,
-      body: state.body,
-      profile: state.profile,
-    }]);
-    await storage.set({ [QUEUE_STORAGE_KEY]: queue });
+function currentProspect() {
+  return {
+    url: state.profile.url,
+    name: state.profile.name,
+    headline: state.profile.headline,
+    location: state.profile.location,
+    email: state.email,
+    emailSource: state.emailSource,
+    workNote: state.note,
+    subject: state.subject,
+    body: state.body,
+    profile: state.profile,
+  };
+}
+
+function updateCampaignButton() {
+  if (!state.profile) return;
+  const memberships = campaignsForProspect(state.campaigns, state.profile.url);
+  const strong = elements.addToCampaignButton.querySelector("strong");
+  const small = elements.addToCampaignButton.querySelector("small");
+  elements.addToCampaignButton.classList.toggle("is-saved", memberships.length > 0);
+  strong.textContent = memberships.length ? `Saved to ${memberships.length} campaign${memberships.length === 1 ? "" : "s"}` : "Add to campaign";
+  small.textContent = memberships.length ? "Profile and note are synced" : "Save this profile and note";
+}
+
+function renderCampaignList() {
+  const memberships = new Set(campaignsForProspect(state.campaigns, state.profile?.url).map((campaign) => campaign.id));
+  const fragment = document.createDocumentFragment();
+  for (const campaign of state.campaigns) {
+    const added = memberships.has(campaign.id);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `campaign-option${added ? " is-added" : ""}`;
+    button.setAttribute("aria-pressed", String(added));
+    const mark = document.createElement("span");
+    mark.className = "campaign-option-mark";
+    mark.textContent = campaign.name.slice(0, 2).toUpperCase();
+    const copy = document.createElement("span");
+    copy.className = "campaign-option-copy";
+    const name = document.createElement("strong");
+    name.textContent = campaign.name;
+    const count = document.createElement("small");
+    count.textContent = `${campaign.prospectIds.length} prospect${campaign.prospectIds.length === 1 ? "" : "s"}`;
+    copy.append(name, count);
+    const status = document.createElement("span");
+    status.className = "campaign-option-status";
+    status.textContent = added ? "Added" : "Add";
+    button.append(mark, copy, status);
+    button.addEventListener("click", async () => {
+      state.lastCampaignId = campaign.id;
+      if (!added) await saveToCampaign(campaign.id);
+      else showToast(`Already saved to ${campaign.name}.`);
+    });
+    fragment.append(button);
   }
-  if (globalThis.chrome?.tabs?.create) await chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
-  else window.open("dashboard.html", "_blank", "noopener,noreferrer");
+  if (!state.campaigns.length) {
+    const empty = document.createElement("p");
+    empty.className = "campaign-empty";
+    empty.textContent = "No campaigns yet. Create one below and this person will be added immediately.";
+    fragment.append(empty);
+  }
+  elements.campaignList.replaceChildren(fragment);
+  updateCampaignButton();
+}
+
+async function loadCampaigns() {
+  const saved = await storage.get([CAMPAIGNS_STORAGE_KEY]);
+  state.campaigns = normalizeCampaigns(saved[CAMPAIGNS_STORAGE_KEY] || []);
+  if (state.isPreview && !state.campaigns.length) {
+    state.campaigns = [
+      createCampaign({ id: "data-center-operators", name: "Data center operators" }),
+      createCampaign({ id: "energy-buyers", name: "Energy buyers" }),
+    ];
+  }
+  renderCampaignList();
+}
+
+async function saveToCampaign(campaignId) {
+  if (!state.profile) return;
+  state.note = elements.workNote.value.trim();
+  const saved = await storage.get([QUEUE_STORAGE_KEY]);
+  const queue = upsertProspects(saved[QUEUE_STORAGE_KEY] || [], [currentProspect()]);
+  state.campaigns = addProspectToCampaign(state.campaigns, campaignId, state.profile.url);
+  await storage.set({ [QUEUE_STORAGE_KEY]: queue, [CAMPAIGNS_STORAGE_KEY]: state.campaigns });
+  state.lastCampaignId = campaignId;
+  const campaign = state.campaigns.find((item) => item.id === campaignId);
+  renderCampaignList();
+  showToast(`Added to ${campaign?.name || "campaign"} with your note.`);
+}
+
+function openCampaignDialog() {
+  renderCampaignList();
+  elements.campaignDialog.showModal();
+  if (!state.campaigns.length) setTimeout(() => elements.newCampaignName.focus(), 0);
+}
+
+async function openCampaigns(campaignId = "") {
+  const page = new URL("dashboard.html", location.href);
+  if (campaignId) page.searchParams.set("campaign", campaignId);
+  if (globalThis.chrome?.tabs?.create) await chrome.tabs.create({ url: chrome.runtime.getURL(`${page.pathname.split("/").pop()}${page.search}`) });
+  else window.open(page.toString(), "_blank", "noopener,noreferrer");
 }
 
 async function openGmail() {
@@ -523,7 +629,22 @@ async function openGmail() {
 
 function bindEvents() {
   elements.settingsButton.addEventListener("click", openSettings);
-  elements.queueButton.addEventListener("click", addCurrentToQueue);
+  elements.queueButton.addEventListener("click", () => openCampaigns());
+  elements.addToCampaignButton.addEventListener("click", openCampaignDialog);
+  elements.closeCampaignDialog.addEventListener("click", () => elements.campaignDialog.close());
+  elements.openCampaignWorkspace.addEventListener("click", () => openCampaigns(state.lastCampaignId));
+  elements.createCampaignForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = elements.newCampaignName.value.trim();
+    if (!name) { elements.newCampaignName.focus(); return; }
+    let campaign = state.campaigns.find((item) => item.name.toLowerCase() === name.toLowerCase());
+    if (!campaign) {
+      campaign = createCampaign({ name });
+      state.campaigns = [...state.campaigns, campaign];
+    }
+    elements.newCampaignName.value = "";
+    await saveToCampaign(campaign.id);
+  });
   document.querySelectorAll(".tab-button").forEach((button) => {
     button.addEventListener("click", () => switchTab(button.dataset.tab));
   });
@@ -589,6 +710,7 @@ async function initialize() {
     elements.previewBadge.hidden = !state.isPreview;
     renderProfile();
     await loadDraft();
+    await loadCampaigns();
     showView("workspace");
     if (previewTab === "draft") switchTab("draft");
 

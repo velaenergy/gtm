@@ -6,14 +6,17 @@
 - **V2 — OpenAI key boundary.** The internal build may store an OpenAI key in the extension's Chrome profile for background-worker calls, but must never expose it to a LinkedIn tab, generated prompt, queue record, or log; production deployment remains server-side.
 - **V3 — LinkedIn contact email.** Email discovery must discreetly try a freshly constructed contact-details RSC request with the current page session, then fall back to LinkedIn's rendered `/overlay/contact-info/` UI; both paths must extract a valid `mailto:` address without storing or replaying HAR credentials.
 - **V4 — Prospect identity.** A normalized LinkedIn `/in/` URL is the queue identity; repeated imports update one prospect instead of creating duplicate outreach rows.
-- **V5 — Human-reviewed Gmail.** Gmail integration may create reviewable drafts with compose-only OAuth access, but must never send messages or rotate sender accounts automatically.
+- **V5 — Human-reviewed Gmail.** Google integration must let the user choose a signed-in Chrome account, may create reviewable drafts with compose-only Gmail access, and must never send messages or rotate sender accounts automatically.
+- **V9 — Mail-merge export.** The current campaign, filtered view, or explicit selection may be exported into a new Google Sheet in the chosen account with one stable header row and all reviewed personalization fields.
 - **V6 — Provider credential boundary.** Internal-build ContactOut and OpenAI keys may be stored in the extension's Chrome profile and read only by its background worker; they must never be injected into LinkedIn tabs, included in queue records, or logged. Production deployment moves them server-side.
 - **V7 — Automatic contact resolution.** Opening or researching a profile starts ContactOut automatically: Contact Info Single first, People Enrich second, broad profile enrichment last; LinkedIn Contact Info is the final fallback and all returned addresses remain visible for review.
+- **V8 — Campaign membership.** Campaigns reference normalized prospect identity; add from profile ! persist current personalization note before membership; campaign totals and exports ! contain campaign members only.
 
 ## I — External surfaces
 
 - **I1 — LinkedIn people search.** Open a native LinkedIn people-result URL and capture only profile links currently rendered in the signed-in user's browser.
 - **I2 — Gmail drafts.** `POST https://gmail.googleapis.com/gmail/v1/users/me/drafts` with a base64url RFC 2822 message and `gmail.compose` authorization.
+- **I3 — Google Sheets export.** `POST https://sheets.googleapis.com/v4/spreadsheets` with mail-merge rows and `spreadsheets` authorization; the created sheet is opened for review and downstream mail merge.
 - **I3 — AI writer.** Existing configured writer endpoint accepts structured profile context and returns subject, body, and personalization note.
 - **I4 — ContactOut enrichment.** `GET https://api.contactout.com/v1/linkedin/enrich?profile=...` using a server-side `token` header.
 
@@ -29,6 +32,7 @@
 | T6 | x | add server-side ContactOut fallback and normalized profile context | V3,V6,I4 |
 | T7 | x | remove local-server requirement with background provider worker and automatic multi-endpoint contact resolution | V6,V7,I4 |
 | T8 | x | add OpenAI search-planning agent and direct background writing | V2,V6,I3 |
+| T9 | x | add named campaigns, profile save action, scoped totals, and export | V4,V8 |
 
 ## B — Bug history
 

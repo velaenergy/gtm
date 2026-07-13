@@ -18,7 +18,7 @@
       </a>
       <div class="topbar-actions">
         <span id="previewBadge" class="preview-badge" hidden>Preview</span>
-        <button id="queueButton" class="queue-button" type="button">+ Queue</button>
+        <button id="queueButton" class="queue-button" type="button">Campaigns</button>
         <button id="settingsButton" class="icon-button" type="button" aria-label="Open settings" title="Open settings">
           <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3"/><path d="M10 2.8v1.4M10 15.8v1.4M17.2 10h-1.4M4.2 10H2.8M15.1 4.9l-1 1M5.9 14.1l-1 1M15.1 15.1l-1-1M5.9 5.9l-1-1"/></svg>
         </button>
@@ -73,6 +73,11 @@
           <section class="block">
             <div class="block-heading"><div><h2>Personalization note</h2><p>Used in the email draft.</p></div></div>
             <textarea id="workNote" class="work-note" rows="4" aria-label="Personalization note"></textarea>
+            <button id="addToCampaignButton" class="campaign-save-button" type="button">
+              <span class="campaign-save-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M3.5 5.5h5l1.4 1.6h6.6v8.4h-13zM10 9v4M8 11h4"/></svg></span>
+              <span class="campaign-save-copy"><strong>Add to campaign</strong><small>Save this profile and note</small></span>
+              <span class="campaign-save-arrow" aria-hidden="true">›</span>
+            </button>
           </section>
 
           <section class="block signals-block">
@@ -105,6 +110,21 @@
       <button id="copyDraftButton" class="secondary-button" type="button">Copy draft</button>
       <button id="openGmailButton" class="gmail-button" type="button">Open in Gmail <span aria-hidden="true">↗</span></button>
     </footer>
+
+    <dialog id="campaignDialog" class="campaign-dialog" aria-labelledby="campaignDialogTitle">
+      <div class="campaign-dialog-card">
+        <header>
+          <div><span>Campaigns</span><h2 id="campaignDialogTitle">Add this person</h2><p>The current personalization note is saved with the prospect.</p></div>
+          <button id="closeCampaignDialog" class="icon-button" type="button" aria-label="Close campaign picker"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg></button>
+        </header>
+        <div id="campaignList" class="campaign-list"></div>
+        <form id="createCampaignForm" class="campaign-create-row">
+          <label for="newCampaignName">New campaign</label>
+          <div><input id="newCampaignName" type="text" maxlength="70" autocomplete="off" placeholder="e.g. Data center operators" /><button id="createCampaignButton" type="submit">Create & add</button></div>
+        </form>
+        <footer><button id="openCampaignWorkspace" type="button">Open campaign workspace <span aria-hidden="true">↗</span></button></footer>
+      </div>
+    </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script type="module" src="popup.js"></script>

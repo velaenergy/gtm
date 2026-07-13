@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Vela GTM",
   "description": "Turn LinkedIn profiles into researched, personalized Vela outreach drafts.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "action": {
     "default_title": "Open Vela GTM",
     "default_popup": "popup.html",
@@ -23,10 +23,11 @@
     "48": "assets/icon-48.png",
     "128": "assets/icon-128.png"
   },
-  "permissions": ["activeTab", "identity", "scripting", "storage", "tabs"],
+  "permissions": ["activeTab", "identity", "identity.email", "scripting", "storage", "tabs"],
   "host_permissions": [
     "https://www.linkedin.com/*",
     "https://gmail.googleapis.com/*",
+    "https://sheets.googleapis.com/*",
     "https://api.contactout.com/*",
     "https://api.openai.com/*",
     "http://127.0.0.1/*",
@@ -41,8 +42,11 @@
     }
   ],
   "oauth2": {
-    "client_id": "REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com",
-    "scopes": ["https://www.googleapis.com/auth/gmail.compose"]
+    "client_id": "1088169803258-bv0d48d7ftb9429eeprg27baqmadaukq.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/gmail.compose",
+      "https://www.googleapis.com/auth/spreadsheets"
+    ]
   },
   "options_page": "options.html",
   "content_security_policy": {

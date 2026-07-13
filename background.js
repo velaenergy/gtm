@@ -1,4 +1,4 @@
-import { enrichViaContactOut, peopleSearch } from "./lib/contactout.js";
+import { contactOutAccountStatus, enrichViaContactOut, peopleSearch } from "./lib/contactout.js";
 import { writeOutreach } from "./server/openai-writer.mjs";
 import { planProspectSearch } from "./server/search-planner.mjs";
 
@@ -13,6 +13,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const configured = await settings();
     if (message.type === "VELA_GTM_PROVIDER_CONTACTOUT") {
       return enrichViaContactOut(message.profile, { apiKey: configured.contactOutApiKey, includePhone: configured.includeContactOutPhone });
+    }
+    if (message.type === "VELA_GTM_PROVIDER_CONTACTOUT_STATUS") {
+      return contactOutAccountStatus({ apiKey: configured.contactOutApiKey });
     }
     if (message.type === "VELA_GTM_PROVIDER_WRITE") {
       return writeOutreach(message.input, { apiKey: configured.openAIApiKey, model: configured.openAIModel || "gpt-5.4-mini" });

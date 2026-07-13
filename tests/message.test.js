@@ -36,6 +36,8 @@ test("the default outreach play resolves all variables", () => {
   assert.match(message.subject, /Quick intro/);
   assert.match(message.body, /^Hi Joshua,/);
   assert.match(message.body, /a16z Speedrun and Z Fellows/);
+  assert.match(message.body, /20-30 minutes/);
+  assert.doesNotMatch(message.body, /20[–—]30/);
   assert.doesNotMatch(message.body, /{{\w+}}/);
 });
 
@@ -54,10 +56,24 @@ test("normalizes common enrichment response shapes and confidence scales", () =>
     confidence: 92,
     emailSource: "",
     emails: ["josh@example.com"],
+    workEmails: [],
+    personalEmails: [],
     phones: [],
     emailStatus: "",
+    emailStatuses: {},
     profile: null,
   });
+});
+
+test("preserves per-address ContactOut verification statuses", () => {
+  const result = normalizeEnrichmentResponse({
+    email: "alex@grid.example",
+    emails: ["alex@grid.example"],
+    emailStatus: "verified",
+    emailStatuses: { "ALEX@GRID.EXAMPLE": "verified" },
+  });
+  assert.equal(result.emailStatus, "verified");
+  assert.deepEqual(result.emailStatuses, { "alex@grid.example": "verified" });
 });
 
 test("email and initials helpers handle normal and empty values", () => {

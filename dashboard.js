@@ -1,5 +1,14 @@
 import { buildWriterRequest, normalizeWriterResponse } from "./lib/ai-writer.js";
-import { gmailDraftPayload } from "./lib/gmail.js";
+import {
+  GMAIL_DRAFTS_WEB_URL,
+  GOOGLE_ACCOUNT_STORAGE_KEY,
+  createGmailDraftWithRetry,
+  getGmailAuthToken,
+  getGmailProfile,
+  gmailDraftBatchSummary,
+} from "./lib/gmail.js";
+import { pickGoogleAccount } from "./lib/google-account-picker.js";
+import { createGoogleSpreadsheet } from "./lib/google-sheets.js";
 import {
   DEFAULT_SETTINGS,
   TEMPLATES,
@@ -18,22 +27,37 @@ import {
   queueStats,
   upsertProspects,
 } from "./lib/queue.js";
+import {
+  CAMPAIGNS_STORAGE_KEY,
+  addProspectToCampaign,
+  campaignProspects,
+  createCampaign,
+  normalizeCampaigns,
+  removeProspectFromAllCampaigns,
+  removeProspectFromCampaign,
+} from "./lib/campaigns.js";
 
 const isExtension = Boolean(globalThis.chrome?.runtime?.id);
-const previewTheme = !isExtension ? new URLSearchParams(location.search).get("theme") : null;
+const pageParams = new URLSearchParams(location.search);
+const previewTheme = !isExtension ? pageParams.get("theme") : null;
+const requestedCampaignId = pageParams.get("campaign") || "";
 const elements = Object.fromEntries([
   "settingsButton", "searchForm", "searchBrief", "planSearchButton", "searchPlan", "searchStrategy", "searchOptions",
   "captureSearchButton", "openImportButton", "openImportButtonTop", "importDialog", "bulkInput", "importButton", "importHint",
   "processButton", "draftReadyButton", "queueBody", "emptyState", "totalStat", "readyStat", "draftedStat",
-  "attentionStat", "progressBar", "progressText", "toast", "navTotal", "navResearch", "navReview", "navDrafted",
+  "attentionStat", "totalDelta", "progressBar", "progressText", "toast", "navTotal", "navResearch", "navReview", "navDrafted",
   "queueHeading", "queueDescription", "tableSearch", "statusFilterButton", "resultCount", "selectAll", "bulkBar",
-  "selectedCount", "bulkResearchButton", "bulkDraftButton", "clearSelectionButton", "exportButton", "copySheetButton",
+  "selectedCount", "bulkResearchButton", "bulkDraftButton", "clearSelectionButton", "exportButton", "exportButtonLabel", "copySheetButton",
   "collapseSidebar", "drawerBackdrop", "reviewDrawer", "closeDrawerButton", "drawerAvatar", "drawerName", "drawerHeadline",
-  "drawerLinkedIn", "drawerWorkNote", "drawerEmail", "drawerSubject", "drawerBody", "saveReviewButton", "approveDraftButton",
+  "drawerLocation", "drawerLinkedIn", "drawerWorkNote", "drawerEmail", "drawerSubject", "drawerBody", "saveReviewButton", "approveDraftButton",
+  "drawerEmailChoices", "drawerEmailSource", "drawerEmailStatus", "copyDrawerEmail", "retryDrawerLookup", "drawerExperienceCount", "drawerExperienceList",
+  "agentActivity", "agentActivityTitle", "agentActivityDetail", "campaignNav", "newCampaignButton", "newCampaignButtonTop",
+  "campaignDialog", "campaignForm", "campaignName", "campaignDescription", "closeCampaignDialog", "cancelCampaignButton",
+  "googleAccountDialog", "googleAccountList",
 ].map((id) => [id, document.getElementById(id)]));
 
 const DEMO_QUEUE = [
-  { url: "https://www.linkedin.com/in/joshua-rivera", name: "Joshua Rivera", headline: "VP, Critical Operations", location: "Seattle, WA", email: "joshua@northstarinfra.com", emailSource: "LinkedIn contact info", status: QUEUE_STATUS.READY, subject: "Your work in critical operations + a quick Vela intro", body: "Hi Joshua,\n\nI came across your work leading critical operations at Northstar Infrastructure and would love to learn from your perspective.\n\nBest,\nTarun", workNote: "your work leading critical operations at Northstar Infrastructure", profile: { experiences: [{ title: "VP, Critical Operations", company: "Northstar Infrastructure" }] }, updatedAt: new Date(Date.now() - 8 * 60_000).toISOString() },
+  { url: "https://www.linkedin.com/in/joshua-rivera", name: "Joshua Rivera", headline: "VP, Critical Operations", location: "Seattle, WA", email: "joshua@northstarinfra.com", emailSource: "ContactOut verified contact", contactDetails: { emails: ["joshua@northstarinfra.com", "josh.rivera@gmail.com", "jrivera@yahoo.com"], workEmails: ["joshua@northstarinfra.com"], personalEmails: ["josh.rivera@gmail.com", "jrivera@yahoo.com"], emailStatus: "Verified" }, status: QUEUE_STATUS.READY, subject: "Your work in critical operations + a quick Vela intro", body: "Hi Joshua,\n\nI came across your work leading critical operations at Northstar Infrastructure and would love to learn from your perspective.\n\nBest,\nTarun", workNote: "your work leading critical operations at Northstar Infrastructure", profile: { experiences: [{ title: "VP, Critical Operations", company: "Northstar Infrastructure", dates: "Apr 2026 - Present" }, { title: "Director, Critical Facilities", company: "Northstar Infrastructure", dates: "Sep 2019 - Apr 2026" }, { title: "Critical Facilities Manager", company: "Meridian Data Centers", dates: "Jan 2017 - Sep 2019" }] }, updatedAt: new Date(Date.now() - 8 * 60_000).toISOString() },
   { url: "https://www.linkedin.com/in/maya-chen", name: "Maya Chen", headline: "Director of Energy Strategy", location: "San Francisco, CA", email: "maya@aperturecompute.com", emailSource: "ContactOut work email", status: QUEUE_STATUS.DRAFTED, subject: "Power strategy at Aperture Compute", body: "Hi Maya,\n\nYour work on energy strategy at Aperture Compute stood out to me.", workNote: "your work on energy strategy for high-density compute", profile: { experiences: [{ title: "Director of Energy Strategy", company: "Aperture Compute" }] }, updatedAt: new Date(Date.now() - 44 * 60_000).toISOString() },
   { url: "https://www.linkedin.com/in/omar-haddad", name: "Omar Haddad", headline: "Head of Site Selection", location: "Austin, TX", email: "omar@vectorgrid.com", emailSource: "LinkedIn contact info", status: QUEUE_STATUS.READY, subject: "Site selection, power, and a quick introduction", body: "Hi Omar,\n\nI was impressed by your work finding and powering new infrastructure sites.", workNote: "your work leading site selection at VectorGrid", profile: { experiences: [{ title: "Head of Site Selection", company: "VectorGrid" }] }, updatedAt: new Date(Date.now() - 2 * 3_600_000).toISOString() },
   { url: "https://www.linkedin.com/in/elena-rossi", name: "Elena Rossi", headline: "SVP, Infrastructure Development", location: "New York, NY", status: QUEUE_STATUS.PROCESSING, profile: { experiences: [{ title: "SVP, Infrastructure Development", company: "Arcadia Data Centers" }] }, updatedAt: new Date(Date.now() - 4 * 3_600_000).toISOString() },
@@ -42,7 +66,12 @@ const DEMO_QUEUE = [
   { url: "https://www.linkedin.com/in/liam-foster", name: "Liam Foster", headline: "Chief Development Officer", location: "Phoenix, AZ", email: "liam@helioscolo.com", emailSource: "ContactOut work email", status: QUEUE_STATUS.DRAFTED, subject: "Development at Helios + Vela", body: "Hi Liam,\n\nI’d love to learn more about the infrastructure development work you’re leading.", workNote: "your infrastructure development work at Helios Colocation", profile: { experiences: [{ title: "Chief Development Officer", company: "Helios Colocation" }] }, updatedAt: new Date(Date.now() - 3 * 86_400_000).toISOString() },
 ];
 
-const state = { queue: [], settings: { ...DEFAULT_SETTINGS }, busy: false, toastTimer: null, view: "all", query: "", selected: new Set(), activeProspectId: null, attentionOnly: false };
+const DEMO_CAMPAIGNS = [
+  createCampaign({ id: "critical-infrastructure-leaders", name: "Critical infrastructure leaders", description: "Operators responsible for power and uptime", prospectIds: [DEMO_QUEUE[0].url, DEMO_QUEUE[2].url, DEMO_QUEUE[3].url] }),
+  createCampaign({ id: "energy-buyers", name: "Energy buyers", description: "Procurement and utility strategy", prospectIds: [DEMO_QUEUE[1].url, DEMO_QUEUE[4].url, DEMO_QUEUE[5].url] }),
+];
+
+const state = { queue: [], campaigns: [], activeCampaignId: "", settings: { ...DEFAULT_SETTINGS }, googleAccount: null, busy: false, toastTimer: null, view: "all", query: "", selected: new Set(), activeProspectId: null, drawerReturnFocus: null, attentionOnly: false };
 
 const storage = {
   async get(keys) {
@@ -75,10 +104,29 @@ function setBusy(busy, label = "Researching queue") {
   elements.processButton.disabled = busy;
   elements.draftReadyButton.disabled = busy;
   elements.captureSearchButton.disabled = busy;
+  elements.agentActivity.hidden = !busy;
+  if (busy) updateAgentActivity(label.toLowerCase().includes("finding") ? "source" : label.toLowerCase().includes("gmail") ? "draft" : "research", label);
+}
+
+const AGENT_STEP_ORDER = ["plan", "source", "research", "draft"];
+
+function updateAgentActivity(step, title, detail = "Vela is using connected sources and tools") {
+  elements.agentActivityTitle.textContent = title;
+  elements.agentActivityDetail.textContent = detail;
+  const activeIndex = AGENT_STEP_ORDER.indexOf(step);
+  for (const node of document.querySelectorAll("[data-agent-step]")) {
+    const index = AGENT_STEP_ORDER.indexOf(node.dataset.agentStep);
+    node.classList.toggle("is-active", index === activeIndex);
+    node.classList.toggle("is-complete", index < activeIndex);
+  }
 }
 
 async function persistQueue() {
   await storage.set({ [QUEUE_STORAGE_KEY]: state.queue });
+}
+
+async function persistCampaigns() {
+  await storage.set({ [CAMPAIGNS_STORAGE_KEY]: state.campaigns });
 }
 
 function statusLabel(status) {
@@ -112,7 +160,18 @@ function relativeTime(value) {
   return `${Math.floor(elapsed / 86_400_000)}d ago`;
 }
 
+function activeCampaign() {
+  return state.campaigns.find((campaign) => campaign.id === state.activeCampaignId) || null;
+}
+
+function scopedQueue() {
+  const campaign = activeCampaign();
+  return campaign ? campaignProspects(state.queue, campaign) : state.queue;
+}
+
 function prospectMatchesView(prospect) {
+  const campaign = activeCampaign();
+  if (campaign && !campaign.prospectIds.includes(prospect.id)) return false;
   if (state.view === "research" && ![QUEUE_STATUS.NEW, QUEUE_STATUS.PROCESSING, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(prospect.status)) return false;
   if (state.view === "review" && prospect.status !== QUEUE_STATUS.READY) return false;
   if (state.view === "drafted" && prospect.status !== QUEUE_STATUS.DRAFTED) return false;
@@ -126,13 +185,40 @@ function visibleProspects() {
   return state.queue.filter(prospectMatchesView);
 }
 
+function renderCampaignNav() {
+  const fragment = document.createDocumentFragment();
+  for (const campaign of state.campaigns) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `nav-item campaign-nav-item${campaign.id === state.activeCampaignId ? " is-active" : ""}`;
+    button.title = campaign.description || campaign.name;
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("viewBox", "0 0 20 20");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "M3 5.5h5l1.5 1.7H17v8.3H3z");
+    icon.append(path);
+    appendText(button, "span", campaign.name);
+    appendText(button, "b", String(campaignProspects(state.queue, campaign).length));
+    button.prepend(icon);
+    button.addEventListener("click", () => setCampaignView(campaign.id));
+    fragment.append(button);
+  }
+  if (!state.campaigns.length) appendText(fragment, "p", "Save someone from the LinkedIn popup or create a campaign.", "campaign-nav-empty");
+  elements.campaignNav.replaceChildren(fragment);
+}
+
 function renderQueue() {
-  const stats = queueStats(state.queue);
+  const scope = scopedQueue();
+  const stats = queueStats(scope);
+  const campaign = activeCampaign();
+  renderCampaignNav();
   elements.totalStat.textContent = stats.total;
   elements.readyStat.textContent = stats.ready;
   elements.draftedStat.textContent = stats.drafted;
   elements.attentionStat.textContent = stats.attention;
-  elements.navTotal.textContent = stats.total;
+  elements.totalDelta.textContent = campaign ? `In ${campaign.name}` : "Across your workspace";
+  elements.exportButtonLabel.textContent = campaign ? "Export campaign" : "Export CSV";
+  elements.navTotal.textContent = state.queue.length;
   elements.navResearch.textContent = state.queue.filter((item) => [QUEUE_STATUS.NEW, QUEUE_STATUS.PROCESSING, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(item.status)).length;
   elements.navReview.textContent = stats.ready;
   elements.navDrafted.textContent = stats.drafted;
@@ -145,6 +231,10 @@ function renderQueue() {
   elements.selectAll.indeterminate = visible.some((item) => state.selected.has(item.id)) && !elements.selectAll.checked;
   elements.selectedCount.textContent = state.selected.size;
   elements.bulkBar.hidden = state.selected.size === 0;
+  const emptyTitle = elements.emptyState.querySelector("h3");
+  const emptyDescription = elements.emptyState.querySelector("p");
+  emptyTitle.textContent = campaign ? `No prospects in ${campaign.name}` : "No prospects in this view";
+  emptyDescription.textContent = campaign ? "Add someone from the LinkedIn popup, or import a list while this campaign is selected." : "Try another filter or ask the Vela agent to build a new search.";
 
   const fragment = document.createDocumentFragment();
   for (const prospect of visible) {
@@ -204,24 +294,36 @@ function renderQueue() {
     if (prospect.status === QUEUE_STATUS.READY) {
       const review = appendText(actions, "button", "Review", "row-button");
       review.type = "button";
-      review.addEventListener("click", () => openReviewDrawer(prospect.id));
+      review.addEventListener("click", (event) => openReviewDrawer(prospect.id, event.currentTarget));
     } else if (prospect.status !== QUEUE_STATUS.DRAFTED) {
       const research = appendText(actions, "button", prospect.status === QUEUE_STATUS.ERROR ? "Retry" : "Research", "row-button");
       research.type = "button";
       research.addEventListener("click", () => processQueue([prospect.id]));
     }
+    if (prospect.status === QUEUE_STATUS.DRAFTED) {
+      const openGmail = appendText(actions, "button", "Open Gmail", "row-button");
+      openGmail.type = "button";
+      openGmail.title = "Open Gmail drafts to review and send manually";
+      openGmail.addEventListener("click", () => openGmailDrafts().catch((error) => showToast(error instanceof Error ? error.message : "Could not open Gmail.")));
+    }
     if (prospect.subject && prospect.status !== QUEUE_STATUS.READY) {
-      const review = appendText(actions, "button", "Open", "row-button");
+      const review = appendText(actions, "button", prospect.status === QUEUE_STATUS.DRAFTED ? "Details" : "Open", "row-button");
       review.type = "button";
-      review.addEventListener("click", () => openReviewDrawer(prospect.id));
+      review.addEventListener("click", (event) => openReviewDrawer(prospect.id, event.currentTarget));
     }
     const remove = appendText(actions, "button", "···", "row-button row-menu");
     remove.type = "button";
-    remove.title = "Remove prospect";
+    remove.title = campaign ? `Remove from ${campaign.name}` : "Remove prospect";
     remove.addEventListener("click", async () => {
-      state.queue = state.queue.filter((item) => item.id !== prospect.id);
+      if (campaign) {
+        state.campaigns = removeProspectFromCampaign(state.campaigns, campaign.id, prospect.url);
+        await persistCampaigns();
+      } else {
+        state.queue = state.queue.filter((item) => item.id !== prospect.id);
+        state.campaigns = removeProspectFromAllCampaigns(state.campaigns, prospect.url);
+        await storage.set({ [QUEUE_STORAGE_KEY]: state.queue, [CAMPAIGNS_STORAGE_KEY]: state.campaigns });
+      }
       state.selected.delete(prospect.id);
-      await persistQueue();
       renderQueue();
     });
 
@@ -234,7 +336,10 @@ function renderQueue() {
 async function addProspects(prospects, message) {
   const before = state.queue.length;
   state.queue = upsertProspects(state.queue, prospects);
-  await persistQueue();
+  if (state.activeCampaignId) {
+    for (const prospect of prospects) state.campaigns = addProspectToCampaign(state.campaigns, state.activeCampaignId, prospect.url);
+  }
+  await storage.set({ [QUEUE_STORAGE_KEY]: state.queue, [CAMPAIGNS_STORAGE_KEY]: state.campaigns });
   renderQueue();
   showToast(message || `${state.queue.length - before} prospect${state.queue.length - before === 1 ? "" : "s"} added.`);
 }
@@ -285,6 +390,7 @@ async function runPlannedSearch(search) {
   }
   try {
     setBusy(true, "Finding people with ContactOut");
+    updateAgentActivity("source", "Searching ContactOut", "Matching titles, seniority, and profile keywords");
     const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_PROVIDER_PEOPLE_SEARCH", filters: search.filters });
     if (!response?.ok) throw new Error(response?.error || "ContactOut People Search failed.");
     const prospects = response.data?.prospects || [];
@@ -299,20 +405,24 @@ async function runPlannedSearch(search) {
 }
 
 async function planSearch(brief) {
+  elements.agentActivity.hidden = false;
+  updateAgentActivity("plan", "Planning your search", "Turning the brief into focused people searches");
   if (!isExtension) {
     renderSearchPlan({
       strategy: "Split the brief into operating ownership, power responsibility, and mission-critical infrastructure so each search stays specific.",
       searches: [
-        { label: "Critical operations", query: "critical operations data center power", rationale: "Targets operators responsible for uptime and electrical systems.", filters: { job_title: ["Critical Operations", "Data Center Operations"], seniority: ["manager", "director"], skills: ["Critical Facilities"], location: [], industry: ["Data Centers"], company: [], keyword: "power infrastructure" } },
-        { label: "Energy strategy", query: "data center energy infrastructure power procurement", rationale: "Targets leaders involved in power availability and procurement.", filters: { job_title: ["Energy Strategy", "Power Procurement"], seniority: ["director", "vice president"], skills: [], location: [], industry: ["Data Centers"], company: [], keyword: "power procurement" } },
+        { label: "Critical operations", query: "critical operations data center power", rationale: "Targets operators responsible for uptime and electrical systems.", filters: { job_title: ["Critical Operations", "Data Center Operations"], seniority: ["Manager", "Director"], skills: ["Critical Facilities"], location: [], industry: [], company: [], keyword: "power infrastructure" } },
+        { label: "Energy strategy", query: "data center energy infrastructure power procurement", rationale: "Targets leaders involved in power availability and procurement.", filters: { job_title: ["Energy Strategy", "Power Procurement"], seniority: ["Director", "VP"], skills: [], location: [], industry: [], company: [], keyword: "power procurement" } },
       ],
     });
+    elements.agentActivity.hidden = true;
     return;
   }
   if (state.settings.openAIApiKey) {
     const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_PROVIDER_PLAN_SEARCH", brief });
     if (!response?.ok) throw new Error(response?.error || "Vela search planning failed.");
     renderSearchPlan(response.data);
+    elements.agentActivity.hidden = true;
     return;
   }
   if (!state.settings.writerEndpointUrl) throw new Error("Add an OpenAI API key in Settings to use the Vela search agent.");
@@ -324,6 +434,7 @@ async function planSearch(brief) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || `Search agent returned ${response.status}.`);
   renderSearchPlan(payload.data);
+  elements.agentActivity.hidden = true;
 }
 
 async function sendLinkedInMessage(tabId, message) {
@@ -424,15 +535,22 @@ async function researchProspect(prospect) {
     if (!profileResponse?.ok) throw new Error(profileResponse?.error || "Could not read the LinkedIn profile.");
     let profile = { ...profileResponse.profile, workNote: prospect.background || prospect.workNote };
 
-    let email = profile.visibleEmail || prospect.email || "";
-    let emailSource = email ? "Visible on profile" : prospect.emailSource || "";
-    let contactDetails = { emails: [], phones: [], emailStatus: "" };
+    const priorProviderEmail = /^ContactOut\b/i.test(prospect.emailSource || "")
+      || (prospect.contactDetails?.emails || []).includes(prospect.email);
+    const preservedEmail = priorProviderEmail ? "" : prospect.email || "";
+    let email = profile.visibleEmail || preservedEmail;
+    let emailSource = profile.visibleEmail ? "Visible on profile" : preservedEmail ? prospect.emailSource || "Saved contact" : "";
+    let contactDetails = { emails: [], workEmails: [], personalEmails: [], phones: [], emailStatus: "", emailStatuses: {}, error: "" };
+    let contactOutError = "";
     let workNote = prospect.background || buildWorkNote(profile);
     if (state.settings.contactOutApiKey || state.settings.endpointUrl) {
       try {
         const enriched = await callEnrichment(profile);
         if (enriched.email) { email = enriched.email; emailSource = enriched.emailSource || "Enrichment service"; }
-        contactDetails = { emails: enriched.emails || [], phones: enriched.phones || [], emailStatus: enriched.emailStatus || "" };
+        contactDetails = {
+          emails: enriched.emails || [], workEmails: enriched.workEmails || [], personalEmails: enriched.personalEmails || [],
+          phones: enriched.phones || [], emailStatus: enriched.emailStatus || "", emailStatuses: enriched.emailStatuses || {}, source: enriched.emailSource || "", error: "",
+        };
         if (enriched.note) workNote = enriched.note;
         if (enriched.profile) {
           profile = {
@@ -445,8 +563,9 @@ async function researchProspect(prospect) {
             contactOut: { company: enriched.profile.company || null, industry: enriched.profile.industry || "", skills: enriched.profile.skills || [] },
           };
         }
-      } catch {
-        // LinkedIn Contact info below remains available when ContactOut misses or errors.
+      } catch (error) {
+        contactOutError = error instanceof Error ? error.message : "ContactOut lookup failed.";
+        contactDetails = { ...contactDetails, source: "ContactOut API error", error: contactOutError };
       }
     }
     if (!email) {
@@ -480,7 +599,7 @@ async function researchProspect(prospect) {
       subject: written.subject,
       body: written.body,
       status: isEmail(email) ? QUEUE_STATUS.READY : QUEUE_STATUS.NEEDS_EMAIL,
-      error: isEmail(email) ? "" : "No email was available in LinkedIn Contact info or the configured enrichment service.",
+      error: isEmail(email) ? "" : contactOutError || "No email was available in LinkedIn Contact info or the configured enrichment service.",
       updatedAt: new Date().toISOString(),
     };
   } finally {
@@ -491,7 +610,7 @@ async function researchProspect(prospect) {
 async function processQueue(ids = null) {
   if (state.busy) return;
   if (!isExtension) {
-    const targets = new Set(ids || state.queue.filter((item) => [QUEUE_STATUS.NEW, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(item.status)).map((item) => item.id));
+    const targets = new Set(ids || scopedQueue().filter((item) => [QUEUE_STATUS.NEW, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(item.status)).map((item) => item.id));
     state.queue = state.queue.map((item) => targets.has(item.id) ? {
       ...item,
       email: item.email || `${(item.name || "prospect").toLowerCase().replace(/[^a-z]+/g, ".").replace(/^\.|\.$/g, "")}@example.com`,
@@ -508,7 +627,7 @@ async function processQueue(ids = null) {
     return;
   }
 
-  const candidates = state.queue.filter((item) => ids ? ids.includes(item.id) : [QUEUE_STATUS.NEW, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(item.status));
+  const candidates = scopedQueue().filter((item) => ids ? ids.includes(item.id) : [QUEUE_STATUS.NEW, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(item.status));
   if (!candidates.length) { showToast("There are no prospects waiting for research."); return; }
   try {
     if (!state.settings.contactOutApiKey && state.settings.endpointUrl && !(await ensureOriginPermission(state.settings.endpointUrl))) throw new Error("Email enrichment access was declined.");
@@ -517,6 +636,7 @@ async function processQueue(ids = null) {
     for (let index = 0; index < candidates.length; index += 1) {
       const current = candidates[index];
       elements.progressText.textContent = `Researching ${index + 1} of ${candidates.length}`;
+      updateAgentActivity("research", `Researching ${current.name || `prospect ${index + 1}`}`, `Profile ${index + 1} of ${candidates.length} - LinkedIn, ContactOut, and draft context`);
       state.queue = state.queue.map((item) => item.id === current.id ? { ...item, status: QUEUE_STATUS.PROCESSING, error: "" } : item);
       renderQueue();
       try {
@@ -539,53 +659,76 @@ async function processQueue(ids = null) {
   }
 }
 
-async function gmailToken() {
-  const clientId = chrome.runtime.getManifest().oauth2?.client_id || "";
-  if (clientId.startsWith("REPLACE_WITH_")) throw new Error("Add the Google OAuth client ID in manifest.json, then reload the extension.");
-  const result = await chrome.identity.getAuthToken({ interactive: true });
-  const token = typeof result === "string" ? result : result?.token;
-  if (!token) throw new Error("Gmail authorization did not return an access token.");
+async function chooseGoogleAccount() {
+  const account = await pickGoogleAccount(chrome.identity, { dialog: elements.googleAccountDialog, list: elements.googleAccountList });
+  if (!account) throw new Error("Choose a Google account to continue.");
+  return account;
+}
+
+async function gmailToken(interactive = false) {
+  let selected = state.googleAccount;
+  if (!selected?.id) selected = await chooseGoogleAccount();
+  const token = await getGmailAuthToken({
+    identity: chrome.identity,
+    manifest: chrome.runtime.getManifest(),
+    interactive,
+    accountId: selected.id,
+  });
+  if (!state.googleAccount?.email) {
+    const profile = await getGmailProfile(token);
+    state.googleAccount = { id: selected.id, email: profile.email || selected.label || "Selected Google account" };
+    await storage.set({ [GOOGLE_ACCOUNT_STORAGE_KEY]: state.googleAccount });
+  }
   return token;
 }
 
-async function createGmailDraft(token, prospect) {
-  const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/drafts", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(gmailDraftPayload({ to: prospect.email, subject: prospect.subject, body: prospect.body })),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error?.message || `Gmail returned ${response.status}.`);
-  return payload.id || "created";
+async function openGmailDrafts() {
+  if (isExtension) await chrome.tabs.create({ url: GMAIL_DRAFTS_WEB_URL });
+  else window.open(GMAIL_DRAFTS_WEB_URL, "_blank", "noopener,noreferrer");
 }
 
 async function createDrafts(ids = null) {
   if (state.busy) return;
-  const ready = state.queue.filter((item) => item.status === QUEUE_STATUS.READY && (!ids || ids.includes(item.id)));
+  const ready = scopedQueue().filter((item) => item.status === QUEUE_STATUS.READY && (!ids || ids.includes(item.id)));
   if (!ready.length) { showToast("No reviewed drafts are ready for Gmail."); return; }
   if (!isExtension) {
     state.queue = state.queue.map((item) => ready.some((prospect) => prospect.id === item.id) ? { ...item, status: QUEUE_STATUS.DRAFTED, draftId: "preview", updatedAt: new Date().toISOString() } : item);
     await persistQueue();
     renderQueue();
-    showToast(`Prepared ${ready.length} Gmail draft${ready.length === 1 ? "" : "s"}. Nothing was sent.`);
+    showToast(`Prepared ${ready.length} preview draft${ready.length === 1 ? "" : "s"}. Nothing was sent.`);
     return;
   }
   try {
     setBusy(true, "Connecting to Gmail");
-    const token = await gmailToken();
+    const authState = { token: await gmailToken(true), refreshAttempted: false };
+    let created = 0;
+    let failed = 0;
+    let blockingGmailError = "";
     for (let index = 0; index < ready.length; index += 1) {
       const prospect = ready[index];
       elements.progressText.textContent = `Creating Gmail draft ${index + 1} of ${ready.length}`;
       try {
-        const draftId = await createGmailDraft(token, prospect);
-        state.queue = state.queue.map((item) => item.id === prospect.id ? { ...item, draftId, status: QUEUE_STATUS.DRAFTED, error: "" } : item);
+        if (blockingGmailError) throw new Error(blockingGmailError);
+        const draftId = await createGmailDraftWithRetry(
+          { to: prospect.email, subject: prospect.subject, body: prospect.body },
+          {
+            authState,
+            removeCachedToken: (token) => chrome.identity.removeCachedAuthToken({ token }),
+            getFreshToken: () => gmailToken(true),
+          },
+        );
+        state.queue = state.queue.map((item) => item.id === prospect.id ? { ...item, draftId, status: QUEUE_STATUS.DRAFTED, error: "", updatedAt: new Date().toISOString() } : item);
+        created += 1;
       } catch (error) {
-        state.queue = state.queue.map((item) => item.id === prospect.id ? { ...item, error: error instanceof Error ? error.message : "Gmail draft failed." } : item);
+        const message = error instanceof Error ? error.message : "Gmail draft failed.";
+        if (error?.status === 401 || error?.status === 403) blockingGmailError = message;
+        state.queue = state.queue.map((item) => item.id === prospect.id ? { ...item, error: message, updatedAt: new Date().toISOString() } : item);
+        failed += 1;
       }
       await persistQueue();
       renderQueue();
     }
-    showToast(`Created ${ready.length} Gmail draft${ready.length === 1 ? "" : "s"}. Nothing was sent.`);
+    showToast(gmailDraftBatchSummary(created, failed));
   } catch (error) {
     showToast(error instanceof Error ? error.message : "Could not connect to Gmail.");
   } finally {
@@ -603,38 +746,131 @@ const VIEW_COPY = {
 
 function setView(view) {
   state.view = view;
+  state.activeCampaignId = "";
   state.attentionOnly = false;
+  state.selected.clear();
   elements.statusFilterButton.classList.remove("is-active");
   for (const button of document.querySelectorAll("[data-view]")) button.classList.toggle("is-active", button.dataset.view === view);
   [elements.queueHeading.textContent, elements.queueDescription.textContent] = VIEW_COPY[view] || VIEW_COPY.all;
   renderQueue();
 }
 
-function openReviewDrawer(id) {
+function setCampaignView(campaignId) {
+  const campaign = state.campaigns.find((item) => item.id === campaignId);
+  if (!campaign) return;
+  state.view = "campaign";
+  state.activeCampaignId = campaign.id;
+  state.attentionOnly = false;
+  state.selected.clear();
+  elements.statusFilterButton.classList.remove("is-active");
+  for (const button of document.querySelectorAll("[data-view]")) button.classList.remove("is-active");
+  elements.queueHeading.textContent = campaign.name;
+  elements.queueDescription.textContent = campaign.description || "Prospects saved to this campaign, with their latest personalization notes.";
+  renderQueue();
+}
+
+function openCampaignCreator() {
+  elements.campaignDialog.showModal();
+  setTimeout(() => elements.campaignName.focus(), 0);
+}
+
+function emailCandidates(prospect) {
+  const details = prospect.contactDetails || {};
+  const work = new Set(details.workEmails || []);
+  const personal = new Set(details.personalEmails || []);
+  return [...new Set([prospect.email, ...(details.emails || []), ...work, ...personal].filter(isEmail))].map((email) => ({
+    email,
+    type: work.has(email) ? "work" : personal.has(email) ? "personal" : "email",
+    status: details.emailStatuses?.[email] || (email === prospect.email ? details.emailStatus : ""),
+  }));
+}
+
+function renderEmailChoices(prospect) {
+  const candidates = emailCandidates(prospect);
+  const fragment = document.createDocumentFragment();
+  for (const candidate of candidates) {
+    const label = document.createElement("label");
+    label.className = "email-choice";
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = "drawer-email-candidate";
+    input.value = candidate.email;
+    input.checked = candidate.email === prospect.email;
+    input.addEventListener("change", () => { elements.drawerEmail.value = candidate.email; });
+    const copy = document.createElement("span");
+    copy.className = "email-choice-copy";
+    appendText(copy, "strong", candidate.email);
+    const detail = [candidate.email === prospect.email ? "Currently selected" : "Select for this draft", candidate.status].filter(Boolean).join(" · ");
+    appendText(copy, "small", detail);
+    const type = appendText(label, "span", candidate.type, "email-choice-type");
+    label.prepend(input, copy);
+    label.append(type);
+    fragment.append(label);
+  }
+  if (!candidates.length) appendText(fragment, "div", "No email candidates yet. Retry the lookup or enter one below.", "email-empty-state");
+  elements.drawerEmailChoices.replaceChildren(fragment);
+  elements.drawerEmailSource.textContent = prospect.contactDetails?.error || prospect.emailSource || prospect.contactDetails?.source || "Contact details found during research";
+  elements.drawerEmailStatus.textContent = prospect.contactDetails?.error ? "API error" : prospect.contactDetails?.emailStatus || (candidates.length ? "Found" : "Missing");
+  elements.drawerEmailStatus.title = prospect.contactDetails?.error || "";
+}
+
+function renderExperience(prospect) {
+  const experiences = prospect.profile?.experiences || [];
+  elements.drawerExperienceCount.textContent = `${experiences.length} found`;
+  const fragment = document.createDocumentFragment();
+  for (const experience of experiences) {
+    const item = document.createElement("div");
+    item.className = "experience-item";
+    appendText(item, "strong", experience.title || "Role");
+    appendText(item, "span", experience.company || "Company not listed");
+    appendText(item, "time", experience.dates || "");
+    fragment.append(item);
+  }
+  if (!experiences.length) appendText(fragment, "p", "No work history was captured from this profile.", "experience-empty");
+  elements.drawerExperienceList.replaceChildren(fragment);
+}
+
+function openReviewDrawer(id, trigger = document.activeElement) {
   const prospect = state.queue.find((item) => item.id === id);
   if (!prospect) return;
   state.activeProspectId = id;
+  state.drawerReturnFocus = trigger instanceof HTMLElement ? trigger : null;
   elements.drawerAvatar.textContent = initialsFor(prospect.name);
   elements.drawerName.textContent = prospect.name || "LinkedIn prospect";
   elements.drawerHeadline.textContent = prospect.headline || companyAndRole(prospect).role;
+  elements.drawerLocation.textContent = prospect.location || "";
   elements.drawerLinkedIn.href = prospect.url;
   elements.drawerWorkNote.value = prospect.workNote || prospect.background || "";
   elements.drawerEmail.value = prospect.email || "";
+  renderEmailChoices(prospect);
+  renderExperience(prospect);
   elements.drawerSubject.value = prospect.subject || "";
   elements.drawerBody.value = prospect.body || "";
-  elements.approveDraftButton.disabled = prospect.status === QUEUE_STATUS.DRAFTED;
-  elements.approveDraftButton.textContent = prospect.status === QUEUE_STATUS.DRAFTED ? "Already in Gmail" : "Approve & create Gmail draft";
+  elements.approveDraftButton.disabled = false;
+  elements.approveDraftButton.textContent = prospect.status === QUEUE_STATUS.DRAFTED ? "Open Gmail drafts" : "Approve & create Gmail draft";
+  elements.reviewDrawer.inert = false;
+  elements.reviewDrawer.setAttribute("aria-hidden", "false");
   elements.drawerBackdrop.hidden = false;
   elements.reviewDrawer.classList.add("is-open");
-  elements.reviewDrawer.setAttribute("aria-hidden", "false");
-  elements.drawerSubject.focus();
+  const drawerContent = elements.reviewDrawer.querySelector(".drawer-content");
+  if (drawerContent) drawerContent.scrollTop = 0;
+  requestAnimationFrame(() => {
+    if (drawerContent) drawerContent.scrollTop = 0;
+    elements.closeDrawerButton.focus({ preventScroll: true });
+  });
 }
 
 function closeReviewDrawer() {
+  const returnFocus = state.drawerReturnFocus;
+  const focusTarget = returnFocus?.isConnected ? returnFocus : elements.tableSearch?.isConnected ? elements.tableSearch : null;
+  if (elements.reviewDrawer.contains(document.activeElement)) document.activeElement.blur();
+  elements.reviewDrawer.inert = true;
   elements.reviewDrawer.classList.remove("is-open");
   elements.reviewDrawer.setAttribute("aria-hidden", "true");
   elements.drawerBackdrop.hidden = true;
   state.activeProspectId = null;
+  state.drawerReturnFocus = null;
+  if (focusTarget) requestAnimationFrame(() => focusTarget.focus({ preventScroll: true }));
 }
 
 async function saveReview() {
@@ -655,38 +891,57 @@ async function saveReview() {
 function exportRows(items) {
   return items.map((prospect) => {
     const details = companyAndRole(prospect);
-    return [prospect.name || "", details.company, details.role, prospect.email || "", statusLabel(prospect.status), prospect.subject || "", prospect.workNote || "", prospect.url || "", prospect.updatedAt || ""];
+    return [prospect.name || "", details.company, details.role, prospect.email || "", statusLabel(prospect.status), prospect.subject || "", prospect.body || "", prospect.workNote || "", prospect.url || "", prospect.updatedAt || ""];
   });
 }
+
+function exportItems() {
+  const visible = visibleProspects();
+  return state.selected.size ? visible.filter((item) => state.selected.has(item.id)) : visible;
+}
+
+const EXPORT_HEADERS = ["Name", "Company", "Role", "Email", "Stage", "Subject", "Message", "Personalization note", "LinkedIn URL", "Updated at"];
 
 function csvCell(value) {
   return `"${String(value ?? "").replaceAll('"', '""')}"`;
 }
 
 function exportCsv() {
-  const items = state.selected.size ? state.queue.filter((item) => state.selected.has(item.id)) : visibleProspects();
+  const items = exportItems();
   if (!items.length) { showToast("There are no prospects to export in this view."); return; }
-  const headers = ["Name", "Company", "Role", "Email", "Stage", "Subject", "Personalization note", "LinkedIn URL", "Updated at"];
-  const csv = [headers, ...exportRows(items)].map((row) => row.map(csvCell).join(",")).join("\r\n");
+  const csv = [EXPORT_HEADERS, ...exportRows(items)].map((row) => row.map(csvCell).join(",")).join("\r\n");
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
   const link = document.createElement("a");
   link.href = url;
-  link.download = `vela-gtm-${new Date().toISOString().slice(0, 10)}.csv`;
+  const campaign = activeCampaign();
+  const scopeName = campaign ? `vela-${campaign.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}` : "vela-gtm";
+  link.download = `${scopeName}-${new Date().toISOString().slice(0, 10)}.csv`;
   link.click();
   URL.revokeObjectURL(url);
   showToast(`Exported ${items.length} prospect${items.length === 1 ? "" : "s"} for Google Sheets.`);
 }
 
 async function copyForSheets() {
-  const items = state.selected.size ? state.queue.filter((item) => state.selected.has(item.id)) : visibleProspects();
-  if (!items.length) { showToast("There are no prospects to copy in this view."); return; }
-  const headers = ["Name", "Company", "Role", "Email", "Stage", "Subject", "Personalization note", "LinkedIn URL", "Updated at"];
-  const tsv = [headers, ...exportRows(items)].map((row) => row.map((value) => String(value ?? "").replaceAll("\t", " ").replaceAll("\n", " ")).join("\t")).join("\n");
+  const items = exportItems();
+  if (!items.length) { showToast("There are no prospects to export in this view."); return; }
+  if (!isExtension) {
+    const tsv = [EXPORT_HEADERS, ...exportRows(items)].map((row) => row.map((value) => String(value ?? "").replaceAll("\t", " ").replaceAll("\n", " ")).join("\t")).join("\n");
+    try { await navigator.clipboard.writeText(tsv); showToast(`Copied ${items.length} row${items.length === 1 ? "" : "s"}. Paste directly into Google Sheets.`); }
+    catch { showToast("Clipboard access was blocked. Use Export CSV instead."); }
+    return;
+  }
   try {
-    await navigator.clipboard.writeText(tsv);
-    showToast(`Copied ${items.length} row${items.length === 1 ? "" : "s"}. Paste directly into Google Sheets.`);
-  } catch {
-    showToast("Clipboard access was blocked. Use Export CSV instead.");
+    setBusy(true, "Creating Google Sheet");
+    const token = await gmailToken(true);
+    const campaign = activeCampaign();
+    const title = `${campaign?.name || "Vela GTM"} mail merge - ${new Date().toISOString().slice(0, 10)}`;
+    const spreadsheet = await createGoogleSpreadsheet(token, { title, rows: [EXPORT_HEADERS, ...exportRows(items)] });
+    await chrome.tabs.create({ url: spreadsheet.url });
+    showToast(`Created a Google Sheet with ${items.length} mail-merge row${items.length === 1 ? "" : "s"}.`);
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "Could not export to Google Sheets.");
+  } finally {
+    setBusy(false);
   }
 }
 
@@ -704,6 +959,7 @@ function bindEvents() {
       await openLinkedInSearch(brief);
     } finally {
       elements.planSearchButton.disabled = false;
+      if (!state.busy) elements.agentActivity.hidden = true;
     }
   });
   elements.searchBrief.addEventListener("keydown", (event) => {
@@ -714,6 +970,30 @@ function bindEvents() {
     elements.searchBrief.focus();
   });
   for (const navItem of document.querySelectorAll("[data-view]")) navItem.addEventListener("click", () => setView(navItem.dataset.view));
+  elements.newCampaignButton.addEventListener("click", openCampaignCreator);
+  elements.newCampaignButtonTop.addEventListener("click", openCampaignCreator);
+  elements.closeCampaignDialog.addEventListener("click", () => elements.campaignDialog.close());
+  elements.cancelCampaignButton.addEventListener("click", () => elements.campaignDialog.close());
+  elements.campaignForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = elements.campaignName.value.trim();
+    if (!name) { elements.campaignName.focus(); return; }
+    const existing = state.campaigns.find((campaign) => campaign.name.toLowerCase() === name.toLowerCase());
+    if (existing) {
+      elements.campaignDialog.close();
+      setCampaignView(existing.id);
+      showToast(`${existing.name} already exists.`);
+      return;
+    }
+    const campaign = createCampaign({ name, description: elements.campaignDescription.value.trim() });
+    state.campaigns = [...state.campaigns, campaign];
+    await persistCampaigns();
+    elements.campaignName.value = "";
+    elements.campaignDescription.value = "";
+    elements.campaignDialog.close();
+    setCampaignView(campaign.id);
+    showToast(`${campaign.name} is ready. Add prospects from LinkedIn or import a list.`);
+  });
   elements.captureSearchButton.addEventListener("click", captureVisibleSearch);
   const openImport = () => elements.importDialog.showModal();
   elements.openImportButton.addEventListener("click", openImport);
@@ -751,8 +1031,26 @@ function bindEvents() {
   elements.closeDrawerButton.addEventListener("click", closeReviewDrawer);
   elements.drawerBackdrop.addEventListener("click", closeReviewDrawer);
   elements.saveReviewButton.addEventListener("click", saveReview);
+  elements.copyDrawerEmail.addEventListener("click", async () => {
+    const email = elements.drawerEmail.value.trim();
+    if (!isEmail(email)) { showToast("Select a valid email first."); return; }
+    try { await navigator.clipboard.writeText(email); showToast("Selected email copied."); }
+    catch { showToast("Clipboard access was blocked."); }
+  });
+  elements.retryDrawerLookup.addEventListener("click", async () => {
+    const id = state.activeProspectId;
+    if (!id) return;
+    closeReviewDrawer();
+    await processQueue([id]);
+  });
   elements.approveDraftButton.addEventListener("click", async () => {
     const id = state.activeProspectId;
+    const prospect = state.queue.find((item) => item.id === id);
+    if (prospect?.status === QUEUE_STATUS.DRAFTED) {
+      try { await openGmailDrafts(); closeReviewDrawer(); }
+      catch (error) { showToast(error instanceof Error ? error.message : "Could not open Gmail."); }
+      return;
+    }
     if (await saveReview()) { await createDrafts([id]); closeReviewDrawer(); }
   });
   document.addEventListener("keydown", (event) => {
@@ -762,13 +1060,23 @@ function bindEvents() {
 }
 
 async function initialize() {
-  const saved = await storage.get([QUEUE_STORAGE_KEY, "velaGtmSettings"]);
+  const saved = await storage.get([QUEUE_STORAGE_KEY, CAMPAIGNS_STORAGE_KEY, "velaGtmSettings", GOOGLE_ACCOUNT_STORAGE_KEY]);
   state.settings = { ...DEFAULT_SETTINGS, ...(saved.velaGtmSettings || {}) };
+  state.googleAccount = saved[GOOGLE_ACCOUNT_STORAGE_KEY] || null;
   if (["light", "dark"].includes(previewTheme)) state.settings.theme = previewTheme;
   applyTheme(state.settings.theme);
-  state.queue = saved[QUEUE_STORAGE_KEY] || (!isExtension ? DEMO_QUEUE : []);
+  state.queue = saved[QUEUE_STORAGE_KEY] || (!isExtension ? upsertProspects([], DEMO_QUEUE) : []);
+  state.campaigns = normalizeCampaigns(saved[CAMPAIGNS_STORAGE_KEY] || (!isExtension ? DEMO_CAMPAIGNS : []));
   bindEvents();
-  renderQueue();
+  if (requestedCampaignId && state.campaigns.some((campaign) => campaign.id === requestedCampaignId)) setCampaignView(requestedCampaignId);
+  else renderQueue();
+  if (isExtension && chrome.storage?.onChanged) chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local") return;
+    if (changes[QUEUE_STORAGE_KEY]) state.queue = changes[QUEUE_STORAGE_KEY].newValue || [];
+    if (changes[CAMPAIGNS_STORAGE_KEY]) state.campaigns = normalizeCampaigns(changes[CAMPAIGNS_STORAGE_KEY].newValue || []);
+    if (state.activeCampaignId && !state.campaigns.some((campaign) => campaign.id === state.activeCampaignId)) setView("all");
+    else if (changes[QUEUE_STORAGE_KEY] || changes[CAMPAIGNS_STORAGE_KEY]) renderQueue();
+  });
 }
 
 applyTheme();
