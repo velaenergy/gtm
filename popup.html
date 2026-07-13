@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Vela GTM</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="https://vela.energy" target="_blank" rel="noreferrer" aria-label="Vela Energy">
+        <span class="logo-wrap" aria-hidden="true">
+          <img class="logo logo-light" src="assets/vela-logo-light.png" alt="" />
+          <img class="logo logo-dark" src="assets/vela-logo-dark.png" alt="" />
+        </span>
+        <span>GTM</span>
+      </a>
+      <div class="topbar-actions">
+        <span id="previewBadge" class="preview-badge" hidden>Preview</span>
+        <button id="queueButton" class="queue-button" type="button">+ Queue</button>
+        <button id="settingsButton" class="icon-button" type="button" aria-label="Open settings" title="Open settings">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3"/><path d="M10 2.8v1.4M10 15.8v1.4M17.2 10h-1.4M4.2 10H2.8M15.1 4.9l-1 1M5.9 14.1l-1 1M15.1 15.1l-1-1M5.9 5.9l-1-1"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <main>
+      <section id="loadingView" class="state-view">
+        <span class="loader" aria-hidden="true"></span>
+        <h1>Reading profile</h1>
+        <p>Pulling the work history visible on this page.</p>
+      </section>
+
+      <section id="pageGate" class="state-view" hidden>
+        <span class="linkedin-mark" aria-hidden="true">in</span>
+        <h1>Open a LinkedIn profile</h1>
+        <p>Vela GTM works on pages beginning with <strong>linkedin.com/in/</strong>.</p>
+      </section>
+
+      <div id="workspace" hidden>
+        <section class="profile-summary">
+          <div id="avatar" class="avatar" aria-hidden="true">VG</div>
+          <div class="profile-copy">
+            <div class="profile-heading">
+              <h1 id="profileName">LinkedIn prospect</h1>
+              <span id="captureStatus" class="capture-status"><i></i> Live</span>
+            </div>
+            <p id="profileHeadline">Work history visible on LinkedIn</p>
+            <span id="profileLocationText" class="profile-location">Location not visible</span>
+          </div>
+        </section>
+
+        <nav class="tabs" aria-label="Prospect workflow">
+          <button class="tab-button" type="button" data-tab="research" aria-selected="true">Research</button>
+          <button class="tab-button" type="button" data-tab="draft" aria-selected="false">Email</button>
+        </nav>
+
+        <section class="tab-panel" data-panel="research">
+          <section class="block email-block">
+            <div class="block-heading">
+              <div><h2>Email</h2><p id="emailSource">Not found yet</p></div>
+              <span id="emailConfidence" class="confidence" hidden></span>
+            </div>
+            <div class="email-row">
+              <input id="emailInput" type="email" inputmode="email" autocomplete="off" aria-label="Prospect email" placeholder="Add or discover an email" />
+              <button id="copyEmailButton" class="quiet-button" type="button">Copy</button>
+              <button id="findEmailButton" class="primary-small" type="button"><span>Retry lookup</span></button>
+            </div>
+            <div id="contactDetails" class="contact-details" hidden></div>
+          </section>
+
+          <section class="block">
+            <div class="block-heading"><div><h2>Personalization note</h2><p>Used in the email draft.</p></div></div>
+            <textarea id="workNote" class="work-note" rows="4" aria-label="Personalization note"></textarea>
+          </section>
+
+          <section class="block signals-block">
+            <div class="block-heading">
+              <div><h2>Work history</h2><p>Roles visible on this profile.</p></div>
+              <span id="signalCount" class="count">0 found</span>
+            </div>
+            <div id="experienceList" class="experience-list"></div>
+          </section>
+        </section>
+
+        <section class="tab-panel" data-panel="draft" hidden>
+          <section class="block composer-block">
+            <div class="block-heading composer-heading">
+              <div><h2>Email draft</h2><p id="templateEyebrow">Pick their brain</p></div>
+              <div class="composer-tools">
+                <button id="generateEmailButton" class="writer-button" type="button"><span>Write with AI</span></button>
+                <label class="template-control"><span>Template</span><select id="templateSelect" aria-label="Outreach template"></select></label>
+              </div>
+            </div>
+            <label class="composer-field"><span>Subject</span><input id="subjectInput" type="text" autocomplete="off" /></label>
+            <label class="composer-field"><span>Message</span><textarea id="bodyInput" rows="14"></textarea></label>
+            <div class="composer-meta"><span>Review before sending</span><span id="wordCount">0 words</span></div>
+          </section>
+        </section>
+      </div>
+    </main>
+
+    <footer id="actionBar" class="action-bar" hidden>
+      <button id="copyDraftButton" class="secondary-button" type="button">Copy draft</button>
+      <button id="openGmailButton" class="gmail-button" type="button">Open in Gmail <span aria-hidden="true">↗</span></button>
+    </footer>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

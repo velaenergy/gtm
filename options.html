@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Vela GTM Settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="https://vela.energy" target="_blank" rel="noreferrer" aria-label="Vela Energy">
+        <span class="logo-wrap" aria-hidden="true">
+          <img class="logo logo-light" src="assets/vela-logo-light.png" alt="" />
+          <img class="logo logo-dark" src="assets/vela-logo-dark.png" alt="" />
+        </span>
+        <span>GTM</span>
+      </a>
+      <span class="internal-label">Internal</span>
+    </header>
+
+    <main class="settings-page">
+      <div class="page-heading">
+        <h1>Settings</h1>
+        <p>Configure how Vela GTM looks, enriches profiles, and fills outreach drafts.</p>
+      </div>
+
+      <form id="settingsForm">
+        <section class="settings-section" aria-labelledby="appearanceHeading">
+          <div class="section-heading">
+            <h2 id="appearanceHeading">Appearance</h2>
+            <p>Choose a theme for the popup and settings.</p>
+          </div>
+          <div class="theme-options" role="radiogroup" aria-label="Theme">
+            <label class="theme-option">
+              <input type="radio" name="theme" value="light" />
+              <span class="theme-preview theme-preview-light"><i></i><i></i><i></i></span>
+              <span>Light</span>
+            </label>
+            <label class="theme-option">
+              <input type="radio" name="theme" value="dark" />
+              <span class="theme-preview theme-preview-dark"><i></i><i></i><i></i></span>
+              <span>Dark</span>
+            </label>
+            <label class="theme-option">
+              <input type="radio" name="theme" value="system" />
+              <span class="theme-preview theme-preview-system"><i></i><i></i><i></i></span>
+              <span>System</span>
+            </label>
+          </div>
+        </section>
+
+        <section class="settings-section" aria-labelledby="credentialsHeading">
+          <div class="section-heading inline-heading">
+            <div>
+              <h2 id="credentialsHeading">Agent credentials</h2>
+              <p>Direct provider access for this internal Chrome profile.</p>
+            </div>
+            <span id="agentServerState" class="permission-state">Keys needed</span>
+          </div>
+          <div class="field-grid">
+            <label class="field">
+              <span>ContactOut API key</span>
+              <input id="contactOutApiKey" type="password" autocomplete="off" placeholder="Paste your ContactOut key" />
+              <small>Automatic contact lookup and People Search.</small>
+            </label>
+            <label class="field">
+              <span>OpenAI API key</span>
+              <input id="openAIApiKey" type="password" autocomplete="off" placeholder="Paste your OpenAI key" />
+              <small>Search planning and personalized drafts.</small>
+            </label>
+          </div>
+          <p class="security-note"><strong>No local server required.</strong> Keys are stored in this Chrome profile and read only by Vela GTM’s background worker—not LinkedIn. A production deployment should move them to Vela’s secret manager.</p>
+          <label class="switch-row">
+            <span><strong>Reveal phone numbers</strong><small>Optional. Uses ContactOut phone credits when a number is found.</small></span>
+            <input id="includeContactOutPhone" type="checkbox" />
+            <i aria-hidden="true"></i>
+          </label>
+        </section>
+
+        <section class="settings-section" aria-labelledby="enrichmentHeading">
+          <div class="section-heading inline-heading">
+            <div>
+              <h2 id="enrichmentHeading">Advanced enrichment endpoint</h2>
+              <p>Optional server override. Leave empty for direct ContactOut.</p>
+            </div>
+            <span id="permissionState" class="permission-state">Not configured</span>
+          </div>
+
+          <label class="field">
+            <span>Webhook URL</span>
+            <input id="endpointUrl" type="url" inputmode="url" autocomplete="url" placeholder="http://127.0.0.1:8787/enrich" />
+            <small>Chrome will request access only to this endpoint’s origin.</small>
+          </label>
+
+          <label class="field">
+            <span>Bearer token <em>Optional</em></span>
+            <div class="password-wrap">
+              <input id="apiToken" type="password" autocomplete="off" placeholder="Stored on this Chrome profile" />
+              <button id="toggleToken" type="button">Show</button>
+            </div>
+          </label>
+
+          <label class="switch-row">
+            <span>
+              <strong>Research contacts automatically</strong>
+              <small>ContactOut first, then LinkedIn Contact Info.</small>
+            </span>
+            <input id="autoEnrich" type="checkbox" />
+            <i aria-hidden="true"></i>
+          </label>
+
+          <details class="contract-details">
+            <summary>Webhook contract</summary>
+            <pre><code>POST { "source": "vela-gtm-extension", "profile": { … } }
+
+→ { "email": "…", "confidence": 0.94, "note": "…" }</code></pre>
+          </details>
+        </section>
+
+        <section class="settings-section" aria-labelledby="writerHeading">
+          <div class="section-heading inline-heading">
+            <div>
+              <h2 id="writerHeading">Advanced writer endpoint</h2>
+              <p>Optional server override. Leave empty for direct OpenAI.</p>
+            </div>
+            <div class="writer-statuses">
+              <span class="model-chip">gpt-5.4-mini</span>
+              <span id="writerPermissionState" class="permission-state">Needs permission</span>
+            </div>
+          </div>
+
+          <label class="field">
+            <span>Writer endpoint</span>
+            <input id="writerEndpointUrl" type="url" inputmode="url" autocomplete="url" placeholder="http://127.0.0.1:8787/generate" />
+            <small>Run the included writer server locally or point this at Vela’s internal deployment.</small>
+          </label>
+
+          <label class="field">
+            <span>Writer server token <em>Optional</em></span>
+            <div class="password-wrap">
+              <input id="writerToken" type="password" autocomplete="off" placeholder="Not your OpenAI API key" />
+              <button id="toggleWriterToken" type="button">Show</button>
+            </div>
+          </label>
+
+          <p class="security-note"><strong>Server mode only.</strong> When this field is set, the extension uses Vela’s writer service instead of calling OpenAI from the background worker.</p>
+        </section>
+
+        <section class="settings-section" aria-labelledby="gmailHeading">
+          <div class="section-heading inline-heading">
+            <div>
+              <h2 id="gmailHeading">Gmail drafts</h2>
+              <p>Compose-only access. Vela creates drafts but never sends them.</p>
+            </div>
+            <span id="gmailState" class="permission-state">Not connected</span>
+          </div>
+          <p class="security-note gmail-note">Chrome extension ID: <code id="extensionId">preview</code>. Create a Google OAuth client for this ID, place it in <code>manifest.json</code>, then reload Vela GTM.</p>
+          <button id="connectGmailButton" class="gmail-connect" type="button">Connect Gmail</button>
+        </section>
+
+        <section class="settings-section" aria-labelledby="senderHeading">
+          <div class="section-heading">
+            <h2 id="senderHeading">Sender defaults</h2>
+            <p>Used when a template is added to a prospect.</p>
+          </div>
+          <div class="field-grid">
+            <label class="field">
+              <span>Sender name</span>
+              <input id="senderName" type="text" autocomplete="name" placeholder="Tarun" />
+            </label>
+            <label class="field">
+              <span>Calendar URL</span>
+              <input id="calendarUrl" type="url" inputmode="url" placeholder="https://cal.com/team/velaenergy" />
+            </label>
+          </div>
+        </section>
+
+        <div class="form-actions">
+          <button id="resetButton" class="reset-button" type="button">Reset</button>
+          <button class="save-button" type="submit">Save changes</button>
+        </div>
+      </form>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

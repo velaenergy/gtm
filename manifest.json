@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "Vela GTM",
+  "description": "Turn LinkedIn profiles into researched, personalized Vela outreach drafts.",
+  "version": "0.4.0",
+  "action": {
+    "default_title": "Open Vela GTM",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "assets/icon-16.png",
+      "32": "assets/icon-32.png",
+      "48": "assets/icon-48.png",
+      "128": "assets/icon-128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "icons": {
+    "16": "assets/icon-16.png",
+    "32": "assets/icon-32.png",
+    "48": "assets/icon-48.png",
+    "128": "assets/icon-128.png"
+  },
+  "permissions": ["activeTab", "identity", "scripting", "storage", "tabs"],
+  "host_permissions": [
+    "https://www.linkedin.com/*",
+    "https://gmail.googleapis.com/*",
+    "https://api.contactout.com/*",
+    "https://api.openai.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "optional_host_permissions": ["https://*/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/in/*", "https://www.linkedin.com/search/results/people/*"],
+      "js": ["lib/linkedin-parser.js", "content-script.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "oauth2": {
+    "client_id": "REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com",
+    "scopes": ["https://www.googleapis.com/auth/gmail.compose"]
+  },
+  "options_page": "options.html",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

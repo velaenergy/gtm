@@ -1,0 +1,16 @@
+{
+  "name": "vela-gtm",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "description": "Internal Vela prospecting companion for LinkedIn profiles.",
+  "scripts": {
+    "test": "node --test",
+    "check": "node scripts/validate-manifest.mjs && node --test",
+    "preview": "python3 -m http.server 4173",
+    "writer": "node server/index.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

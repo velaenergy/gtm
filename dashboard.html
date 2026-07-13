@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>GTM workspace · Vela</title>
+    <link rel="icon" href="assets/icon-32.png" />
+    <link rel="stylesheet" href="dashboard.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="GTM workspace navigation">
+        <div class="sidebar-head">
+          <a class="brand" href="https://vela.energy" target="_blank" rel="noreferrer" aria-label="Vela Energy">
+            <span class="logo-wrap" aria-hidden="true">
+              <img class="logo logo-light" src="assets/vela-logo-light.png" alt="" />
+              <img class="logo logo-dark" src="assets/vela-logo-dark.png" alt="" />
+            </span>
+            <span class="brand-copy"><strong>Vela</strong><small>GTM workspace</small></span>
+          </a>
+          <button id="collapseSidebar" class="icon-button sidebar-toggle" type="button" aria-label="Collapse sidebar">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 4.5 7 10l5.5 5.5M4 3.5h12v13H4z"/></svg>
+          </button>
+        </div>
+
+        <nav class="nav-groups">
+          <div class="nav-group">
+            <p class="nav-label">Workspace</p>
+            <button class="nav-item is-active" type="button" data-view="all">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 4.5h13v11h-13zM3.5 8h13M8 8v7.5"/></svg>
+              <span>Prospects</span><b id="navTotal">0</b>
+            </button>
+            <button class="nav-item" type="button" data-view="research">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m14.5 14.5 3 3M16 9a7 7 0 1 1-14 0 7 7 0 0 1 14 0ZM6.5 9h5M9 6.5v5"/></svg>
+              <span>Research queue</span><b id="navResearch">0</b>
+            </button>
+            <button class="nav-item" type="button" data-view="review">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h9l3 3v10H4zM13 3.5v3h3M7 10h6M7 13h4"/></svg>
+              <span>Review queue</span><b id="navReview">0</b>
+            </button>
+            <button class="nav-item" type="button" data-view="drafted">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5.5h14v10H3zM3.5 6l6.5 5 6.5-5"/></svg>
+              <span>Gmail drafts</span><b id="navDrafted">0</b>
+            </button>
+          </div>
+          <div class="nav-group">
+            <p class="nav-label">Sources</p>
+            <button id="captureSearchButton" class="nav-item" type="button">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15ZM2.8 8h14.4M2.8 12h14.4M10 2.5c2 2 2 13 0 15M10 2.5c-2 2-2 13 0 15"/></svg>
+              <span>Capture LinkedIn</span>
+            </button>
+            <button id="openImportButton" class="nav-item" type="button">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 7l4-4 4 4M3.5 12.5v4h13v-4"/></svg>
+              <span>Import list</span>
+            </button>
+          </div>
+        </nav>
+
+        <div class="sidebar-foot">
+          <div class="safety-card">
+            <span class="safety-icon"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5 16 5v4.7c0 3.5-2.4 6.2-6 7.8-3.6-1.6-6-4.3-6-7.8V5zM7.2 10l1.8 1.8 3.8-4"/></svg></span>
+            <div><strong>Human review on</strong><span>Nothing sends automatically</span></div>
+          </div>
+          <button id="settingsButton" class="nav-item" type="button">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM10 2.5v2M10 15.5v2M17.5 10h-2M4.5 10h-2M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4M15.3 15.3l-1.4-1.4M6.1 6.1 4.7 4.7"/></svg>
+            <span>Settings</span>
+          </button>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="workspace-topbar">
+          <div class="crumb"><span>Vela Energy</span><i>/</i><strong>GTM</strong></div>
+          <div class="top-actions">
+            <button id="copySheetButton" class="button button-ghost" type="button">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6.5 3.5h10v10h-10zM3.5 6.5v10h10"/></svg>
+              Copy for Sheets
+            </button>
+            <button id="exportButton" class="button button-outline" type="button">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9M6.5 8.5 10 12l3.5-3.5M3.5 14v2.5h13V14"/></svg>
+              Export CSV
+            </button>
+            <span class="avatar-user" aria-label="Tarun">TR</span>
+          </div>
+        </header>
+
+        <div class="workspace-content">
+          <section class="hero" aria-labelledby="pageTitle">
+            <div class="hero-heading">
+              <p class="eyebrow"><span></span>Agent workspace</p>
+              <h1 id="pageTitle">Turn a market into<br /><em>conversations.</em></h1>
+              <p>Describe who matters. Vela plans the search, researches the people, and prepares the work for your review.</p>
+            </div>
+            <div class="activity-note"><span class="activity-pulse"></span><div><strong>Agent ready</strong><small>6 sources available</small></div></div>
+          </section>
+
+          <section class="agent-panel" aria-label="Vela agent search">
+            <form id="searchForm" class="agent-form">
+              <div class="agent-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+              <label class="sr-only" for="searchBrief">Describe the people you want to find</label>
+              <textarea id="searchBrief" rows="2" autocomplete="off" placeholder="Find data center leaders responsible for power, site selection, or critical operations at growing operators..."></textarea>
+              <button id="planSearchButton" class="agent-submit" type="submit" aria-label="Plan search">
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"/></svg>
+              </button>
+            </form>
+            <div class="agent-footer">
+              <div class="agent-tools"><button type="button" data-prompt="Find VP and director-level data center operators focused on power and critical infrastructure">Data center operators</button><button type="button" data-prompt="Find energy procurement and utility strategy leaders at large industrial loads">Energy buyers</button><button type="button" data-prompt="Find site selection leaders at AI infrastructure and colocation companies">Site selection</button></div>
+              <span><kbd>⌘</kbd><kbd>↵</kbd> to run</span>
+            </div>
+            <div id="searchPlan" class="search-plan" hidden>
+              <div class="plan-head"><span>Vela’s plan</span><p id="searchStrategy"></p></div>
+              <div id="searchOptions" class="search-options"></div>
+            </div>
+          </section>
+
+          <section class="metrics" aria-label="Pipeline summary">
+            <article><div><span>Prospects</span><strong id="totalStat">0</strong></div><small id="totalDelta">Across your workspace</small></article>
+            <article><div><span>Needs research</span><strong id="attentionStat">0</strong></div><small><i class="dot dot-amber"></i>Waiting on the agent</small></article>
+            <article><div><span>Ready to review</span><strong id="readyStat">0</strong></div><small><i class="dot dot-blue"></i>Human decision required</small></article>
+            <article><div><span>In Gmail</span><strong id="draftedStat">0</strong></div><small><i class="dot dot-green"></i>Prepared, never auto-sent</small></article>
+          </section>
+
+          <section class="queue-section" aria-labelledby="queueHeading">
+            <div class="queue-titlebar">
+              <div><h2 id="queueHeading">All prospects</h2><p id="queueDescription">Every prospect across research, review, and Gmail.</p></div>
+              <div class="queue-actions">
+                <button id="draftReadyButton" class="button button-outline" type="button">Create Gmail drafts</button>
+                <button id="processButton" class="button button-primary" type="button">
+                  <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m10 2 .9 3.1L14 6l-3.1.9L10 10l-.9-3.1L6 6l3.1-.9zM15.5 11l.6 2.4 2.4.6-2.4.6-.6 2.4-.6-2.4-2.4-.6 2.4-.6zM5 11.5l.7 2.1 2.1.7-2.1.7-.7 2.1-.7-2.1-2.1-.7 2.1-.7z"/></svg>
+                  Research queue
+                </button>
+              </div>
+            </div>
+
+            <div class="table-toolbar">
+              <label class="table-search">
+                <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.7" cy="8.7" r="5.2"/><path d="m12.6 12.6 4 4"/></svg>
+                <span class="sr-only">Filter prospects</span>
+                <input id="tableSearch" type="search" placeholder="Filter people, roles, emails..." autocomplete="off" />
+                <kbd>⌘K</kbd>
+              </label>
+              <div class="toolbar-right">
+                <button id="statusFilterButton" class="button button-ghost filter-button" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M5.5 10h9M8 15h4"/></svg> Filter</button>
+                <button id="openImportButtonTop" class="button button-ghost" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 7l4-4 4 4M3.5 12.5v4h13v-4"/></svg> Import</button>
+              </div>
+            </div>
+
+            <div id="bulkBar" class="bulk-bar" hidden>
+              <span><strong id="selectedCount">0</strong> selected</span>
+              <button id="bulkResearchButton" type="button">Research</button>
+              <button id="bulkDraftButton" type="button">Create drafts</button>
+              <button id="clearSelectionButton" type="button">Clear</button>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead><tr>
+                  <th class="check-cell"><input id="selectAll" type="checkbox" aria-label="Select all visible prospects" /></th>
+                  <th>Person</th><th>Company / role</th><th>Email</th><th>Stage</th><th>Draft</th><th>Updated</th><th><span class="sr-only">Actions</span></th>
+                </tr></thead>
+                <tbody id="queueBody"></tbody>
+              </table>
+              <div id="emptyState" class="empty-state">
+                <span class="empty-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4zM4 10h16M9 10v8"/></svg></span>
+                <h3>No prospects in this view</h3>
+                <p>Try another filter or ask the Vela agent to build a new search.</p>
+              </div>
+            </div>
+            <div class="table-footer"><span id="resultCount">0 prospects</span><span>Local workspace · updates automatically</span></div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <div id="drawerBackdrop" class="drawer-backdrop" hidden></div>
+    <aside id="reviewDrawer" class="review-drawer" aria-labelledby="drawerTitle" aria-hidden="true">
+      <header class="drawer-header">
+        <div><p>Draft review</p><h2 id="drawerTitle">Review prospect</h2></div>
+        <button id="closeDrawerButton" class="icon-button" type="button" aria-label="Close review panel"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg></button>
+      </header>
+      <div class="drawer-content">
+        <div class="prospect-summary"><span id="drawerAvatar" class="person-avatar">VG</span><div><strong id="drawerName">Prospect</strong><p id="drawerHeadline"></p><a id="drawerLinkedIn" href="#" target="_blank" rel="noreferrer">View LinkedIn ↗</a></div></div>
+        <div class="review-status"><span><i></i>Human review required</span><small>Nothing is sent from this screen</small></div>
+        <label class="field"><span>Personalization note</span><textarea id="drawerWorkNote" rows="3"></textarea></label>
+        <label class="field"><span>To</span><input id="drawerEmail" type="email" /></label>
+        <label class="field"><span>Subject</span><input id="drawerSubject" type="text" /></label>
+        <label class="field"><span>Message</span><textarea id="drawerBody" rows="13"></textarea></label>
+      </div>
+      <footer class="drawer-footer">
+        <button id="saveReviewButton" class="button button-outline" type="button">Save changes</button>
+        <button id="approveDraftButton" class="button button-primary" type="button">Approve & create Gmail draft</button>
+      </footer>
+    </aside>
+
+    <dialog id="importDialog" class="modal">
+      <form method="dialog" class="modal-card">
+        <header><div><p class="eyebrow">Bring your own list</p><h2>Import prospects</h2></div><button class="icon-button" value="cancel" aria-label="Close import dialog"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg></button></header>
+        <div class="modal-body">
+          <p>Paste one LinkedIn profile per line. Add context after a vertical bar to give the agent a head start.</p>
+          <label class="field"><span>LinkedIn profiles</span><textarea id="bulkInput" rows="8" placeholder="https://www.linkedin.com/in/example | leads critical operations at a data center"></textarea></label>
+          <span id="importHint">Duplicates are merged automatically using the LinkedIn URL.</span>
+        </div>
+        <footer><button class="button button-ghost" value="cancel">Cancel</button><button id="importButton" class="button button-primary" type="button">Add to workspace</button></footer>
+      </form>
+    </dialog>
+
+    <div id="progressBar" class="progress-bar" hidden><i></i><span id="progressText">Researching queue</span></div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="dashboard.js"></script>
+  </body>
+</html>
