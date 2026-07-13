@@ -29,8 +29,11 @@ const googleAccountDialog = document.getElementById("googleAccountDialog");
 const googleAccountList = document.getElementById("googleAccountList");
 const extensionId = document.getElementById("extensionId");
 const contactOutApiKey = document.getElementById("contactOutApiKey");
+const apolloApiKey = document.getElementById("apolloApiKey");
 const testContactOutButton = document.getElementById("testContactOutButton");
 const contactOutApiState = document.getElementById("contactOutApiState");
+const testApolloButton = document.getElementById("testApolloButton");
+const apolloApiState = document.getElementById("apolloApiState");
 const openAIApiKey = document.getElementById("openAIApiKey");
 const agentServerState = document.getElementById("agentServerState");
 const includeContactOutPhone = document.getElementById("includeContactOutPhone");
@@ -107,6 +110,7 @@ function fillForm(settings) {
   writerEndpointUrl.value = settings.writerEndpointUrl || "";
   writerToken.value = settings.writerToken || "";
   contactOutApiKey.value = settings.contactOutApiKey || "";
+  apolloApiKey.value = settings.apolloApiKey || "";
   openAIApiKey.value = settings.openAIApiKey || "";
   includeContactOutPhone.checked = Boolean(settings.includeContactOutPhone);
   autoEnrich.checked = Boolean(settings.autoEnrich);
@@ -135,7 +139,7 @@ async function requestOriginAccess(value) {
 }
 
 function updateAgentKeyState() {
-  const configured = [contactOutApiKey.value.trim() && "ContactOut", openAIApiKey.value.trim() && "OpenAI"].filter(Boolean);
+  const configured = [contactOutApiKey.value.trim() && "ContactOut", apolloApiKey.value.trim() && "Apollo", openAIApiKey.value.trim() && "OpenAI"].filter(Boolean);
   agentServerState.textContent = configured.length ? configured.join(" + ") : "Keys needed";
   agentServerState.classList.toggle("has-access", configured.length === 2);
 }
@@ -162,6 +166,7 @@ form.addEventListener("submit", async (event) => {
         writerEndpointUrl: writerEndpoint,
         writerToken: writerToken.value.trim(),
         contactOutApiKey: contactOutApiKey.value.trim(),
+        apolloApiKey: apolloApiKey.value.trim(),
         openAIApiKey: openAIApiKey.value.trim(),
         openAIModel: "gpt-5.4-mini",
         includeContactOutPhone: includeContactOutPhone.checked,
@@ -203,6 +208,7 @@ resetButton.addEventListener("click", () => {
 });
 
 contactOutApiKey.addEventListener("input", updateAgentKeyState);
+apolloApiKey.addEventListener("input", updateAgentKeyState);
 openAIApiKey.addEventListener("input", updateAgentKeyState);
 
 function contactOutUsageSummary(usage = {}) {
@@ -239,6 +245,31 @@ testContactOutButton.addEventListener("click", async () => {
     showToast(message);
   } finally {
     testContactOutButton.disabled = false;
+  }
+});
+
+testApolloButton.addEventListener("click", async () => {
+  if (!isExtension) { showToast("Load the extension in Chrome to test Apollo."); return; }
+  const saved = (await storage.get("velaGtmSettings")).velaGtmSettings || {};
+  const enteredKey = apolloApiKey.value.trim();
+  if (!enteredKey) { showToast("Add an Apollo API key first."); return; }
+  if (enteredKey !== saved.apolloApiKey) { showToast("Save settings before testing the Apollo key."); return; }
+  try {
+    testApolloButton.disabled = true;
+    apolloApiState.textContent = "Testing";
+    const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_PROVIDER_APOLLO_STATUS" });
+    if (!response?.ok) throw new Error(response?.error || "Apollo API test failed.");
+    apolloApiState.textContent = "Connected";
+    apolloApiState.classList.add("has-access");
+    showToast("Apollo connected.");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Apollo API test failed.";
+    apolloApiState.textContent = "API error";
+    apolloApiState.title = message;
+    apolloApiState.classList.remove("has-access");
+    showToast(message);
+  } finally {
+    testApolloButton.disabled = false;
   }
 });
 

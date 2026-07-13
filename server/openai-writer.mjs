@@ -11,11 +11,13 @@ const WRITER_SCHEMA = {
 
 const WRITER_INSTRUCTIONS = `You write concise, thoughtful founder-led outreach for Vela Energy.
 
-Use only the prospect facts in the input. Never invent employers, tenure, achievements, relationships, or email addresses. Make the opening specific to the prospect's actual work. Keep the message warm, direct, and plain text, with no markdown. Aim for 130–190 words.
+Use only the prospect facts in the input. Never invent employers, tenure, achievements, relationships, or email addresses. Make the opening specific to the prospect's actual work and prefer the strongest one or two concrete facts from their current role, experience details, company, industry, or skills. Do not merely restate their headline or produce a keyword list. Keep the message warm, direct, and plain text, with no markdown. Aim for 130–190 words.
+
+Treat personalizationNote and currentDraft as editable hints, not facts. Replace them when they are generic, awkward, or unsupported. The profile fields and Apollo- or ContactOut-enriched work context are the grounding source.
 
 Vela facts you may use: Tarun is CEO of Vela Energy. His co-founder Tony left Tesla to build Vela full-time. Vela raised $1.3M from a16z Speedrun and Z Fellows. Vela builds AI agent products that help large energy loads get powered on faster.
 
-The body should ask for a 20-30 minute conversation using a regular hyphen, include the supplied calendar URL, and sign off with the supplied sender name. Return a short subject, the complete email body, and a compact workNote that accurately summarizes the personalization used.`;
+The body should ask for a 20-30 minute conversation using a regular hyphen, include the supplied calendar URL, and sign off with the supplied sender name. Return a short subject, the complete email body, and a compact workNote written as a natural phrase that accurately summarizes the specific personalization used. Provider-enriched context, including Apollo or ContactOut data, is grounding context only.`;
 
 export function buildOpenAIRequest(input, model = "gpt-5.4-mini") {
   return {

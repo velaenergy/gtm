@@ -2,7 +2,6 @@ import {
   DEFAULT_SETTINGS,
   TEMPLATES,
   applyTemplate,
-  buildWorkNote,
   gmailComposeUrl,
   initialsFor,
   isEmail,
@@ -10,7 +9,8 @@ import {
   resolveTheme,
   templateVariables,
 } from "./lib/message.js";
-import { buildWriterRequest, normalizeWriterResponse } from "./lib/ai-writer.js";
+import { buildWriterRequest, mergeEnrichedProfile, normalizeWriterResponse } from "./lib/ai-writer.js";
+import { resolveContactEmail } from "./lib/contact-resolution.js";
 import { QUEUE_STORAGE_KEY, upsertProspects } from "./lib/queue.js";
 import {
   CAMPAIGNS_STORAGE_KEY,
@@ -41,7 +41,7 @@ const elements = Object.fromEntries(
     "loadingView", "pageGate", "workspace", "actionBar", "previewBadge", "settingsButton", "queueButton", "captureStatus",
     "avatar", "profileName", "profileHeadline", "profileLocationText", "emailSource", "emailConfidence", "emailInput",
     "findEmailButton", "copyEmailButton", "contactDetails", "workNote", "signalCount", "experienceList", "templateSelect",
-    "templateEyebrow", "generateEmailButton", "subjectInput", "bodyInput", "wordCount", "copyDraftButton", "openGmailButton", "toast",
+    "personalizationSource", "rewritePersonalizationButton", "templateEyebrow", "generateEmailButton", "subjectInput", "bodyInput", "wordCount", "copyDraftButton", "openGmailButton", "toast",
     "addToCampaignButton", "campaignDialog", "closeCampaignDialog", "campaignList", "createCampaignForm", "newCampaignName",
     "createCampaignButton", "openCampaignWorkspace",
   ].map((id) => [id, document.getElementById(id)]),
@@ -52,12 +52,15 @@ const state = {
   settings: { ...DEFAULT_SETTINGS },
   email: "",
   emailSource: "",
+  emailVerified: false,
+  emailType: "",
   contactDetails: { emails: [], phones: [], emailStatus: "", emailStatuses: {}, error: "" },
   confidence: null,
   note: "",
   templateId: TEMPLATES[0].id,
   subject: "",
   body: "",
+  personalizationModel: "",
   campaigns: [],
   lastCampaignId: "",
   composerDirty: false,
@@ -143,24 +146,25 @@ function updateWordCount() {
 function renderEmail() {
   elements.emailInput.value = state.email;
   elements.emailInput.classList.toggle("is-invalid", Boolean(state.email) && !isEmail(state.email));
-  elements.emailSource.textContent = state.emailSource || "Not found yet";
-  elements.emailConfidence.hidden = state.confidence === null;
-  elements.emailConfidence.textContent = state.confidence === null ? "" : `${Math.round(state.confidence)}% confidence`;
-  const details = [];
-  for (const email of state.contactDetails.emails || []) details.push({ value: email, primary: email === state.email });
-  for (const phone of state.contactDetails.phones || []) details.push({ value: phone, primary: false });
-  elements.contactDetails.hidden = details.length < 2 && !state.contactDetails.emailStatus;
+  elements.emailSource.textContent = state.emailSource || "No contact provider has checked this profile yet";
+  elements.emailConfidence.hidden = !state.emailVerified && state.emailType !== "linkedin";
+  elements.emailConfidence.textContent = state.emailVerified ? "Provider verified" : state.emailType === "linkedin" ? "LinkedIn provided" : "";
+  const details = (state.contactDetails.emails || []).filter((email) => email !== state.email
+    && ["verified", "valid"].includes(state.contactDetails.emailStatuses?.[email]?.toLowerCase()));
+  elements.contactDetails.hidden = details.length === 0;
   const fragment = document.createDocumentFragment();
-  for (const detail of details) {
-    const chip = document.createElement("span");
-    chip.className = `contact-detail${detail.primary ? " is-primary" : ""}`;
-    chip.textContent = detail.value;
-    fragment.append(chip);
-  }
-  if (state.contactDetails.emailStatus) {
-    const chip = document.createElement("span");
+  for (const email of details) {
+    const chip = document.createElement("button");
+    chip.type = "button";
     chip.className = "contact-detail";
-    chip.textContent = state.contactDetails.emailStatus;
+    chip.textContent = `${email} · verified`;
+    chip.addEventListener("click", () => {
+      state.email = email;
+      state.emailVerified = true;
+      state.emailSource = "Alternative email verified by provider";
+      renderEmail();
+      queueDraftSave();
+    });
     fragment.append(chip);
   }
   elements.contactDetails.replaceChildren(fragment);
@@ -205,6 +209,13 @@ function renderProfile() {
   const statusDot = document.createElement("i");
   elements.captureStatus.replaceChildren(statusDot, document.createTextNode(state.isPreview ? " Demo data" : " Live page"));
   elements.workNote.value = state.note;
+  const savedProvider = state.emailSource.match(/(?:ContactOut|Apollo)/i)?.[0] || "provider";
+  const savedContextLabel = state.emailVerified ? `verified ${savedProvider} research` : state.emailType === "linkedin" ? "LinkedIn profile context" : "profile context";
+  elements.personalizationSource.textContent = state.personalizationModel
+    ? `Written with ${state.personalizationModel} from ${savedContextLabel}`
+    : state.emailVerified ? "Ready to write from verified research"
+      : state.emailType === "linkedin" ? "Ready to write from LinkedIn Contact Info"
+        : "Runs after an email is found";
   elements.templateSelect.value = state.templateId;
   renderEmail();
   renderExperiences();
@@ -222,13 +233,20 @@ async function loadDraft() {
     return;
   }
 
-  state.email = saved.email || state.email;
-  state.emailSource = saved.email ? saved.emailSource || "Saved locally" : state.emailSource;
+  const savedVerified = Boolean(saved.emailVerified);
+  const savedManual = /^Entered manually\b/i.test(saved.emailSource || "");
+  const savedLinkedIn = /^LinkedIn Contact Info\b/i.test(saved.emailSource || "");
+  state.email = savedVerified || savedManual || savedLinkedIn ? saved.email || "" : state.email;
+  state.emailSource = state.email ? saved.emailSource || "Saved locally" : state.emailSource;
+  state.emailVerified = savedVerified;
+  state.emailType = saved.emailType || "";
+  state.contactDetails = saved.contactDetails || state.contactDetails;
   state.confidence = saved.confidence ?? state.confidence;
   state.note = saved.note || state.note;
   state.templateId = TEMPLATES.some((template) => template.id === saved.templateId) ? saved.templateId : state.templateId;
   state.subject = saved.subject || "";
   state.body = saved.body || "";
+  state.personalizationModel = saved.personalizationModel || "";
   state.composerDirty = Boolean(saved.subject || saved.body);
 
   renderProfile();
@@ -250,11 +268,15 @@ function queueDraftSave() {
       [draftKey()]: {
         email: state.email,
         emailSource: state.emailSource,
+        emailVerified: state.emailVerified,
+        emailType: state.emailType,
+        contactDetails: state.contactDetails,
         confidence: state.confidence,
         note: state.note,
         templateId: state.templateId,
         subject: state.subject,
         body: state.body,
+        personalizationModel: state.personalizationModel,
         updatedAt: new Date().toISOString(),
       },
     });
@@ -311,38 +333,74 @@ async function requestEndpointPermission(endpointUrl) {
   return chrome.permissions.request({ origins: [originPatternFor(endpointUrl)] });
 }
 
-function setFindEmailLoading(loading, label = "Retry lookup") {
+function setFindEmailLoading(loading, label = state.email ? "Refresh" : "Find email") {
   elements.findEmailButton.disabled = loading;
   elements.findEmailButton.classList.toggle("is-loading", loading);
   elements.findEmailButton.querySelector("span").textContent = label;
 }
 
+async function requestLinkedInEmail() {
+  if (state.isPreview) return { ok: true, email: state.profile?.visibleEmail || "", strategy: "preview" };
+  if (!state.activeTabId) throw new Error("Open a LinkedIn profile before using LinkedIn Contact Info.");
+  const message = { type: "VELA_GTM_FIND_LINKEDIN_EMAIL" };
+  try {
+    return await chrome.tabs.sendMessage(state.activeTabId, message);
+  } catch {
+    await chrome.scripting.executeScript({
+      target: { tabId: state.activeTabId },
+      files: ["lib/linkedin-parser.js", "content-script.js"],
+    });
+    return chrome.tabs.sendMessage(state.activeTabId, message);
+  }
+}
+
 async function enrichProfile({ requestPermission = true, manageButton = true, openSettingsWhenMissing = true, silent = false, replaceProviderResult = false } = {}) {
   if (!state.profile) return;
-  const direct = Boolean(state.settings.contactOutApiKey && globalThis.chrome?.runtime?.sendMessage);
+  const providers = [
+    state.settings.apolloApiKey ? "Apollo" : "",
+    state.settings.contactOutApiKey ? "ContactOut" : "",
+  ].filter(Boolean);
+  const provider = providers[0] || "";
+  const direct = Boolean(providers.length && globalThis.chrome?.runtime?.sendMessage);
   if (!direct && !state.settings.endpointUrl) {
     if (openSettingsWhenMissing) {
-      showToast("Add an enrichment webhook in Settings first.");
+      showToast("Add a ContactOut or Apollo API key in Settings first.");
       openSettings();
     }
     return false;
   }
 
   try {
-    const priorProviderEmail = /^ContactOut\b/i.test(state.emailSource || "")
+    const priorProviderEmail = /^(ContactOut|Apollo)\b/i.test(state.emailSource || "")
       || (state.contactDetails.emails || []).includes(state.email);
     if (replaceProviderResult && priorProviderEmail) {
       state.email = "";
-      state.emailSource = "Checking ContactOut…";
+      state.emailSource = `Checking ${provider}…`;
       state.contactDetails = { emails: [], phones: [], emailStatus: "", emailStatuses: {}, error: "" };
       renderEmail();
     }
     if (manageButton) setFindEmailLoading(true, "Searching");
-    let payload;
+    let result;
     if (direct) {
-      const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_PROVIDER_CONTACTOUT", profile: state.profile });
-      if (!response?.ok) throw new Error(response?.error || "ContactOut lookup failed.");
-      payload = { ...response.data, emailSource: response.data.source };
+      let lastError;
+      for (const candidate of providers) {
+        try {
+          const response = await chrome.runtime.sendMessage({ type: `VELA_GTM_PROVIDER_${candidate.toUpperCase()}`, profile: state.profile });
+          if (!response?.ok) throw new Error(response?.error || `${candidate} lookup failed.`);
+          const candidateResult = normalizeEnrichmentResponse({ ...response.data, emailSource: response.data.source });
+          state.profile = mergeEnrichedProfile(state.profile, candidateResult);
+          renderExperiences();
+          const candidateStatus = String(candidateResult.emailStatuses?.[candidateResult.email] || candidateResult.emailStatus || "").toLowerCase();
+          if (candidateResult.email && ["verified", "valid"].includes(candidateStatus)) {
+            result = candidateResult;
+            break;
+          }
+          lastError = new Error(`${candidate} did not return an explicitly verified email.`);
+        } catch (error) {
+          lastError = error instanceof Error ? error : new Error(`${candidate} lookup failed.`);
+        }
+      }
+      if (!result) throw lastError || new Error("No configured provider returned a verified email.");
     } else {
       let permitted = await hasEndpointPermission(state.settings.endpointUrl);
       if (!permitted && requestPermission) permitted = await requestEndpointPermission(state.settings.endpointUrl);
@@ -350,27 +408,33 @@ async function enrichProfile({ requestPermission = true, manageButton = true, op
       const headers = { "Content-Type": "application/json", Accept: "application/json" };
       if (state.settings.apiToken) headers.Authorization = `Bearer ${state.settings.apiToken}`;
       const response = await fetch(state.settings.endpointUrl, { method: "POST", headers, body: JSON.stringify({ source: "vela-gtm-extension", profile: state.profile }) });
-      payload = await response.json().catch(() => ({}));
+      const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || `Enrichment service returned ${response.status}.`);
+      result = normalizeEnrichmentResponse(payload);
     }
-    const result = normalizeEnrichmentResponse(payload);
-    if (!result.email && !result.note) throw new Error("The service returned no email or note.");
+    const selectedStatus = String(result.emailStatuses?.[result.email] || result.emailStatus || "").toLowerCase();
+    const fromProvider = direct || new RegExp(`^${provider}\\b`, "i").test(result.emailSource || "");
+    if (!result.email || !["verified", "valid"].includes(selectedStatus) || !fromProvider) {
+      state.email = "";
+      state.emailVerified = false;
+      state.emailType = "";
+      state.emailSource = `No verified email found by ${provider}`;
+      state.contactDetails = { emails: [], phones: [], emailStatus: "", emailStatuses: {}, error: `${providers.join(" or ")} did not return an explicitly verified address.` };
+      renderEmail();
+      queueDraftSave();
+      throw new Error(`${provider} did not return a verified email for this profile.`);
+    }
 
-    if (result.email) {
-      state.email = result.email;
-      state.emailSource = result.emailSource || "Enrichment service";
-      state.confidence = result.confidence;
-    }
-    state.contactDetails = { emails: result.emails, phones: result.phones, emailStatus: result.emailStatus, emailStatuses: result.emailStatuses, error: "" };
-    if (result.note) {
-      state.note = result.note;
-      elements.workNote.value = state.note;
-      if (!state.composerDirty) rebuildComposer();
-    }
+    state.email = result.email;
+    state.emailVerified = true;
+    state.emailType = result.workEmails?.includes(result.email) ? "work" : result.personalEmails?.includes(result.email) ? "personal" : "other";
+    state.emailSource = `${state.emailType === "work" ? "Work" : state.emailType === "personal" ? "Personal" : "Contact"} email confirmed by ${provider}`;
+    state.confidence = result.confidence;
+    state.contactDetails = { emails: result.emails, phones: [], emailStatus: selectedStatus, emailStatuses: result.emailStatuses, error: "" };
     renderEmail();
     queueDraftSave();
-    if (!silent) showToast(result.email ? "Email found and added to the draft." : "Research note refreshed.");
-    return Boolean(result.email || result.note);
+    if (!silent) showToast(`Verified ${provider} email found. Writing personalization…`);
+    return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Enrichment failed. Check Settings.";
     state.emailSource = message;
@@ -385,69 +449,91 @@ async function enrichProfile({ requestPermission = true, manageButton = true, op
 
 async function findProspectEmail({ automatic = false } = {}) {
   if (!state.profile) return;
-  let contactOutError = "";
   setFindEmailLoading(true, "Looking up");
 
   try {
-    if (state.settings.contactOutApiKey || state.settings.endpointUrl) {
-      state.emailSource = "Checking ContactOut…";
-      renderEmail();
-      const permitted = state.settings.contactOutApiKey || await hasEndpointPermission(state.settings.endpointUrl).catch(() => false);
-      if (permitted || !automatic) {
+    const resolution = await resolveContactEmail({
+      contactOutLookup: async () => {
+        if (!state.settings.contactOutApiKey && !state.settings.apolloApiKey && !state.settings.endpointUrl) throw new Error("No contact provider is configured.");
+        state.emailSource = `${[state.settings.contactOutApiKey ? "ContactOut" : "", state.settings.apolloApiKey ? "Apollo" : ""].filter(Boolean).join(" + ")} is checking this profile…`;
+        renderEmail();
         const found = await enrichProfile({
           requestPermission: !automatic,
           manageButton: false,
           openSettingsWhenMissing: false,
-          silent: automatic,
-          replaceProviderResult: !automatic,
+          silent: true,
+          replaceProviderResult: true,
         });
-        if (found && state.email) return;
-      } else {
-        contactOutError = "ContactOut server access has not been granted.";
-      }
-    }
-
-    state.emailSource = "Checking LinkedIn contact info…";
-    renderEmail();
-    if (!state.isPreview && state.activeTabId) {
-      const response = await chrome.tabs.sendMessage(state.activeTabId, { type: "VELA_GTM_FIND_LINKEDIN_EMAIL" });
-      if (response?.email) {
-        state.email = response.email;
-        state.emailSource = "LinkedIn contact info";
-        state.confidence = null;
+        if (found && state.emailVerified && state.email) return { email: state.email, result: found };
+        throw new Error(state.contactDetails.error || `${[state.settings.contactOutApiKey ? "ContactOut" : "", state.settings.apolloApiKey ? "Apollo" : ""].filter(Boolean).join(" or ")} did not return a verified email for this profile.`);
+      },
+      linkedInLookup: async () => {
+        state.emailSource = "Configured providers did not find an email. Checking LinkedIn Contact Info…";
         renderEmail();
-        queueDraftSave();
-        if (!automatic) showToast("Email found in LinkedIn Contact info.");
-        return;
-      }
-      if (!response?.ok) throw new Error(response?.error || "Could not read LinkedIn Contact info.");
+        const response = await requestLinkedInEmail();
+        if (!response?.ok) throw new Error(response?.error || "Could not read LinkedIn Contact Info.");
+        return response;
+      },
+    });
+
+    if (!resolution.email) {
+      const details = [resolution.contactOutError, resolution.linkedInError].filter(Boolean).join(" LinkedIn fallback: ");
+      state.email = "";
+      state.emailVerified = false;
+      state.emailType = "";
+      state.emailSource = "No email found through the configured providers or LinkedIn Contact Info";
+      state.contactDetails = { ...state.contactDetails, error: details };
+      renderEmail();
+      queueDraftSave();
+      if (!automatic) showToast(details || state.emailSource);
+      return false;
     }
 
-    state.emailSource = "No email found";
-    renderEmail();
-    if (!automatic) showToast(contactOutError || "No email was found through ContactOut or LinkedIn.");
+    if (resolution.source === "linkedin") {
+      state.email = resolution.email;
+      state.emailVerified = false;
+      state.emailType = "linkedin";
+      state.emailSource = resolution.strategy === "rsc" ? "LinkedIn Contact Info" : "LinkedIn Contact Info overlay";
+      state.confidence = null;
+      state.contactDetails = { ...state.contactDetails, error: "" };
+      renderEmail();
+      queueDraftSave();
+    }
+
+    setFindEmailLoading(true, "Personalizing");
+    const written = await generateEmail({ silent: automatic, announce: false });
+    if (!automatic) {
+      const lookupLabel = resolution.source === "contactout" ? `${state.emailSource.match(/(?:ContactOut|Apollo)/i)?.[0] || "Provider"} email` : "LinkedIn Contact Info email";
+      showToast(written ? `${lookupLabel} and AI personalization are ready.` : `${lookupLabel} found. Configure the AI writer to personalize it.`);
+    }
+    return true;
   } catch (error) {
-    state.emailSource = "Lookup needs attention";
     renderEmail();
     if (!automatic) showToast(error instanceof Error ? error.message : "Could not finish email lookup.");
+    return false;
   } finally {
     setFindEmailLoading(false);
   }
 }
 
-async function generateEmail() {
+function setWriterLoading(loading) {
+  for (const button of [elements.generateEmailButton, elements.rewritePersonalizationButton]) {
+    button.disabled = loading;
+    button.classList.toggle("is-loading", loading);
+    const label = button.querySelector("span");
+    if (label) label.textContent = loading ? "Writing" : button === elements.generateEmailButton ? "Write with AI" : "Rewrite with AI";
+  }
+}
+
+async function generateEmail({ silent = false, announce = true } = {}) {
   if (!state.profile) return;
   if (!state.settings.openAIApiKey && !state.settings.writerEndpointUrl) {
-    showToast("Add an OpenAI key or writer endpoint in Settings first.");
-    openSettings();
-    return;
+    if (!silent) { showToast("Add an OpenAI key or writer endpoint in Settings first."); openSettings(); }
+    return false;
   }
 
-  const buttonLabel = elements.generateEmailButton.querySelector("span");
   try {
-    elements.generateEmailButton.disabled = true;
-    elements.generateEmailButton.classList.add("is-loading");
-    buttonLabel.textContent = "Writing";
+    setWriterLoading(true);
 
     const input = buildWriterRequest(state.profile, state.settings, state.note, { subject: state.subject, body: state.body });
     let payload;
@@ -474,18 +560,22 @@ async function generateEmail() {
       state.note = result.workNote;
       elements.workNote.value = result.workNote;
     }
+    state.personalizationModel = result.model || state.settings.openAIModel || "gpt-5.4-mini";
+    const providerLabel = state.emailSource.match(/(?:ContactOut|Apollo)/i)?.[0] || "provider";
+    const contextLabel = state.emailVerified ? `verified ${providerLabel} research` : state.emailType === "linkedin" ? "LinkedIn profile context" : "profile context";
+    elements.personalizationSource.textContent = `Written with ${state.personalizationModel} from ${contextLabel}`;
     elements.subjectInput.value = state.subject;
     elements.bodyInput.value = state.body;
     elements.templateEyebrow.textContent = `Written with ${result.model || "gpt-5.4-mini"}`;
     updateWordCount();
     queueDraftSave();
-    showToast("AI draft ready. Review it before sending.");
+    if (announce) showToast("AI personalization and email draft are ready.");
+    return true;
   } catch (error) {
-    showToast(error instanceof Error ? error.message : "Could not generate the email.");
+    if (!silent) showToast(error instanceof Error ? error.message : "Could not generate the email.");
+    return false;
   } finally {
-    elements.generateEmailButton.disabled = false;
-    elements.generateEmailButton.classList.remove("is-loading");
-    buttonLabel.textContent = "Write with AI";
+    setWriterLoading(false);
   }
 }
 
@@ -520,6 +610,7 @@ function currentProspect() {
     location: state.profile.location,
     email: state.email,
     emailSource: state.emailSource,
+    contactDetails: state.contactDetails,
     workNote: state.note,
     subject: state.subject,
     body: state.body,
@@ -676,14 +767,17 @@ function bindEvents() {
 
   elements.emailInput.addEventListener("input", () => {
     state.email = elements.emailInput.value.trim();
-    state.emailSource = state.email ? "Entered manually" : "Not found yet";
+    state.emailSource = state.email ? "Entered manually · not provider verified" : "No contact provider has checked this profile yet";
+    state.emailVerified = false;
+    state.emailType = "";
     state.confidence = null;
     renderEmail();
     queueDraftSave();
   });
 
   elements.findEmailButton.addEventListener("click", () => findProspectEmail());
-  elements.generateEmailButton.addEventListener("click", generateEmail);
+  elements.generateEmailButton.addEventListener("click", () => generateEmail());
+  elements.rewritePersonalizationButton.addEventListener("click", () => generateEmail());
   elements.copyEmailButton.addEventListener("click", () => copyText(elements.emailInput.value.trim(), "Email copied."));
   elements.copyDraftButton.addEventListener("click", () =>
     copyText(`To: ${elements.emailInput.value.trim()}\nSubject: ${state.subject}\n\n${state.body}`, "Draft copied."),
@@ -704,9 +798,10 @@ async function initialize() {
       return;
     }
 
-    state.email = state.profile.visibleEmail || "";
-    state.emailSource = state.email ? "Visible on profile" : "Not found yet";
-    state.note = buildWorkNote(state.profile);
+    state.email = "";
+    state.emailSource = "No contact provider has checked this profile yet";
+    state.emailVerified = false;
+    state.note = "";
     elements.previewBadge.hidden = !state.isPreview;
     renderProfile();
     await loadDraft();

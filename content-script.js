@@ -89,9 +89,14 @@
   }
 
   function contactOverlayRoot() {
-    return document.querySelector(
+    const semantic = document.querySelector(
       "[data-sdui-screen='com.linkedin.sdui.flagshipnav.profile.ProfileContactDetailsOverlay'], [data-sdui-screen*='ProfileContactDetailsOverlay']",
     );
+    if (semantic) return semantic;
+    if (/\/overlay\/contact-info\/?$/i.test(window.location.pathname)) {
+      return document.querySelector("[role='dialog'], main");
+    }
+    return null;
   }
 
   function emailFromContactOverlay() {
@@ -169,7 +174,7 @@
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
   }
 
-  function waitForContactEmail(timeout = 6000) {
+  function waitForContactEmail(timeout = 9000) {
     const immediate = emailFromContactOverlay();
     if (immediate) return Promise.resolve(immediate);
 
@@ -190,7 +195,7 @@
           finish(email);
           return;
         }
-        if (contactOverlayRoot() && !emptyOverlayTimer) emptyOverlayTimer = setTimeout(() => finish(""), 900);
+        if (contactOverlayRoot() && !emptyOverlayTimer) emptyOverlayTimer = setTimeout(() => finish(""), 2500);
       };
       const observer = new MutationObserver(check);
       const timer = setTimeout(() => finish(""), timeout);

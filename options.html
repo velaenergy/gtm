@@ -65,6 +65,11 @@
               <small>Automatic contact lookup and People Search.</small>
             </label>
             <label class="field">
+              <span>Apollo API key</span>
+              <input id="apolloApiKey" type="password" autocomplete="off" placeholder="Paste your Apollo key" />
+              <small>First-pass contact enrichment and People Search provider.</small>
+            </label>
+            <label class="field">
               <span>OpenAI API key</span>
               <input id="openAIApiKey" type="password" autocomplete="off" placeholder="Paste your OpenAI key" />
               <small>Search planning and personalized drafts.</small>
@@ -73,10 +78,12 @@
           <div class="provider-actions">
             <button id="testContactOutButton" class="provider-test" type="button">Test ContactOut API</button>
             <span id="contactOutApiState" class="permission-state">Not tested</span>
+            <button id="testApolloButton" class="provider-test" type="button">Test Apollo API</button>
+            <span id="apolloApiState" class="permission-state">Not tested</span>
           </div>
           <p class="security-note"><strong>No local server required.</strong> Keys are stored in this Chrome profile and read only by Vela GTM’s background worker—not LinkedIn. A production deployment should move them to Vela’s secret manager.</p>
           <label class="switch-row">
-            <span><strong>Reveal phone numbers</strong><small>Optional. Uses ContactOut phone credits when a number is found.</small></span>
+            <span><strong>Reveal phone numbers</strong><small>Optional. Uses credits from the active enrichment provider.</small></span>
             <input id="includeContactOutPhone" type="checkbox" />
             <i aria-hidden="true"></i>
           </label>
@@ -86,7 +93,7 @@
           <div class="section-heading inline-heading">
             <div>
               <h2 id="enrichmentHeading">Advanced enrichment endpoint</h2>
-              <p>Optional server override. Leave empty for direct ContactOut.</p>
+              <p>Optional server override. Leave empty for direct ContactOut or Apollo.</p>
             </div>
             <span id="permissionState" class="permission-state">Not configured</span>
           </div>
@@ -108,7 +115,7 @@
           <label class="switch-row">
             <span>
               <strong>Research contacts automatically</strong>
-              <small>ContactOut first, then LinkedIn Contact Info.</small>
+              <small>Apollo first, ContactOut second, then LinkedIn Contact Info.</small>
             </span>
             <input id="autoEnrich" type="checkbox" />
             <i aria-hidden="true"></i>

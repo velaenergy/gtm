@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { enrichLinkedInProfile, normalizeContactOutResponse } from "../server/contactout.mjs";
-import { contactOutAccountStatus, normalizePeopleSearchFilters, peopleSearch } from "../lib/contactout.js";
+import { contactOutAccountStatus, isContactOutVerified, normalizeContactOutResponse as normalizeDirectContactOut, normalizePeopleSearchFilters, peopleSearch, verifyEmailAddress } from "../lib/contactout.js";
 
 const response = {
   status_code: 200,
@@ -28,6 +28,90 @@ test("prefers ContactOut work email and normalizes bounded professional context"
   assert.deepEqual(result.emailStatuses, { "alex@grid.example": "verified" });
   assert.equal(result.profile.experiences[0].dates, "2022 – Present");
   assert.deepEqual(result.profile.skills, ["Critical Facilities", "Power"]);
+});
+
+test("never promotes an unverified ContactOut address to the recipient", () => {
+  const result = normalizeDirectContactOut({ profile: {
+    work_email: ["risky@grid.example"],
+    work_email_status: { "risky@grid.example": "unverified" },
+    personal_email: ["verified@gmail.example"],
+    personal_email_status: { "verified@gmail.example": "verified" },
+  } });
+  assert.equal(result.email, "verified@gmail.example");
+  assert.deepEqual(result.emails, ["verified@gmail.example"]);
+  assert.deepEqual(result.unverifiedEmails, ["risky@grid.example"]);
+  assert.equal(isContactOutVerified("Verified"), true);
+  assert.equal(isContactOutVerified("valid"), true);
+  assert.equal(isContactOutVerified("Verified | Unverified"), false);
+});
+
+test("uses Email Verifier to promote an otherwise unverified ContactOut candidate", async () => {
+  const calls = [];
+  const result = await enrichLinkedInProfile({ url: "https://www.linkedin.com/in/alex-morgan" }, {
+    apiKey: "server-secret",
+    fetchImpl: async (url) => {
+      calls.push(String(url));
+      if (String(url).includes("/v1/email/verify?")) {
+        return { ok: true, status: 200, async json() { return { status_code: 200, data: { status: "valid" } }; } };
+      }
+      return { ok: true, status: 200, async json() { return { status_code: 200, profile: {
+        work_email: ["alex@grid.example"],
+        work_email_status: { "alex@grid.example": "unverified" },
+      } }; } };
+    },
+  });
+  assert.equal(result.email, "alex@grid.example");
+  assert.equal(result.emailStatus, "valid");
+  assert.deepEqual(calls.map((url) => new URL(url).pathname), ["/v1/people/linkedin", "/v1/email/verify"]);
+});
+
+test("caches verifier results while continuing through every enrichment fallback", async () => {
+  const paths = [];
+  const result = await enrichLinkedInProfile({ url: "https://www.linkedin.com/in/alex-morgan", name: "Alex Morgan" }, {
+    apiKey: "server-secret",
+    fetchImpl: async (url) => {
+      const path = new URL(url).pathname;
+      paths.push(path);
+      if (path === "/v1/email/verify") {
+        return { ok: true, status: 200, async json() { return { status_code: 200, data: { status: "unknown" } }; } };
+      }
+      if (path === "/v1/linkedin/enrich") {
+        return { ok: true, status: 200, async json() { return { status_code: 200, profile: {
+          work_email: ["confirmed@grid.example"],
+          work_email_status: { "confirmed@grid.example": "verified" },
+        } }; } };
+      }
+      return { ok: true, status: 200, async json() { return { status_code: 200, profile: {
+        headline: "VP, Critical Operations",
+        work_email: ["uncertain@grid.example"],
+        work_email_status: { "uncertain@grid.example": "unverified" },
+      } }; } };
+    },
+  });
+  assert.equal(result.email, "confirmed@grid.example");
+  assert.deepEqual(paths, ["/v1/people/linkedin", "/v1/email/verify", "/v1/people/enrich", "/v1/linkedin/enrich"]);
+});
+
+test("parses Email Verifier statuses", async () => {
+  const status = await verifyEmailAddress("alex@grid.example", {
+    apiKey: "server-secret",
+    fetchImpl: async () => ({ ok: true, status: 200, async json() { return { status_code: 200, data: { status: "accept_all" } }; } }),
+  });
+  assert.equal(status, "accept_all");
+});
+
+test("rejects ContactOut sample fixtures as unavailable account access", async () => {
+  await assert.rejects(
+    enrichLinkedInProfile({ url: "https://www.linkedin.com/in/alex-morgan" }, {
+      apiKey: "demo-key",
+      fetchImpl: async () => ({ ok: true, status: 200, async json() { return {
+        status_code: 200,
+        message: "This is a sample response. To unlock full access, please book a call with our sales team.",
+        profile: { url: "https://www.linkedin.com/in/example-person", work_email: ["email1@example.com"] },
+      }; } }),
+    }),
+    /sample fixture.*no usable credits or this endpoint is not enabled/i,
+  );
 });
 
 test("calls Contact Info first with verified work email and the token header", async () => {
@@ -70,10 +154,41 @@ test("checks ContactOut account usage without exposing the token", async () => {
       assert.equal(String(url), "https://api.contactout.com/v1/stats");
       assert.equal(options.headers.authorization, "basic");
       assert.equal(options.headers.token, "server-secret");
-      return { ok: true, status: 200, async json() { return { status_code: 200, usage: { count: 12, quota: 100, remaining: 88 } }; } };
+      return { ok: true, status: 200, async json() { return { status_code: 200, period: { start: "2026-07-01", end: "2026-07-31" }, usage: { count: 12, quota: 100, remaining: 88 } }; } };
     },
   });
   assert.deepEqual(result.usage, { count: 12, quota: 100, remaining: 88 });
+});
+
+test("recognizes ContactOut's static documentation usage response", async () => {
+  await assert.rejects(
+    contactOutAccountStatus({
+      apiKey: "demo-key",
+      fetchImpl: async () => ({ ok: true, status: 200, async json() { return {
+        status_code: 200,
+        period: { start: "2023-04-01", end: "2023-04-30" },
+        usage: { count: 100, quota: 200, phone_count: 500, phone_quota: 1000 },
+      }; } }),
+    }),
+    /sample fixture.*no usable credits or this endpoint is not enabled/i,
+  );
+});
+
+test("distinguishes exhausted credits from invalid credentials", async () => {
+  await assert.rejects(
+    contactOutAccountStatus({
+      apiKey: "valid-but-exhausted",
+      fetchImpl: async () => ({ ok: false, status: 403, async json() { return { status_code: 403, message: "You're out of credits, please email your sales manager" }; } }),
+    }),
+    /accepted.*out of credits/i,
+  );
+  await assert.rejects(
+    contactOutAccountStatus({
+      apiKey: "invalid",
+      fetchImpl: async () => ({ ok: false, status: 400, async json() { return { status_code: 400, message: "Bad credentials or invalid headers" }; } }),
+    }),
+    /rejected.*credentials/i,
+  );
 });
 
 test("does not accept non-profile LinkedIn URLs", async () => {

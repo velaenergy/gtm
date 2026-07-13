@@ -4,12 +4,14 @@
 
 - **V1 — LinkedIn SDUI extraction.** When a rendered LinkedIn profile exposes a semantic `Topcard` section and dated `Experience` rows, Vela GTM must recover the visible name, headline, location, and work history without depending on LinkedIn's generated class names.
 - **V2 — OpenAI key boundary.** The internal build may store an OpenAI key in the extension's Chrome profile for background-worker calls, but must never expose it to a LinkedIn tab, generated prompt, queue record, or log; production deployment remains server-side.
-- **V3 — LinkedIn contact email.** Email discovery must discreetly try a freshly constructed contact-details RSC request with the current page session, then fall back to LinkedIn's rendered `/overlay/contact-info/` UI; both paths must extract a valid `mailto:` address without storing or replaying HAR credentials.
+- **V3 — Verified recipient boundary.** Only an address explicitly marked `verified` by ContactOut enrichment or `valid` by ContactOut Email Verifier for that exact email may become the automatic draft recipient. `accept_all`, `invalid`, `disposable`, `unknown`, LinkedIn-visible, and manually entered addresses remain unverified.
 - **V4 — Prospect identity.** A normalized LinkedIn `/in/` URL is the queue identity; repeated imports update one prospect instead of creating duplicate outreach rows.
 - **V5 — Human-reviewed Gmail.** Google integration must let the user choose a signed-in Chrome account, may create reviewable drafts with compose-only Gmail access, and must never send messages or rotate sender accounts automatically.
 - **V9 — Mail-merge export.** The current campaign, filtered view, or explicit selection may be exported into a new Google Sheet in the chosen account with one stable header row and all reviewed personalization fields.
 - **V6 — Provider credential boundary.** Internal-build ContactOut and OpenAI keys may be stored in the extension's Chrome profile and read only by its background worker; they must never be injected into LinkedIn tabs, included in queue records, or logged. Production deployment moves them server-side.
-- **V7 — Automatic contact resolution.** Opening or researching a profile starts ContactOut automatically: Contact Info Single first, People Enrich second, broad profile enrichment last; LinkedIn Contact Info is the final fallback and all returned addresses remain visible for review.
+- **V7 — Automatic contact resolution.** Opening or researching a profile starts ContactOut automatically: Contact Info Single first, People Enrich second, broad profile enrichment last. Candidate addresses without a conclusive per-address status are checked through Email Verifier, with one per-lookup cache preventing duplicate verification charges. Static documentation/sample fixtures fail closed with an actionable credits-or-endpoint-access error; unverified and placeholder addresses are never promoted.
+- **V10 — AI-grounded personalization.** After verified enrichment, the OpenAI writer receives the bounded LinkedIn and ContactOut work context and returns a structured personalization note, subject, and complete message; provider context is never treated as permission to invent facts.
+- **V11 — Lookup fallback order.** ∀ profile lookup → ContactOut chain first; miss or error → LinkedIn session RSC then rendered Contact Info overlay; ContactOut success ⊥ LinkedIn call. LinkedIn result labeled LinkedIn-provided, never ContactOut-verified.
 - **V8 — Campaign membership.** Campaigns reference normalized prospect identity; add from profile ! persist current personalization note before membership; campaign totals and exports ! contain campaign members only.
 
 ## I — External surfaces
@@ -18,7 +20,7 @@
 - **I2 — Gmail drafts.** `POST https://gmail.googleapis.com/gmail/v1/users/me/drafts` with a base64url RFC 2822 message and `gmail.compose` authorization.
 - **I3 — Google Sheets export.** `POST https://sheets.googleapis.com/v4/spreadsheets` with mail-merge rows and `spreadsheets` authorization; the created sheet is opened for review and downstream mail merge.
 - **I3 — AI writer.** Existing configured writer endpoint accepts structured profile context and returns subject, body, and personalization note.
-- **I4 — ContactOut enrichment.** `GET https://api.contactout.com/v1/linkedin/enrich?profile=...` using a server-side `token` header.
+- **I4 — ContactOut enrichment.** Contact Info `GET /v1/people/linkedin`, People Enrich `POST /v1/people/enrich`, broad profile `GET /v1/linkedin/enrich`, Email Verifier `GET /v1/email/verify`, and account validation `GET /v1/stats`, using the background-only `token` header.
 
 ## T — Build plan
 
@@ -33,8 +35,10 @@
 | T7 | x | remove local-server requirement with background provider worker and automatic multi-endpoint contact resolution | V6,V7,I4 |
 | T8 | x | add OpenAI search-planning agent and direct background writing | V2,V6,I3 |
 | T9 | x | add named campaigns, profile save action, scoped totals, and export | V4,V8 |
+| T10 | x | restore popup ContactOut → LinkedIn contact fallback | V3,V7,V11,I4 |
 
 ## B — Bug history
 
 - **B1 · 2026-07-13 · V1.** The extractor assumed a `main h1` and `span[aria-hidden='true']` nodes. LinkedIn's current SDUI profile renders its top card with an `h2`, ordinary text nodes, and opaque classes, leaving headline, location, and experience empty even though they were visible.
 - **B2 · 2026-07-13 · V3.** Email extraction only inspected the base profile DOM, while LinkedIn exposes the address after its `ProfileContactDetailsOverlay` navigation renders a `mailto:` link.
+- **B3 · 2026-07-13 · V11.** Verified-only popup refactor returned on ContactOut miss or error → LinkedIn fallback never ran.

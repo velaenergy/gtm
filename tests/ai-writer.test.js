@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildWriterRequest, normalizeWriterResponse } from "../lib/ai-writer.js";
+import { buildWriterRequest, mergeEnrichedProfile, normalizeWriterResponse } from "../lib/ai-writer.js";
 import { buildOpenAIRequest, responseOutputText, writeOutreach } from "../server/openai-writer.mjs";
 
 test("builds a bounded writer payload from visible profile data", () => {
@@ -19,6 +19,26 @@ test("builds a bounded writer payload from visible profile data", () => {
   assert.equal(request.profile.experiences[0].details, "Builds grid software.");
   assert.equal(request.sender.name, "Tarun");
   assert.equal(request.personalizationNote, "their grid operations work");
+});
+
+test("grounds the writer in richer ContactOut profile context", () => {
+  const merged = mergeEnrichedProfile(
+    { name: "Alex Morgan", headline: "Operator", experiences: [{ title: "Old role", company: "Old Co" }] },
+    { emailSource: "ContactOut verified contact", profile: {
+      headline: "VP, Critical Operations",
+      about: "Runs mission-critical infrastructure.",
+      experiences: [{ title: "VP", company: "Grid Works", details: "Leads critical facilities." }],
+      company: { name: "Grid Works", industry: "Data Centers" },
+      industry: "Energy",
+      skills: ["Power", "Critical Facilities"],
+      source: "ContactOut",
+    } },
+  );
+  const request = buildWriterRequest(merged, { senderName: "Tarun" });
+  assert.equal(request.profile.headline, "VP, Critical Operations");
+  assert.equal(request.profile.experiences[0].details, "Leads critical facilities.");
+  assert.equal(request.profile.company.name, "Grid Works");
+  assert.deepEqual(request.profile.skills, ["Power", "Critical Facilities"]);
 });
 
 test("uses gpt-5.4-mini and strict structured output without storing the response", () => {

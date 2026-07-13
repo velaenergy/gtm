@@ -59,20 +59,20 @@
         <section class="tab-panel" data-panel="research">
           <section class="block email-block">
             <div class="block-heading">
-              <div><h2>Email</h2><p id="emailSource">Not found yet</p></div>
+              <div><h2>Verified work email</h2><p id="emailSource">ContactOut has not checked this profile yet</p></div>
               <span id="emailConfidence" class="confidence" hidden></span>
             </div>
             <div class="email-row">
-              <input id="emailInput" type="email" inputmode="email" autocomplete="off" aria-label="Prospect email" placeholder="Add or discover an email" />
+              <input id="emailInput" type="email" inputmode="email" autocomplete="off" aria-label="Prospect email" placeholder="No verified email yet" />
               <button id="copyEmailButton" class="quiet-button" type="button">Copy</button>
-              <button id="findEmailButton" class="primary-small" type="button"><span>Retry lookup</span></button>
+              <button id="findEmailButton" class="primary-small" type="button"><span>Find verified</span></button>
             </div>
             <div id="contactDetails" class="contact-details" hidden></div>
           </section>
 
           <section class="block">
-            <div class="block-heading"><div><h2>Personalization note</h2><p>Used in the email draft.</p></div></div>
-            <textarea id="workNote" class="work-note" rows="4" aria-label="Personalization note"></textarea>
+            <div class="block-heading personalization-heading"><div><h2>AI personalization</h2><p id="personalizationSource">Grounded in profile research</p></div><button id="rewritePersonalizationButton" class="writer-button" type="button"><span>Rewrite with AI</span></button></div>
+            <textarea id="workNote" class="work-note" rows="4" aria-label="Personalization note" placeholder="ContactOut research and the AI writer will build a specific note here."></textarea>
             <button id="addToCampaignButton" class="campaign-save-button" type="button">
               <span class="campaign-save-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M3.5 5.5h5l1.4 1.6h6.6v8.4h-13zM10 9v4M8 11h4"/></svg></span>
               <span class="campaign-save-copy"><strong>Add to campaign</strong><small>Save this profile and note</small></span>

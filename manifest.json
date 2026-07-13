@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Vela GTM",
   "description": "Turn LinkedIn profiles into researched, personalized Vela outreach drafts.",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "action": {
     "default_title": "Open Vela GTM",
     "default_popup": "popup.html",
@@ -29,6 +29,7 @@
     "https://gmail.googleapis.com/*",
     "https://sheets.googleapis.com/*",
     "https://api.contactout.com/*",
+    "https://api.apollo.io/*",
     "https://api.openai.com/*",
     "http://127.0.0.1/*",
     "http://localhost/*"

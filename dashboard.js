@@ -375,7 +375,7 @@ function renderSearchPlan(plan) {
     appendText(button, "strong", search.label);
     appendText(button, "p", `${search.query} — ${search.rationale}`);
     appendText(button, "b", "↗");
-    button.title = state.settings.contactOutApiKey ? "Find candidates with ContactOut" : "Open this search in LinkedIn";
+    button.title = state.settings.contactOutApiKey || state.settings.apolloApiKey ? `Find candidates with ${state.settings.contactOutApiKey ? "ContactOut" : "Apollo"}` : "Open this search in LinkedIn";
     button.addEventListener("click", () => runPlannedSearch(search));
     fragment.append(button);
   }
@@ -384,17 +384,18 @@ function renderSearchPlan(plan) {
 }
 
 async function runPlannedSearch(search) {
-  if (!state.settings.contactOutApiKey) {
+  if (!state.settings.contactOutApiKey && !state.settings.apolloApiKey) {
     await openLinkedInSearch(search.query);
     return;
   }
   try {
-    setBusy(true, "Finding people with ContactOut");
-    updateAgentActivity("source", "Searching ContactOut", "Matching titles, seniority, and profile keywords");
+    const provider = state.settings.apolloApiKey ? "Apollo" : "ContactOut";
+    setBusy(true, `Finding people with ${provider}`);
+    updateAgentActivity("source", `Searching ${provider}`, "Matching titles, seniority, and profile keywords");
     const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_PROVIDER_PEOPLE_SEARCH", filters: search.filters });
-    if (!response?.ok) throw new Error(response?.error || "ContactOut People Search failed.");
+    if (!response?.ok) throw new Error(response?.error || `${provider} People Search failed.`);
     const prospects = response.data?.prospects || [];
-    if (!prospects.length) throw new Error("ContactOut found no people for this strategy. Try a broader plan.");
+    if (!prospects.length) throw new Error(`${provider} found no people for this strategy. Try a broader plan.`);
     await addProspects(prospects, `Added ${prospects.length} of ${response.data.total || prospects.length} matching people.`);
   } catch (error) {
     showToast(error instanceof Error ? error.message : "People search failed.");
@@ -487,10 +488,22 @@ async function ensureOriginPermission(endpointUrl) {
 }
 
 async function callEnrichment(profile) {
-  if (state.settings.contactOutApiKey) {
-    const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_PROVIDER_CONTACTOUT", profile });
-    if (!response?.ok) throw new Error(response?.error || "ContactOut lookup failed.");
-    return normalizeEnrichmentResponse({ ...response.data, emailSource: response.data.source });
+  const providers = [state.settings.apolloApiKey ? "APOLLO" : "", state.settings.contactOutApiKey ? "CONTACTOUT" : ""].filter(Boolean);
+  if (providers.length) {
+    let lastError;
+    for (const provider of providers) {
+      try {
+        const response = await chrome.runtime.sendMessage({ type: `VELA_GTM_PROVIDER_${provider}`, profile });
+        if (!response?.ok) throw new Error(response?.error || `${provider} lookup failed.`);
+        const result = normalizeEnrichmentResponse({ ...response.data, emailSource: response.data.source });
+        const status = String(result.emailStatuses?.[result.email] || result.emailStatus || "").toLowerCase();
+        if (result.email && ["verified", "valid"].includes(status)) return result;
+        lastError = new Error(`${provider === "CONTACTOUT" ? "ContactOut" : "Apollo"} did not return an explicitly verified email.`);
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(`${provider} lookup failed.`);
+      }
+    }
+    throw lastError || new Error("No configured provider returned a verified email.");
   }
   if (!state.settings.endpointUrl) return {};
   const headers = { "Content-Type": "application/json", Accept: "application/json" };
@@ -535,7 +548,7 @@ async function researchProspect(prospect) {
     if (!profileResponse?.ok) throw new Error(profileResponse?.error || "Could not read the LinkedIn profile.");
     let profile = { ...profileResponse.profile, workNote: prospect.background || prospect.workNote };
 
-    const priorProviderEmail = /^ContactOut\b/i.test(prospect.emailSource || "")
+    const priorProviderEmail = /^(ContactOut|Apollo)\b/i.test(prospect.emailSource || "")
       || (prospect.contactDetails?.emails || []).includes(prospect.email);
     const preservedEmail = priorProviderEmail ? "" : prospect.email || "";
     let email = profile.visibleEmail || preservedEmail;
@@ -543,7 +556,7 @@ async function researchProspect(prospect) {
     let contactDetails = { emails: [], workEmails: [], personalEmails: [], phones: [], emailStatus: "", emailStatuses: {}, error: "" };
     let contactOutError = "";
     let workNote = prospect.background || buildWorkNote(profile);
-    if (state.settings.contactOutApiKey || state.settings.endpointUrl) {
+    if (state.settings.contactOutApiKey || state.settings.apolloApiKey || state.settings.endpointUrl) {
       try {
         const enriched = await callEnrichment(profile);
         if (enriched.email) { email = enriched.email; emailSource = enriched.emailSource || "Enrichment service"; }
@@ -564,8 +577,9 @@ async function researchProspect(prospect) {
           };
         }
       } catch (error) {
-        contactOutError = error instanceof Error ? error.message : "ContactOut lookup failed.";
-        contactDetails = { ...contactDetails, source: "ContactOut API error", error: contactOutError };
+    const provider = state.settings.apolloApiKey ? "Apollo" : "ContactOut";
+        contactOutError = error instanceof Error ? error.message : `${provider} lookup failed.`;
+        contactDetails = { ...contactDetails, source: `${provider} API error`, error: contactOutError };
       }
     }
     if (!email) {
@@ -630,13 +644,13 @@ async function processQueue(ids = null) {
   const candidates = scopedQueue().filter((item) => ids ? ids.includes(item.id) : [QUEUE_STATUS.NEW, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(item.status));
   if (!candidates.length) { showToast("There are no prospects waiting for research."); return; }
   try {
-    if (!state.settings.contactOutApiKey && state.settings.endpointUrl && !(await ensureOriginPermission(state.settings.endpointUrl))) throw new Error("Email enrichment access was declined.");
+    if (!state.settings.contactOutApiKey && !state.settings.apolloApiKey && state.settings.endpointUrl && !(await ensureOriginPermission(state.settings.endpointUrl))) throw new Error("Email enrichment access was declined.");
     if (!state.settings.openAIApiKey && state.settings.writerEndpointUrl && !(await ensureOriginPermission(state.settings.writerEndpointUrl))) throw new Error("AI writer access was declined.");
     setBusy(true);
     for (let index = 0; index < candidates.length; index += 1) {
       const current = candidates[index];
       elements.progressText.textContent = `Researching ${index + 1} of ${candidates.length}`;
-      updateAgentActivity("research", `Researching ${current.name || `prospect ${index + 1}`}`, `Profile ${index + 1} of ${candidates.length} - LinkedIn, ContactOut, and draft context`);
+      updateAgentActivity("research", `Researching ${current.name || `prospect ${index + 1}`}`, `Profile ${index + 1} of ${candidates.length} - LinkedIn, enrichment providers, and draft context`);
       state.queue = state.queue.map((item) => item.id === current.id ? { ...item, status: QUEUE_STATUS.PROCESSING, error: "" } : item);
       renderQueue();
       try {

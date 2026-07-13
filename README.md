@@ -5,7 +5,7 @@ An internal Chrome extension that turns a LinkedIn profile into a researched, ed
 Click the toolbar icon while viewing a `linkedin.com/in/...` profile and Vela GTM will:
 
 - read the public profile details already visible in the active tab;
-- automatically query ContactOut and fall back to LinkedIn Contact Info without requiring a lookup click;
+- automatically query Apollo first, then ContactOut, then LinkedIn Contact Info, using only an address explicitly verified for that prospect;
 - build an editable work note from the prospect’s current and prior roles;
 - plan searches and generate grounded drafts with `gpt-5.4-mini` from the extension background worker;
 - fill one of three outreach plays, including the Vela “quick intro + pick your brain” email;
@@ -28,6 +28,18 @@ The **Campaigns** action opens a larger prospecting workspace. From there the te
 
 The extension does **not** invent email addresses, reuse captured HAR credentials, or send messages silently. This internal build can store provider keys in the current Chrome profile; they are read only by the background worker and never injected into LinkedIn pages.
 
+Apollo is supported as a second enrichment agent. Add an Apollo API key in **Settings → Agent credentials** to use Apollo people matching and People Search. When both keys are present, ContactOut runs first and Apollo automatically gets a chance if ContactOut errors or does not return an explicitly verified email. Apollo requests use the documented `x-api-key` header and retry one rate-limited request after `Retry-After`.
+
+## Managed Chrome install
+
+The signed release extension ID is `mecnpdbecgmgjolcdldhkeplheojjpki`. In the managed Chrome dialog, enter that ID and use this custom update URL:
+
+```
+https://raw.githubusercontent.com/velaenergy/gtm/main/updates.xml
+```
+
+The update manifest points to the signed CRX published in each GitHub Release. Keep the signing key outside Git and reuse it for every release; changing it changes the extension ID and breaks managed updates.
+
 ## Install locally
 
 1. Open `chrome://extensions` in Chrome.
@@ -45,9 +57,11 @@ If the profile was already open when you installed or reloaded the extension, Ve
 
 **Find email** first asks LinkedIn's current contact-details RSC route for the profile's `ProfileContactDetailsOverlay` and extracts the returned `mailto:` address. This uses the active page's current session and constructs a fresh request; no cookie or CSRF value is copied from a HAR file. If LinkedIn rejects or changes that internal route, Vela GTM clicks the profile's official `/overlay/contact-info/` link, reads the rendered `mailto:`, and closes the overlay.
 
-Email resolution starts automatically when the popup opens. The background worker calls ContactOut's Contact Info API with real-time work-email lookup, then People Enrich, then the broad LinkedIn Profile API. If those miss, it checks LinkedIn Contact Info. All returned addresses and verification status are shown in the popup, while a work email remains the preferred draft recipient.
+Email resolution starts automatically when the popup opens. The background worker calls Apollo People Bulk Match first using the LinkedIn URL and extracted name, then ContactOut's Contact Info → People Enrich → broad LinkedIn Profile chain, then LinkedIn Contact Info as the final browser-session fallback. When enrichment returns a candidate without a conclusive per-address status, Vela checks it with ContactOut's Email Verifier and accepts only `valid`; `accept_all`, `invalid`, `disposable`, `unknown`, unverified, mixed-status, LinkedIn-visible, manually entered, and placeholder addresses are never presented as verified. Candidate verification is cached for the lookup so the same address is not charged twice across fallback endpoints.
 
-Add the ContactOut and OpenAI keys in **Settings → Agent credentials** and save. The ContactOut value must be an API token issued for API access; a browser Pro subscription or browser-session credential is not interchangeable with an API token. Use **Test ContactOut API** after saving to validate the token through `/v1/stats` without performing a contact lookup. No localhost process is needed. ContactOut People Search powers AI-planned discovery, returning up to 10 queue candidates per selected strategy without revealing their contact information until research runs.
+After a verified lookup, Vela passes the bounded LinkedIn and Apollo/ContactOut work context to the configured OpenAI Responses API writer. Structured output returns the personalization note, subject, and complete message together, and the popup labels the resulting copy with the model used. **Rewrite with AI** regenerates all three from the same grounded context.
+
+Add the ContactOut and OpenAI keys in **Settings → Agent credentials** and save. The ContactOut value must be an API token with usable credits and Contact Info, People Enrich, and Email Verifier access; a browser Pro subscription or browser-session credential is not interchangeable with that token. A real dashboard-issued key can still be unusable when its credits are exhausted or an endpoint has not been enabled. In that state ContactOut may return its static `example-person` / `email1@example.com` documentation fixture rather than the requested prospect. **Test ContactOut API** detects that response and reports the account-access problem before a contact lookup. No localhost process is needed. ContactOut People Search powers AI-planned discovery, returning up to 10 queue candidates per selected strategy without revealing their contact information until research runs.
 
 Direct ContactOut requests include the documented `authorization: basic` and `token` headers. A `429` honors `Retry-After` and retries once; Vela does not rotate credentials or bypass ContactOut's request-per-minute or credit limits.
 
