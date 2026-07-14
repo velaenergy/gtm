@@ -45,12 +45,41 @@ async function enablePersistentSidePanel() {
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 }
 
-async function openSidePanelForTab(sender = {}) {
+function tabIdFromSender(sender = {}) {
   const tabId = sender.tab?.id;
   if (!Number.isInteger(tabId)) throw new Error("Vela GTM could not identify this LinkedIn tab.");
-  if (!chrome.sidePanel?.open) throw new Error("Update Chrome to open Vela GTM from LinkedIn.");
-  await chrome.sidePanel.open({ tabId });
-  return { opened: true };
+  return tabId;
+}
+
+async function configureSidePanelForTab(sender = {}) {
+  const tabId = tabIdFromSender(sender);
+  if (!chrome.sidePanel?.setOptions) throw new Error("Update Chrome to configure Vela GTM on LinkedIn.");
+  await chrome.sidePanel.setOptions({ tabId, path: "popup.html", enabled: true });
+  return { configured: true };
+}
+
+function openSidePanelFromMessage(sender = {}, sendResponse) {
+  let tabId;
+  try {
+    tabId = tabIdFromSender(sender);
+  } catch (error) {
+    sendResponse({ ok: false, error: error instanceof Error ? error.message : "Could not identify this LinkedIn tab." });
+    return false;
+  }
+  if (!chrome.sidePanel?.open) {
+    sendResponse({ ok: false, error: "Update Chrome to open Vela GTM from LinkedIn." });
+    return false;
+  }
+
+  // Invoke open() directly in the message event spawned by the click. Chrome
+  // requires this call to remain associated with the originating user gesture.
+  chrome.sidePanel.open({ tabId })
+    .then(() => sendResponse({ ok: true, data: { opened: true } }))
+    .catch((error) => sendResponse({
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not open Vela GTM.",
+    }));
+  return true;
 }
 
 async function maintainWorkspaceBackup() {
@@ -251,12 +280,15 @@ async function restoreScheduledAlarms() {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "VELA_GTM_OPEN_SIDE_PANEL") {
+    return openSidePanelFromMessage(sender, sendResponse);
+  }
   const supported = message?.type?.startsWith("VELA_GTM_PROVIDER_")
     || message?.type?.startsWith("VELA_GTM_CONTACTOUT_SESSION_")
-    || ["VELA_GTM_EMAIL_SEND", "VELA_GTM_EMAIL_SCHEDULE", "VELA_GTM_EMAIL_SCHEDULE_CANCEL", "VELA_GTM_OPEN_SIDE_PANEL"].includes(message?.type);
+    || ["VELA_GTM_CONFIGURE_SIDE_PANEL", "VELA_GTM_EMAIL_SEND", "VELA_GTM_EMAIL_SCHEDULE", "VELA_GTM_EMAIL_SCHEDULE_CANCEL"].includes(message?.type);
   if (!supported) return false;
   (async () => {
-    if (message.type === "VELA_GTM_OPEN_SIDE_PANEL") return openSidePanelForTab(sender);
+    if (message.type === "VELA_GTM_CONFIGURE_SIDE_PANEL") return configureSidePanelForTab(sender);
     if (message.type === "VELA_GTM_EMAIL_SEND") return sendDelivery(message.delivery);
     if (message.type === "VELA_GTM_EMAIL_SCHEDULE") return scheduleDelivery(message.delivery);
     if (message.type === "VELA_GTM_EMAIL_SCHEDULE_CANCEL") return cancelScheduledJob(message.id);

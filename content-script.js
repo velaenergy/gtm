@@ -11,11 +11,19 @@
 
   const { cleanText, emailFromFlightResponse, emailFromMailto, memberIdFromMarkup, parseExperienceLines, parseTopCardLines, uniqueLines } = parser;
 
-  function mountVelaLauncher() {
+  async function mountVelaLauncher() {
     if (!launcher || document.getElementById("vela-gtm-linkedin-launcher")) return;
+    try {
+      const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_CONFIGURE_SIDE_PANEL" });
+      if (!response?.ok) throw new Error(response?.error || "Could not configure Vela GTM.");
+    } catch (error) {
+      console.error("Could not prepare the Vela GTM launcher. Refresh this LinkedIn page after reloading the extension.", error);
+      return;
+    }
+
     const host = document.createElement("div");
     host.id = "vela-gtm-linkedin-launcher";
-    host.style.cssText = "position:fixed;right:0;top:44vh;z-index:2147483646;display:none";
+    host.style.cssText = "position:fixed;right:0;top:44vh;z-index:2147483647;display:none;pointer-events:auto";
     const shadow = host.attachShadow({ mode: "closed" });
     const style = document.createElement("style");
     style.textContent = `
@@ -85,7 +93,7 @@
     setInterval(updateVisibility, 750);
   }
 
-  mountVelaLauncher();
+  mountVelaLauncher().catch((error) => console.error("Could not mount the Vela GTM launcher.", error));
 
   function isVisible(node) {
     const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
