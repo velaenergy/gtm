@@ -21,5 +21,5 @@ test("upsert preserves drafted state for repeated imports", () => {
   assert.equal(updated.length, 1);
   assert.equal(updated[0].status, QUEUE_STATUS.DRAFTED);
   assert.equal(updated[0].background, "New signal");
-  assert.deepEqual(queueStats(updated), { total: 1, ready: 0, drafted: 1, attention: 0 });
+  assert.deepEqual(queueStats(updated), { total: 1, ready: 0, drafted: 1, sent: 0, attention: 0 });
 });

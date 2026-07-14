@@ -20,7 +20,7 @@
         <span id="previewBadge" class="preview-badge" hidden>Preview</span>
         <button id="queueButton" class="queue-button" type="button">Campaigns</button>
         <button id="settingsButton" class="icon-button" type="button" aria-label="Open settings" title="Open settings">
-          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3"/><path d="M10 2.8v1.4M10 15.8v1.4M17.2 10h-1.4M4.2 10H2.8M15.1 4.9l-1 1M5.9 14.1l-1 1M15.1 15.1l-1-1M5.9 5.9l-1-1"/></svg>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5.25h8.5M15.5 5.25H17M3 10h2.5M9.5 10H17M3 14.75h7.5M14.5 14.75H17"/><circle cx="13.5" cy="5.25" r="2"/><circle cx="7.5" cy="10" r="2"/><circle cx="12.5" cy="14.75" r="2"/></svg>
         </button>
       </div>
     </header>
@@ -33,9 +33,11 @@
       </section>
 
       <section id="pageGate" class="state-view" hidden>
-        <span class="linkedin-mark" aria-hidden="true">in</span>
-        <h1>Open a LinkedIn profile</h1>
-        <p>Vela GTM works on pages beginning with <strong>linkedin.com/in/</strong>.</p>
+        <span class="sidepanel-orbit" aria-hidden="true"><i></i><i></i><i></i></span>
+        <p class="state-kicker">Persistent browser workspace</p>
+        <h1>Vela is ready when you are</h1>
+        <p>Keep this panel open while you browse. Open any LinkedIn profile and Vela will switch to that person automatically.</p>
+        <button id="gateWorkspaceButton" class="gate-workspace-button" type="button">Open GTM workspace <span aria-hidden="true">↗</span></button>
       </section>
 
       <div id="workspace" hidden>
@@ -51,16 +53,17 @@
           </div>
         </section>
 
-        <nav class="tabs" aria-label="Prospect workflow">
-          <button class="tab-button" type="button" data-tab="research" aria-selected="true">Research</button>
-          <button class="tab-button" type="button" data-tab="draft" aria-selected="false">Email</button>
-        </nav>
-
-        <section class="tab-panel" data-panel="research">
-          <section class="block email-block">
+        <div class="workflow">
+          <section id="contactStep" class="block workflow-step email-block">
             <div class="block-heading">
-              <div><h2>Verified work email</h2><p id="emailSource">ContactOut has not checked this profile yet</p></div>
-              <span id="emailConfidence" class="confidence" hidden></span>
+              <div class="step-heading">
+                <span class="step-number" aria-hidden="true">1</span>
+                <div><h2>Choose an email</h2><p id="emailSource">ContactOut has not checked this profile yet</p></div>
+              </div>
+              <div class="contact-status">
+                <span id="contactOutBalance" class="credit-balance" hidden></span>
+                <span id="emailConfidence" class="confidence" hidden></span>
+              </div>
             </div>
             <div class="email-row">
               <input id="emailInput" type="email" inputmode="email" autocomplete="off" aria-label="Prospect email" placeholder="No verified email yet" />
@@ -70,45 +73,68 @@
             <div id="contactDetails" class="contact-details" hidden></div>
           </section>
 
-          <section class="block">
-            <div class="block-heading personalization-heading"><div><h2>AI personalization</h2><p id="personalizationSource">Grounded in profile research</p></div><button id="rewritePersonalizationButton" class="writer-button" type="button"><span>Rewrite with AI</span></button></div>
-            <textarea id="workNote" class="work-note" rows="4" aria-label="Personalization note" placeholder="ContactOut research and the AI writer will build a specific note here."></textarea>
+          <section id="personalizationStep" class="block workflow-step personalization-block">
+            <div class="block-heading personalization-heading">
+              <div class="step-heading">
+                <span class="step-number" aria-hidden="true">2</span>
+                <div><h2>Review the opener</h2><p id="personalizationSource">Grounded in profile research</p></div>
+              </div>
+              <button id="rewritePersonalizationButton" class="writer-button" type="button"><span>Rewrite</span></button>
+            </div>
+            <div class="personalization-preview"><span>Why I'm reaching out</span><textarea id="workNote" class="work-note" rows="3" aria-label="AI-written personalized opener" placeholder="A specific, natural reason for reaching out will appear here…"></textarea></div>
+          </section>
+
+          <details id="emailDraftDisclosure" class="block draft-disclosure">
+            <summary>
+              <span class="step-number" aria-hidden="true">3</span>
+              <span class="draft-summary-copy"><strong>Review email</strong><small id="templateEyebrow">Pick their brain</small></span>
+              <span class="disclosure-label">Optional</span>
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6.5 8 3.5 3.5L13.5 8"/></svg>
+            </summary>
+            <div class="composer-block">
+              <div class="composer-tools">
+                <label class="template-control"><span>Template</span><select id="templateSelect" aria-label="Outreach template"></select></label>
+                <button id="generateEmailButton" class="writer-button" type="button"><span>Write with AI</span></button>
+              </div>
+              <label class="composer-field"><span>Subject</span><input id="subjectInput" type="text" autocomplete="off" /></label>
+              <label class="composer-field"><span>Message</span><textarea id="bodyInput" rows="12"></textarea></label>
+              <div class="composer-meta"><span>Your template remains editable</span><span id="wordCount">0 words</span></div>
+            </div>
+          </details>
+
+          <div class="secondary-workflow">
             <button id="addToCampaignButton" class="campaign-save-button" type="button">
               <span class="campaign-save-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M3.5 5.5h5l1.4 1.6h6.6v8.4h-13zM10 9v4M8 11h4"/></svg></span>
               <span class="campaign-save-copy"><strong>Add to campaign</strong><small>Save this profile and note</small></span>
               <span class="campaign-save-arrow" aria-hidden="true">›</span>
             </button>
-          </section>
-
-          <section class="block signals-block">
-            <div class="block-heading">
-              <div><h2>Work history</h2><p>Roles visible on this profile.</p></div>
-              <span id="signalCount" class="count">0 found</span>
-            </div>
-            <div id="experienceList" class="experience-list"></div>
-          </section>
-        </section>
-
-        <section class="tab-panel" data-panel="draft" hidden>
-          <section class="block composer-block">
-            <div class="block-heading composer-heading">
-              <div><h2>Email draft</h2><p id="templateEyebrow">Pick their brain</p></div>
-              <div class="composer-tools">
-                <button id="generateEmailButton" class="writer-button" type="button"><span>Write with AI</span></button>
-                <label class="template-control"><span>Template</span><select id="templateSelect" aria-label="Outreach template"></select></label>
-              </div>
-            </div>
-            <label class="composer-field"><span>Subject</span><input id="subjectInput" type="text" autocomplete="off" /></label>
-            <label class="composer-field"><span>Message</span><textarea id="bodyInput" rows="14"></textarea></label>
-            <div class="composer-meta"><span>Review before sending</span><span id="wordCount">0 words</span></div>
-          </section>
-        </section>
+            <details class="signals-block">
+              <summary><span>Profile context</span><span id="signalCount" class="count">0 roles</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6.5 8 3.5 3.5L13.5 8"/></svg></summary>
+              <div id="experienceList" class="experience-list"></div>
+            </details>
+          </div>
+        </div>
       </div>
     </main>
 
     <footer id="actionBar" class="action-bar" hidden>
-      <button id="copyDraftButton" class="secondary-button" type="button">Copy draft</button>
-      <button id="openGmailButton" class="gmail-button" type="button">Open in Gmail <span aria-hidden="true">↗</span></button>
+      <div class="delivery-controls">
+        <button id="deliveryAccountButton" class="delivery-account" type="button">
+          <span>Send from</span>
+          <strong id="deliveryAccount">Connect Gmail in Settings</strong>
+          <i aria-hidden="true">›</i>
+        </button>
+        <label class="schedule-control">
+          <span class="schedule-copy"><strong>Schedule sends</strong><small id="scheduleHint">Send immediately</small></span>
+          <input id="scheduleToggle" type="checkbox" />
+          <i class="schedule-switch" aria-hidden="true"></i>
+          <input id="scheduleTime" type="time" value="09:00" aria-label="Default scheduled send time" />
+        </label>
+      </div>
+      <div class="delivery-actions">
+        <button id="copyDraftButton" class="secondary-button" type="button">Copy draft</button>
+        <button id="sendEmailButton" class="gmail-button" type="button">Send email</button>
+      </div>
     </footer>
 
     <dialog id="campaignDialog" class="campaign-dialog" aria-labelledby="campaignDialogTitle">

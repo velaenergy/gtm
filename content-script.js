@@ -8,7 +8,7 @@
     throw new Error("Vela GTM profile parser did not load.");
   }
 
-  const { cleanText, emailFromFlightResponse, emailFromMailto, parseExperienceLines, parseTopCardLines, uniqueLines } = parser;
+  const { cleanText, emailFromFlightResponse, emailFromMailto, memberIdFromMarkup, parseExperienceLines, parseTopCardLines, uniqueLines } = parser;
 
   function isVisible(node) {
     const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
@@ -133,25 +133,32 @@
     const csrfToken = currentCsrfToken();
     if (csrfToken) headers["csrf-token"] = csrfToken;
 
-    const response = await fetch(endpoint, {
-      method: "POST",
-      credentials: "include",
-      headers,
-      body: JSON.stringify({
-        clientArguments: {
-          $type: "proto.sdui.actions.requests.RequestedArguments",
-          payload: { vanityName, givenName, familyName, isVanityNameResolved: true },
-          requestedStateKeys: [],
-          requestMetadata: { $type: "proto.sdui.common.RequestMetadata" },
-          states: [],
-          screenId,
-        },
-        isModal: true,
-      }),
-    });
-    if (!response.ok) throw new Error(`LinkedIn contact details returned ${response.status}.`);
-    const flight = await response.text();
-    return emailFromFlightResponse(flight);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3500);
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        credentials: "include",
+        headers,
+        signal: controller.signal,
+        body: JSON.stringify({
+          clientArguments: {
+            $type: "proto.sdui.actions.requests.RequestedArguments",
+            payload: { vanityName, givenName, familyName, isVanityNameResolved: true },
+            requestedStateKeys: [],
+            requestMetadata: { $type: "proto.sdui.common.RequestMetadata" },
+            states: [],
+            screenId,
+          },
+          isModal: true,
+        }),
+      });
+      if (!response.ok) throw new Error(`LinkedIn contact details returned ${response.status}.`);
+      const flight = await response.text();
+      return emailFromFlightResponse(flight);
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   function closeContactOverlay() {
@@ -174,7 +181,7 @@
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
   }
 
-  function waitForContactEmail(timeout = 9000) {
+  function waitForContactEmail(timeout = 6500) {
     const immediate = emailFromContactOverlay();
     if (immediate) return Promise.resolve(immediate);
 
@@ -237,6 +244,7 @@
     const fallbackName = cleanText(jsonLd.name || document.title.split("|")[0]);
     const top = parseTopCardLines(textLines(topCard), headingName || fallbackName);
 
+    const vanityName = window.location.pathname.match(/^\/in\/([^/]+)/i)?.[1] || "";
     return {
       name: top.name,
       headline: top.headline || cleanText(jsonLd.jobTitle),
@@ -244,6 +252,7 @@
       about: extractAbout(),
       experiences: extractExperience(),
       visibleEmail: extractVisibleEmail(),
+      memberId: memberIdFromMarkup(document.documentElement.innerHTML, vanityName),
       url: `${window.location.origin}${window.location.pathname}`,
       capturedAt: new Date().toISOString(),
     };

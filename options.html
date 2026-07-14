@@ -54,39 +54,114 @@
           <div class="section-heading inline-heading">
             <div>
               <h2 id="credentialsHeading">Agent credentials</h2>
-              <p>Direct provider access for this internal Chrome profile.</p>
+              <p>Connect the browser session used for contact research and add optional fallbacks.</p>
             </div>
             <span id="agentServerState" class="permission-state">Keys needed</span>
           </div>
+          <div id="contactOutSessionCard" class="contactout-session-card" data-state="checking">
+            <div class="contactout-session-summary">
+              <span class="contactout-session-dot" aria-hidden="true"></span>
+              <div class="contactout-session-copy">
+                <span>Browser session · Primary</span>
+                <strong id="contactOutSessionTitle">Checking ContactOut…</strong>
+                <p id="contactOutSessionDetail">Verifying the ContactOut login in this Chrome profile.</p>
+              </div>
+            </div>
+            <span id="contactOutSessionState" class="permission-state">Checking</span>
+            <div id="contactOutSessionAccount" class="contactout-session-account" hidden>
+              <div><span>Signed in as</span><strong id="contactOutSessionAccountEmail">ContactOut account</strong></div>
+              <div><span>Email credits</span><strong id="contactOutSessionCredits">—</strong></div>
+            </div>
+            <div class="contactout-session-actions">
+              <button id="connectContactOutSessionButton" class="provider-test session-primary-action" type="button">Sign in to ContactOut</button>
+              <button id="checkContactOutSessionButton" class="provider-test" type="button">Check again</button>
+            </div>
+            <p id="contactOutSessionHint" class="contactout-session-hint">Vela checks the normal ContactOut page in this browser. Cookies never leave ContactOut.</p>
+          </div>
+          <label class="switch-row session-switch">
+            <span><strong>Use signed-in ContactOut session</strong><small>Manual profile lookups reveal one contact and show the remaining balance in the side panel.</small></span>
+            <input id="contactOutSessionEnabled" type="checkbox" />
+            <i aria-hidden="true"></i>
+          </label>
           <div class="field-grid">
             <label class="field">
-              <span>ContactOut API key</span>
-              <input id="contactOutApiKey" type="password" autocomplete="off" placeholder="Paste your ContactOut key" />
-              <small>Automatic contact lookup and People Search.</small>
+              <span>ContactOut API token <em>Optional fallback</em></span>
+              <div class="password-wrap">
+                <input id="contactOutApiKey" type="password" autocomplete="off" placeholder="Paste your ContactOut key" />
+                <button type="button" data-secret-toggle="contactOutApiKey">Show</button>
+              </div>
+              <small>Used only if the browser session fails, and for ContactOut People Search.</small>
             </label>
             <label class="field">
               <span>Apollo API key</span>
-              <input id="apolloApiKey" type="password" autocomplete="off" placeholder="Paste your Apollo key" />
-              <small>First-pass contact enrichment and People Search provider.</small>
+              <div class="password-wrap">
+                <input id="apolloApiKey" type="password" autocomplete="off" placeholder="Paste your Apollo key" />
+                <button type="button" data-secret-toggle="apolloApiKey">Show</button>
+              </div>
+              <small>Optional fallback when ContactOut does not return a verified address.</small>
             </label>
             <label class="field">
               <span>OpenAI API key</span>
-              <input id="openAIApiKey" type="password" autocomplete="off" placeholder="Paste your OpenAI key" />
+              <div class="password-wrap">
+                <input id="openAIApiKey" type="password" autocomplete="off" placeholder="Paste your OpenAI key" />
+                <button type="button" data-secret-toggle="openAIApiKey">Show</button>
+              </div>
               <small>Search planning and personalized drafts.</small>
             </label>
           </div>
-          <div class="provider-actions">
+          <div class="contactout-api-check">
+            <div>
+              <span>API fallback</span>
+              <strong id="contactOutApiState">Not configured</strong>
+              <p id="contactOutApiDetail">Optional. Used only when the browser session cannot return a result, and for People Search.</p>
+            </div>
             <button id="testContactOutButton" class="provider-test" type="button">Test ContactOut API</button>
-            <span id="contactOutApiState" class="permission-state">Not tested</span>
+          </div>
+          <div class="provider-actions apollo-actions">
             <button id="testApolloButton" class="provider-test" type="button">Test Apollo API</button>
             <span id="apolloApiState" class="permission-state">Not tested</span>
           </div>
-          <p class="security-note"><strong>No local server required.</strong> Keys are stored in this Chrome profile and read only by Vela GTM’s background worker—not LinkedIn. A production deployment should move them to Vela’s secret manager.</p>
+          <p class="security-note"><strong>No HAR replay.</strong> ContactOut requests run inside a normal ContactOut page so its own site owns login, session rotation, CSRF, and Cloudflare state. Optional API keys stay in this Chrome profile and are read only by Vela GTM’s background worker.</p>
           <label class="switch-row">
-            <span><strong>Reveal phone numbers</strong><small>Optional. Uses credits from the active enrichment provider.</small></span>
+            <span><strong>Reveal phone numbers</strong><small>Optional for documented API providers. The browser-session flow currently requests email reveals only.</small></span>
             <input id="includeContactOutPhone" type="checkbox" />
             <i aria-hidden="true"></i>
           </label>
+        </section>
+
+        <section class="settings-section generation-section" aria-labelledby="generationHeading">
+          <div class="section-heading inline-heading">
+            <div>
+              <h2 id="generationHeading">Email generation</h2>
+              <p>Decide exactly how much of the final message AI is allowed to write.</p>
+            </div>
+            <span class="permission-state has-access">Human review</span>
+          </div>
+          <div class="generation-options" role="radiogroup" aria-label="AI generation mode">
+            <label class="generation-option">
+              <input type="radio" name="aiGenerationMode" value="personalization" />
+              <span class="generation-radio" aria-hidden="true"></span>
+              <span><strong>Personalization only</strong><small>AI writes the short <code>{{workNote}}</code> phrase. Your template stays unchanged.</small></span>
+              <em>Recommended</em>
+            </label>
+            <label class="generation-option">
+              <input type="radio" name="aiGenerationMode" value="full" />
+              <span class="generation-radio" aria-hidden="true"></span>
+              <span><strong>Entire email</strong><small>AI may rewrite the subject, message, and personalization phrase from grounded profile context.</small></span>
+            </label>
+          </div>
+          <div class="template-editor">
+            <div class="template-editor-head">
+              <div><strong>Email templates</strong><small>Create reusable plays, then choose one from the profile popup.</small></div>
+              <button id="addTemplateButton" class="template-add" type="button">+ Add template</button>
+            </div>
+            <div id="templateList" class="template-list" role="tablist" aria-label="Email templates"></div>
+            <div class="template-variable-row"><span>Available variables</span><code>{{firstName}}</code> <code>{{workNote}}</code> <code>{{workNoteSentence}}</code> <code>{{shortRole}}</code> <code>{{senderName}}</code> <code>{{calendarUrl}}</code></div>
+            <label class="field"><span>Template name</span><input id="templateName" type="text" maxlength="60" autocomplete="off" /></label>
+            <label class="field"><span>Subject</span><input id="templateSubject" type="text" autocomplete="off" placeholder="Quick intro + would love to pick your brain" /></label>
+            <label class="field"><span>Message</span><textarea id="templateBody" rows="11" spellcheck="true"></textarea></label>
+            <div class="template-actions"><button id="deleteTemplateButton" type="button">Delete template</button><span>At least one template is required.</span></div>
+          </div>
         </section>
 
         <section class="settings-section" aria-labelledby="enrichmentHeading">
@@ -115,7 +190,7 @@
           <label class="switch-row">
             <span>
               <strong>Research contacts automatically</strong>
-              <small>Apollo first, ContactOut second, then LinkedIn Contact Info.</small>
+              <small>Opening a new LinkedIn profile runs ContactOut, AI personalization, and configured fallbacks automatically.</small>
             </span>
             <input id="autoEnrich" type="checkbox" />
             <i aria-hidden="true"></i>
@@ -161,17 +236,69 @@
         <section class="settings-section" aria-labelledby="gmailHeading">
           <div class="section-heading inline-heading">
             <div>
-              <h2 id="gmailHeading">Gmail drafts</h2>
-              <p>Choose the exact Google account used for Gmail drafts and Sheets exports. Vela never sends automatically.</p>
+              <h2 id="gmailHeading">Email delivery</h2>
+              <p>Choose whether Vela opens your email app or sends through a connected Gmail account.</p>
             </div>
             <span id="gmailState" class="permission-state">Not connected</span>
           </div>
-          <p class="security-note gmail-note">Chrome extension ID: <code id="extensionId">preview</code>. Create a Google OAuth client for this ID, place it in <code>manifest.json</code>, then reload Vela GTM.</p>
-          <p id="gmailAccountDetail" class="security-note gmail-account-detail">No Google account selected.</p>
-          <div class="gmail-actions">
-            <button id="connectGmailButton" class="gmail-connect" type="button">Connect Gmail</button>
-            <button id="disconnectGmailButton" class="gmail-disconnect" type="button" hidden>Disconnect</button>
+          <div class="generation-options delivery-method-options" role="radiogroup" aria-label="Email delivery method">
+            <label class="generation-option">
+              <input type="radio" name="deliveryMethod" value="mailto" />
+              <span class="generation-radio" aria-hidden="true"></span>
+              <span><strong>Default email app</strong><small>Open a prefilled <code>mailto:</code> draft for manual review and sending. No Gmail connection required.</small></span>
+              <em>Manual</em>
+            </label>
+            <label class="generation-option">
+              <input type="radio" name="deliveryMethod" value="gmail" />
+              <span class="generation-radio" aria-hidden="true"></span>
+              <span><strong>Connected Gmail sender</strong><small>Send immediately or schedule through the exact Google account selected below.</small></span>
+            </label>
           </div>
+          <div id="gmailConnectionSetup">
+            <p class="security-note gmail-note">Chrome extension ID: <code id="extensionId">preview</code>. Google asks for Gmail send access and the selected account's email label; Vela cannot read the inbox.</p>
+            <div class="google-chooser-setup">
+              <div class="google-chooser-heading">
+                <div><span>Account chooser setup</span><strong id="googleChooserState">Web OAuth client needed</strong></div>
+                <span class="permission-state">One-time admin setup</span>
+              </div>
+              <label class="field google-client-field">
+                <span>Google Web OAuth client ID <em>Enables account choice</em></span>
+                <input id="googleWebClientId" type="text" inputmode="text" autocomplete="off" placeholder="…apps.googleusercontent.com" />
+                <small>Create a Web application client in the same Google Cloud project, paste its client ID here, then save.</small>
+              </label>
+              <div class="google-redirect-row">
+                <div><span>Authorized redirect URI</span><code id="googleRedirectUri">Available after loading the extension</code></div>
+                <button id="copyGoogleRedirectButton" class="provider-test" type="button">Copy URI</button>
+              </div>
+            </div>
+            <p id="gmailAccountDetail" class="security-note gmail-account-detail">No Gmail sender connected.</p>
+            <div class="gmail-actions">
+              <button id="connectGmailButton" class="gmail-connect" type="button">Choose Gmail sender</button>
+              <button id="disconnectGmailButton" class="gmail-disconnect" type="button" hidden>Disconnect</button>
+            </div>
+          </div>
+          <label class="switch-row recipient-mode-switch">
+            <span><strong>Allow multiple recipient emails</strong><small>Off by default. Turn this on to select and send separate copies to more than one verified address for a prospect.</small></span>
+            <input id="allowMultipleRecipients" type="checkbox" />
+            <i aria-hidden="true"></i>
+          </label>
+        </section>
+
+        <section class="settings-section" aria-labelledby="diagnosticsHeading">
+          <div class="section-heading inline-heading">
+            <div>
+              <h2 id="diagnosticsHeading">Contact diagnostics</h2>
+              <p>Shows the last safe provider stages so failed browser-session requests can be located precisely.</p>
+            </div>
+            <span id="diagnosticState" class="permission-state">No events</span>
+          </div>
+          <div class="diagnostic-actions">
+            <button id="refreshDiagnosticsButton" class="provider-test" type="button">Refresh log</button>
+            <button id="copyDiagnosticsButton" class="provider-test" type="button">Copy safe log</button>
+            <button id="clearDiagnosticsButton" class="provider-test" type="button">Clear</button>
+          </div>
+          <pre id="diagnosticLog" class="diagnostic-log" aria-live="polite">No diagnostic events yet.</pre>
+          <p class="security-note"><strong>Redacted by design.</strong> This log never stores cookies, CSRF values, API keys, email addresses, phone numbers, names, LinkedIn URLs, or ContactOut UUIDs.</p>
         </section>
 
         <section class="settings-section" aria-labelledby="senderHeading">
@@ -197,16 +324,6 @@
         </div>
       </form>
     </main>
-    <dialog id="googleAccountDialog" class="account-dialog">
-      <form method="dialog" class="account-card">
-        <header><div><span>Google connection</span><h2>Choose an account</h2></div><button type="submit" value="cancel" aria-label="Close account chooser">×</button></header>
-        <p>Vela requests Gmail draft and Google Sheets access for the account you select.</p>
-        <div id="googleAccountList" class="google-account-list"></div>
-        <small>To use another address, sign it into this Chrome profile first, then reopen this chooser.</small>
-        <footer><button type="submit" value="cancel">Cancel</button></footer>
-      </form>
-    </dialog>
-
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script type="module" src="options.js"></script>
   </body>

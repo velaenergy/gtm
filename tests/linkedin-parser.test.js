@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 await import("../lib/linkedin-parser.js");
 
-const { emailFromFlightResponse, emailFromMailto, parseExperienceLines, parseTopCardLines } = globalThis.VelaLinkedInParser;
+const { emailFromFlightResponse, emailFromMailto, memberIdFromMarkup, parseExperienceLines, parseTopCardLines } = globalThis.VelaLinkedInParser;
 
 test("V3 extracts and validates an email from the rendered contact overlay mailto", () => {
   assert.equal(emailFromMailto("mailto:alex%40relay.energy?subject=Hello"), "alex@relay.energy");
@@ -64,4 +64,10 @@ test("parses dated experience rows from hydrated SDUI text", () => {
       details: "",
     },
   ]);
+});
+
+test("recovers the numeric LinkedIn member id nearest the active vanity name", () => {
+  const markup = `{"entityUrn":"urn:li:fsd_profile:123456789","publicIdentifier":"alex-morgan"}`;
+  assert.equal(memberIdFromMarkup(markup, "alex-morgan"), 123456789);
+  assert.equal(memberIdFromMarkup(markup, "someone-else"), 0);
 });

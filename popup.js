@@ -1,17 +1,29 @@
 import {
   DEFAULT_SETTINGS,
-  TEMPLATES,
   applyTemplate,
+  emailTemplates,
   gmailComposeUrl,
+  mailtoComposeUrl,
   initialsFor,
   isEmail,
+  migrateLegacyQuickIntroDraft,
   normalizeEnrichmentResponse,
+  normalizeRecipientSelection,
   resolveTheme,
   templateVariables,
 } from "./lib/message.js";
-import { buildWriterRequest, mergeEnrichedProfile, normalizeWriterResponse } from "./lib/ai-writer.js";
+import { GOOGLE_ACCOUNT_STORAGE_KEY } from "./lib/google-auth.js";
+import {
+  DEFAULT_DELIVERY_SETTINGS,
+  DELIVERY_SETTINGS_KEY,
+  nextScheduledAt,
+  normalizeDeliverySettings,
+} from "./lib/schedule.js";
+import { buildWriterRequest, mergeEnrichedProfile, normalizeWorkNote, normalizeWriterResponse, openerQualityIssues } from "./lib/ai-writer.js";
 import { resolveContactEmail } from "./lib/contact-resolution.js";
-import { QUEUE_STORAGE_KEY, upsertProspects } from "./lib/queue.js";
+import { PROVIDER, configuredEnrichmentProviders, providerLabel } from "./lib/provider-priority.js";
+import { appendDiagnostic } from "./lib/diagnostics.js";
+import { QUEUE_STORAGE_KEY, prospectIdentity, upsertProspects } from "./lib/queue.js";
 import {
   CAMPAIGNS_STORAGE_KEY,
   addProspectToCampaign,
@@ -38,10 +50,12 @@ const DEMO_PROFILE = {
 
 const elements = Object.fromEntries(
   [
-    "loadingView", "pageGate", "workspace", "actionBar", "previewBadge", "settingsButton", "queueButton", "captureStatus",
+    "loadingView", "pageGate", "workspace", "actionBar", "previewBadge", "settingsButton", "queueButton", "gateWorkspaceButton", "captureStatus",
     "avatar", "profileName", "profileHeadline", "profileLocationText", "emailSource", "emailConfidence", "emailInput",
+    "contactStep", "personalizationStep", "contactOutBalance", "emailDraftDisclosure",
     "findEmailButton", "copyEmailButton", "contactDetails", "workNote", "signalCount", "experienceList", "templateSelect",
-    "personalizationSource", "rewritePersonalizationButton", "templateEyebrow", "generateEmailButton", "subjectInput", "bodyInput", "wordCount", "copyDraftButton", "openGmailButton", "toast",
+    "personalizationSource", "rewritePersonalizationButton", "templateEyebrow", "generateEmailButton", "subjectInput", "bodyInput", "wordCount", "copyDraftButton", "sendEmailButton", "toast",
+    "deliveryAccountButton", "deliveryAccount", "scheduleToggle", "scheduleTime", "scheduleHint",
     "addToCampaignButton", "campaignDialog", "closeCampaignDialog", "campaignList", "createCampaignForm", "newCampaignName",
     "createCampaignButton", "openCampaignWorkspace",
   ].map((id) => [id, document.getElementById(id)]),
@@ -56,8 +70,10 @@ const state = {
   emailType: "",
   contactDetails: { emails: [], phones: [], emailStatus: "", emailStatuses: {}, error: "" },
   confidence: null,
+  selectedRecipients: new Set(),
   note: "",
-  templateId: TEMPLATES[0].id,
+  templates: [],
+  templateId: "",
   subject: "",
   body: "",
   personalizationModel: "",
@@ -67,6 +83,13 @@ const state = {
   draftTimer: null,
   toastTimer: null,
   activeTabId: null,
+  googleAccount: null,
+  deliverySettings: { ...DEFAULT_DELIVERY_SETTINGS },
+  deliveryLoading: false,
+  contactOutCreditsRemaining: null,
+  autoLookupAttempts: new Set(),
+  refreshTimer: null,
+  refreshSequence: 0,
   isPreview: !globalThis.chrome?.tabs?.query,
 };
 
@@ -110,7 +133,7 @@ function setText(element, value, fallback = "") {
 
 function populateTemplates() {
   const fragment = document.createDocumentFragment();
-  for (const template of TEMPLATES) {
+  for (const template of state.templates) {
     const option = document.createElement("option");
     option.value = template.id;
     option.textContent = template.name;
@@ -120,7 +143,7 @@ function populateTemplates() {
 }
 
 function activeTemplate() {
-  return TEMPLATES.find((template) => template.id === state.templateId) || TEMPLATES[0];
+  return state.templates.find((template) => template.id === state.templateId) || state.templates[0];
 }
 
 function rebuildComposer({ markClean = true } = {}) {
@@ -141,38 +164,143 @@ function rebuildComposer({ markClean = true } = {}) {
 function updateWordCount() {
   const count = state.body.trim() ? state.body.trim().split(/\s+/).length : 0;
   elements.wordCount.textContent = `${count} ${count === 1 ? "word" : "words"}`;
+  renderDelivery();
+}
+
+function verifiedRecipientEmails() {
+  const statuses = state.contactDetails.emailStatuses || {};
+  return [...new Set([
+    ...(state.emailVerified && isEmail(state.email) ? [state.email] : []),
+    ...(state.contactDetails.emails || []).filter((email) => ["verified", "valid"].includes(String(statuses[email] || statuses[email.toLowerCase()] || "").toLowerCase())),
+  ].map((email) => String(email).trim().toLowerCase()).filter(isEmail))];
+}
+
+function selectedRecipientEmails() {
+  return normalizeRecipientSelection(verifiedRecipientEmails(), state.selectedRecipients, {
+    allowMultiple: Boolean(state.settings.allowMultipleRecipients),
+    preferred: state.email,
+  });
+}
+
+function manualRecipientEmails() {
+  const current = isEmail(state.email) ? String(state.email).trim().toLowerCase() : "";
+  return normalizeRecipientSelection([...new Set([current, ...verifiedRecipientEmails()].filter(Boolean))], state.selectedRecipients, {
+    allowMultiple: Boolean(state.settings.allowMultipleRecipients),
+    preferred: current,
+  });
+}
+
+function formatScheduledTime(date) {
+  return new Intl.DateTimeFormat(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }).format(date);
+}
+
+function renderDelivery() {
+  if (!elements.sendEmailButton) return;
+  const mailto = state.settings.deliveryMethod === "mailto";
+  const recipients = mailto ? manualRecipientEmails() : selectedRecipientEmails();
+  const connected = !mailto && Boolean(state.googleAccount?.id);
+  elements.deliveryAccount.textContent = mailto ? "Default email app" : connected ? state.googleAccount.email || "Selected Google account" : "Manual Gmail compose";
+  elements.deliveryAccountButton.classList.toggle("is-connected", connected);
+  elements.scheduleToggle.checked = !mailto && state.deliverySettings.scheduleEnabled;
+  elements.scheduleTime.value = state.deliverySettings.scheduleTime;
+  elements.scheduleToggle.disabled = !connected;
+  elements.scheduleTime.disabled = !connected || !state.deliverySettings.scheduleEnabled;
+  if (mailto) {
+    elements.scheduleHint.textContent = "Manual send · scheduling unavailable";
+    elements.sendEmailButton.textContent = recipients.length > 1 ? `Open ${recipients.length} emails` : "Open email app";
+  } else if (!connected) {
+    elements.scheduleHint.textContent = "Connect Gmail to schedule";
+    elements.sendEmailButton.textContent = recipients.length > 1 ? `Open ${recipients.length} drafts` : "Open Gmail";
+  } else if (state.deliverySettings.scheduleEnabled) {
+    const next = nextScheduledAt(state.deliverySettings.scheduleTime);
+    elements.scheduleHint.textContent = `Next occurrence · ${formatScheduledTime(next)} · stays on`;
+    elements.sendEmailButton.textContent = recipients.length > 1 ? `Schedule to ${recipients.length}` : "Schedule send";
+  } else {
+    elements.scheduleHint.textContent = "Off · sends immediately";
+    elements.sendEmailButton.textContent = recipients.length > 1 ? `Send to ${recipients.length}` : "Send email";
+  }
+  elements.sendEmailButton.disabled = state.deliveryLoading || !recipients.length || !state.subject.trim() || !state.body.trim();
+  elements.sendEmailButton.title = !recipients.length
+    ? mailto ? "Add a valid recipient email" : "Choose a verified recipient"
+    : !connected
+      ? mailto ? "Open a prefilled draft in the default email app" : "Open a prefilled Gmail draft and send it manually"
+      : "";
 }
 
 function renderEmail() {
   elements.emailInput.value = state.email;
+  if (!elements.findEmailButton.disabled) elements.findEmailButton.querySelector("span").textContent = state.email ? "Refresh" : "Find verified";
   elements.emailInput.classList.toggle("is-invalid", Boolean(state.email) && !isEmail(state.email));
   elements.emailSource.textContent = state.emailSource || "No contact provider has checked this profile yet";
   elements.emailConfidence.hidden = !state.emailVerified && state.emailType !== "linkedin";
   elements.emailConfidence.textContent = state.emailVerified ? "Provider verified" : state.emailType === "linkedin" ? "LinkedIn provided" : "";
-  const details = (state.contactDetails.emails || []).filter((email) => email !== state.email
-    && ["verified", "valid"].includes(state.contactDetails.emailStatuses?.[email]?.toLowerCase()));
-  elements.contactDetails.hidden = details.length === 0;
+  const remaining = Number(state.contactOutCreditsRemaining);
+  elements.contactOutBalance.hidden = !Number.isFinite(remaining);
+  elements.contactOutBalance.textContent = Number.isFinite(remaining) ? `${remaining.toLocaleString()} remaining` : "";
+  const recipients = verifiedRecipientEmails();
+  const selected = selectedRecipientEmails();
+  const allowMultiple = Boolean(state.settings.allowMultipleRecipients);
+  state.selectedRecipients = new Set(selected);
+  elements.contactDetails.hidden = recipients.length === 0;
   const fragment = document.createDocumentFragment();
-  for (const email of details) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "contact-detail";
-    chip.textContent = `${email} · verified`;
-    chip.addEventListener("click", () => {
-      state.email = email;
-      state.emailVerified = true;
-      state.emailSource = "Alternative email verified by provider";
+  if (recipients.length) {
+    const head = document.createElement("div");
+    head.className = "recipient-picker-head";
+    const label = document.createElement("span");
+    label.textContent = allowMultiple ? "Send to" : "Send to one";
+    if (allowMultiple && recipients.length > 1) {
+      const selectAll = document.createElement("button");
+      selectAll.type = "button";
+      selectAll.textContent = selected.length === recipients.length ? "All selected" : "Select all";
+      selectAll.disabled = selected.length === recipients.length;
+      selectAll.addEventListener("click", () => {
+        state.selectedRecipients = new Set(recipients);
+        renderEmail();
+        queueDraftSave();
+      });
+      head.append(label, selectAll);
+    } else {
+      const mode = document.createElement("span");
+      mode.className = "recipient-picker-mode";
+      mode.textContent = "One recipient";
+      head.append(label, mode);
+    }
+    fragment.append(head);
+  }
+  for (const email of recipients) {
+    const option = document.createElement("label");
+    option.className = `recipient-option${allowMultiple ? "" : " is-single"}`;
+    const checkbox = document.createElement("input");
+    checkbox.type = allowMultiple ? "checkbox" : "radio";
+    if (!allowMultiple) checkbox.name = "verifiedRecipient";
+    checkbox.checked = state.selectedRecipients.has(email);
+    const mark = document.createElement("i");
+    mark.setAttribute("aria-hidden", "true");
+    const copy = document.createElement("span");
+    const address = document.createElement("strong");
+    address.textContent = email;
+    const status = document.createElement("small");
+    status.textContent = email === state.email ? "Primary · provider verified" : "Alternative · provider verified";
+    copy.append(address, status);
+    option.append(checkbox, mark, copy);
+    checkbox.addEventListener("change", () => {
+      if (!allowMultiple && checkbox.checked) state.selectedRecipients = new Set([email]);
+      else if (checkbox.checked) state.selectedRecipients.add(email);
+      else if (selectedRecipientEmails().length > 1) state.selectedRecipients.delete(email);
+      else checkbox.checked = true;
       renderEmail();
       queueDraftSave();
     });
-    fragment.append(chip);
+    fragment.append(option);
   }
   elements.contactDetails.replaceChildren(fragment);
+  elements.contactStep.classList.toggle("is-complete", selectedRecipientEmails().length > 0);
+  renderDelivery();
 }
 
 function renderExperiences() {
   const experiences = state.profile?.experiences || [];
-  elements.signalCount.textContent = `${experiences.length} found`;
+  elements.signalCount.textContent = `${experiences.length} ${experiences.length === 1 ? "role" : "roles"}`;
 
   if (!experiences.length) {
     const empty = document.createElement("p");
@@ -209,6 +337,7 @@ function renderProfile() {
   const statusDot = document.createElement("i");
   elements.captureStatus.replaceChildren(statusDot, document.createTextNode(state.isPreview ? " Demo data" : " Live page"));
   elements.workNote.value = state.note;
+  elements.personalizationStep.classList.toggle("is-complete", Boolean(state.note));
   const savedProvider = state.emailSource.match(/(?:ContactOut|Apollo)/i)?.[0] || "provider";
   const savedContextLabel = state.emailVerified ? `verified ${savedProvider} research` : state.emailType === "linkedin" ? "LinkedIn profile context" : "profile context";
   elements.personalizationSource.textContent = state.personalizationModel
@@ -241,11 +370,22 @@ async function loadDraft() {
   state.emailVerified = savedVerified;
   state.emailType = saved.emailType || "";
   state.contactDetails = saved.contactDetails || state.contactDetails;
+  state.selectedRecipients = new Set(Array.isArray(saved.selectedRecipients) ? saved.selectedRecipients : []);
   state.confidence = saved.confidence ?? state.confidence;
-  state.note = saved.note || state.note;
-  state.templateId = TEMPLATES.some((template) => template.id === saved.templateId) ? saved.templateId : state.templateId;
+  const savedNote = saved.note || state.note;
+  state.note = normalizeWorkNote(savedNote, state.profile);
+  state.templateId = state.templates.some((template) => template.id === saved.templateId) ? saved.templateId : state.templateId;
   state.subject = saved.subject || "";
   state.body = saved.body || "";
+  const noteWasNormalized = Boolean(savedNote && state.note && savedNote !== state.note);
+  if (noteWasNormalized && state.body.includes(savedNote)) state.body = state.body.replace(savedNote, state.note);
+  const migratedDraft = migrateLegacyQuickIntroDraft(
+    { subject: state.subject, body: state.body },
+    templateVariables(state.profile, state.settings, state.note),
+  );
+  const draftWasMigrated = migratedDraft.subject !== state.subject || migratedDraft.body !== state.body;
+  state.subject = migratedDraft.subject;
+  state.body = migratedDraft.body;
   state.personalizationModel = saved.personalizationModel || "";
   state.composerDirty = Boolean(saved.subject || saved.body);
 
@@ -255,6 +395,7 @@ async function loadDraft() {
     elements.bodyInput.value = state.body;
     elements.templateEyebrow.textContent = activeTemplate().eyebrow;
     updateWordCount();
+    if (noteWasNormalized || draftWasMigrated) queueDraftSave();
   } else {
     rebuildComposer();
   }
@@ -271,6 +412,7 @@ function queueDraftSave() {
         emailVerified: state.emailVerified,
         emailType: state.emailType,
         contactDetails: state.contactDetails,
+        selectedRecipients: selectedRecipientEmails(),
         confidence: state.confidence,
         note: state.note,
         templateId: state.templateId,
@@ -284,14 +426,27 @@ function queueDraftSave() {
 }
 
 async function loadSettings() {
-  const result = await storage.get(["velaGtmSettings"]);
+  const result = await storage.get(["velaGtmSettings", GOOGLE_ACCOUNT_STORAGE_KEY, DELIVERY_SETTINGS_KEY]);
   state.settings = { ...DEFAULT_SETTINGS, ...(result.velaGtmSettings || {}) };
+  state.templates = emailTemplates(state.settings);
+  state.templateId = state.templates[0]?.id || "";
+  state.googleAccount = result[GOOGLE_ACCOUNT_STORAGE_KEY] || null;
+  state.deliverySettings = normalizeDeliverySettings(result[DELIVERY_SETTINGS_KEY]);
+  if (state.isPreview && !state.googleAccount) state.googleAccount = { id: "preview", email: "tarun@vela.energy" };
   if (["light", "dark"].includes(previewTheme)) state.settings.theme = previewTheme;
   applyTheme(state.settings.theme);
+  populateTemplates();
+  if (state.profile) renderEmail();
+  renderDelivery();
+}
+
+function linkedInProfileIdentity(url = "") {
+  const match = String(url).match(/^https:\/\/(?:www\.)?linkedin\.com\/in\/([^/?#]+)/i);
+  return match ? `https://www.linkedin.com/in/${match[1].toLowerCase()}` : "";
 }
 
 function isLinkedInProfile(url = "") {
-  return /^https:\/\/www\.linkedin\.com\/in\/[^/?#]+/i.test(url);
+  return Boolean(linkedInProfileIdentity(url));
 }
 
 async function requestProfileFromTab(tabId) {
@@ -339,28 +494,37 @@ function setFindEmailLoading(loading, label = state.email ? "Refresh" : "Find em
   elements.findEmailButton.querySelector("span").textContent = label;
 }
 
-async function requestLinkedInEmail() {
-  if (state.isPreview) return { ok: true, email: state.profile?.visibleEmail || "", strategy: "preview" };
-  if (!state.activeTabId) throw new Error("Open a LinkedIn profile before using LinkedIn Contact Info.");
+function withTimeout(promise, timeout, message) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), timeout); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+async function requestLinkedInEmail(tabId = state.activeTabId, profile = state.profile) {
+  if (state.isPreview) return { ok: true, email: profile?.visibleEmail || "", strategy: "preview" };
+  if (!tabId) throw new Error("Open a LinkedIn profile before using LinkedIn Contact Info.");
   const message = { type: "VELA_GTM_FIND_LINKEDIN_EMAIL" };
   try {
-    return await chrome.tabs.sendMessage(state.activeTabId, message);
+    return await chrome.tabs.sendMessage(tabId, message);
   } catch {
     await chrome.scripting.executeScript({
-      target: { tabId: state.activeTabId },
+      target: { tabId },
       files: ["lib/linkedin-parser.js", "content-script.js"],
     });
-    return chrome.tabs.sendMessage(state.activeTabId, message);
+    return chrome.tabs.sendMessage(tabId, message);
   }
 }
 
-async function enrichProfile({ requestPermission = true, manageButton = true, openSettingsWhenMissing = true, silent = false, replaceProviderResult = false } = {}) {
+async function enrichProfile({ requestPermission = true, manageButton = true, openSettingsWhenMissing = true, silent = false, replaceProviderResult = false, allowSessionReveal = false } = {}) {
   if (!state.profile) return;
-  const providers = [
-    state.settings.apolloApiKey ? "Apollo" : "",
-    state.settings.contactOutApiKey ? "ContactOut" : "",
-  ].filter(Boolean);
+  const profileAtStart = state.profile;
+  const isCurrentProfile = () => state.profile === profileAtStart;
+  const providerIds = configuredEnrichmentProviders(state.settings);
+  const providers = providerIds.map(providerLabel);
   const provider = providers[0] || "";
+  let resolvedProvider = provider;
   const direct = Boolean(providers.length && globalThis.chrome?.runtime?.sendMessage);
   if (!direct && !state.settings.endpointUrl) {
     if (openSettingsWhenMissing) {
@@ -383,59 +547,100 @@ async function enrichProfile({ requestPermission = true, manageButton = true, op
     let result;
     if (direct) {
       let lastError;
-      for (const candidate of providers) {
+      const providerErrors = [];
+      for (const providerId of providerIds) {
+        const candidate = providerLabel(providerId);
         try {
-          const response = await chrome.runtime.sendMessage({ type: `VELA_GTM_PROVIDER_${candidate.toUpperCase()}`, profile: state.profile });
+          await appendDiagnostic({ area: "popup", stage: "provider_dispatch", outcome: "sent", provider: providerId, profileKind: isLinkedInProfile(profileAtStart.url) ? "linkedin_profile" : "invalid_profile" });
+          if (!isCurrentProfile()) return false;
+          const response = await withTimeout(
+            chrome.runtime.sendMessage({ type: `VELA_GTM_PROVIDER_${providerId}`, profile: profileAtStart }),
+            20000,
+            `${candidate} lookup timed out.`,
+          );
+          if (!isCurrentProfile()) return false;
           if (!response?.ok) throw new Error(response?.error || `${candidate} lookup failed.`);
-          const candidateResult = normalizeEnrichmentResponse({ ...response.data, emailSource: response.data.source });
-          state.profile = mergeEnrichedProfile(state.profile, candidateResult);
+          let providerData = response.data;
+          if (providerId === PROVIDER.CONTACTOUT_SESSION) {
+            const credits = Number(providerData?.credits?.after ?? providerData?.credits?.before);
+            if (Number.isFinite(credits)) state.contactOutCreditsRemaining = credits;
+          }
+          if (providerId === PROVIDER.CONTACTOUT_SESSION && providerData?.requiresReveal) {
+            if (!allowSessionReveal) {
+              state.emailSource = "ContactOut is ready. Click Find verified to reveal the best email.";
+              state.contactDetails = { ...state.contactDetails, error: "" };
+              renderEmail();
+              return false;
+            }
+            const reveal = await withTimeout(
+              chrome.runtime.sendMessage({ type: "VELA_GTM_PROVIDER_CONTACTOUT_SESSION_REVEAL", revealToken: providerData.revealToken }),
+              20000,
+              "ContactOut reveal timed out. Check your credit balance before retrying.",
+            );
+            if (!isCurrentProfile()) return false;
+            if (!reveal?.ok) throw new Error(reveal?.error || "ContactOut reveal failed.");
+            providerData = reveal.data;
+            const credits = Number(providerData?.credits?.after ?? providerData?.credits?.before);
+            if (Number.isFinite(credits)) state.contactOutCreditsRemaining = credits;
+          }
+          const candidateResult = normalizeEnrichmentResponse({ ...providerData, emailSource: providerData.source });
+          const enrichedProfile = mergeEnrichedProfile(profileAtStart, candidateResult);
+          Object.assign(profileAtStart, enrichedProfile);
+          state.profile = profileAtStart;
           renderExperiences();
           const candidateStatus = String(candidateResult.emailStatuses?.[candidateResult.email] || candidateResult.emailStatus || "").toLowerCase();
           if (candidateResult.email && ["verified", "valid"].includes(candidateStatus)) {
             result = candidateResult;
+            resolvedProvider = candidate;
             break;
           }
           lastError = new Error(`${candidate} did not return an explicitly verified email.`);
         } catch (error) {
           lastError = error instanceof Error ? error : new Error(`${candidate} lookup failed.`);
+          providerErrors.push(`${candidate}: ${lastError.message}`);
+          await appendDiagnostic({ area: "popup", stage: "provider_dispatch", outcome: "error", provider: providerId, message: lastError.message });
         }
       }
-      if (!result) throw lastError || new Error("No configured provider returned a verified email.");
+      if (!result) throw new Error(providerErrors.join(" · ") || lastError?.message || "No configured provider returned a verified email.");
     } else {
       let permitted = await hasEndpointPermission(state.settings.endpointUrl);
       if (!permitted && requestPermission) permitted = await requestEndpointPermission(state.settings.endpointUrl);
       if (!permitted) throw new Error("Vela GTM needs access to the enrichment endpoint.");
       const headers = { "Content-Type": "application/json", Accept: "application/json" };
       if (state.settings.apiToken) headers.Authorization = `Bearer ${state.settings.apiToken}`;
-      const response = await fetch(state.settings.endpointUrl, { method: "POST", headers, body: JSON.stringify({ source: "vela-gtm-extension", profile: state.profile }) });
+      const response = await fetch(state.settings.endpointUrl, { method: "POST", headers, body: JSON.stringify({ source: "vela-gtm-extension", profile: profileAtStart }) });
+      if (!isCurrentProfile()) return false;
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || `Enrichment service returned ${response.status}.`);
       result = normalizeEnrichmentResponse(payload);
     }
+    if (!isCurrentProfile()) return false;
     const selectedStatus = String(result.emailStatuses?.[result.email] || result.emailStatus || "").toLowerCase();
-    const fromProvider = direct || new RegExp(`^${provider}\\b`, "i").test(result.emailSource || "");
+    const fromProvider = direct || new RegExp(`^${resolvedProvider}\\b`, "i").test(result.emailSource || "");
     if (!result.email || !["verified", "valid"].includes(selectedStatus) || !fromProvider) {
       state.email = "";
       state.emailVerified = false;
       state.emailType = "";
-      state.emailSource = `No verified email found by ${provider}`;
+      state.emailSource = `No verified email found by ${resolvedProvider}`;
       state.contactDetails = { emails: [], phones: [], emailStatus: "", emailStatuses: {}, error: `${providers.join(" or ")} did not return an explicitly verified address.` };
       renderEmail();
       queueDraftSave();
-      throw new Error(`${provider} did not return a verified email for this profile.`);
+      throw new Error(`${resolvedProvider} did not return a verified email for this profile.`);
     }
 
     state.email = result.email;
     state.emailVerified = true;
+    state.selectedRecipients = new Set([state.email]);
     state.emailType = result.workEmails?.includes(result.email) ? "work" : result.personalEmails?.includes(result.email) ? "personal" : "other";
-    state.emailSource = `${state.emailType === "work" ? "Work" : state.emailType === "personal" ? "Personal" : "Contact"} email confirmed by ${provider}`;
+    state.emailSource = `${state.emailType === "work" ? "Work" : state.emailType === "personal" ? "Personal" : "Contact"} email confirmed by ${resolvedProvider}`;
     state.confidence = result.confidence;
     state.contactDetails = { emails: result.emails, phones: [], emailStatus: selectedStatus, emailStatuses: result.emailStatuses, error: "" };
     renderEmail();
     queueDraftSave();
-    if (!silent) showToast(`Verified ${provider} email found. Writing personalization…`);
+    if (!silent) showToast(`Verified ${resolvedProvider} email found. Writing personalization…`);
     return result;
   } catch (error) {
+    if (!isCurrentProfile()) return false;
     const message = error instanceof Error ? error.message : "Enrichment failed. Check Settings.";
     state.emailSource = message;
     state.contactDetails = { ...state.contactDetails, error: message };
@@ -443,19 +648,28 @@ async function enrichProfile({ requestPermission = true, manageButton = true, op
     if (!silent) showToast(message);
     return false;
   } finally {
-    if (manageButton) setFindEmailLoading(false);
+    if (manageButton && isCurrentProfile()) setFindEmailLoading(false);
   }
 }
 
 async function findProspectEmail({ automatic = false } = {}) {
   if (!state.profile) return;
+  const profileAtStart = state.profile;
+  const activeTabIdAtStart = state.activeTabId;
+  const isCurrentProfile = () => state.profile === profileAtStart;
   setFindEmailLoading(true, "Looking up");
+  await appendDiagnostic({
+    area: "popup", stage: "lookup_start", outcome: automatic ? "automatic" : "manual",
+    provider: configuredEnrichmentProviders(state.settings).join("+"), profileKind: isLinkedInProfile(profileAtStart.url) ? "linkedin_profile" : "invalid_profile",
+  });
+  if (!isCurrentProfile()) return false;
 
   try {
     const resolution = await resolveContactEmail({
       contactOutLookup: async () => {
-        if (!state.settings.contactOutApiKey && !state.settings.apolloApiKey && !state.settings.endpointUrl) throw new Error("No contact provider is configured.");
-        state.emailSource = `${[state.settings.contactOutApiKey ? "ContactOut" : "", state.settings.apolloApiKey ? "Apollo" : ""].filter(Boolean).join(" + ")} is checking this profile…`;
+        if (!isCurrentProfile()) throw new Error("Profile changed during lookup.");
+        if (!state.settings.contactOutSessionEnabled && !state.settings.contactOutApiKey && !state.settings.apolloApiKey && !state.settings.endpointUrl) throw new Error("No contact provider is configured.");
+        state.emailSource = `${[state.settings.contactOutSessionEnabled ? "ContactOut session" : "", state.settings.contactOutApiKey ? "ContactOut API" : "", state.settings.apolloApiKey ? "Apollo" : ""].filter(Boolean).join(" + ")} is checking this profile…`;
         renderEmail();
         const found = await enrichProfile({
           requestPermission: !automatic,
@@ -463,20 +677,32 @@ async function findProspectEmail({ automatic = false } = {}) {
           openSettingsWhenMissing: false,
           silent: true,
           replaceProviderResult: true,
+          allowSessionReveal: true,
         });
+        if (!isCurrentProfile()) throw new Error("Profile changed during lookup.");
         if (found && state.emailVerified && state.email) return { email: state.email, result: found };
-        throw new Error(state.contactDetails.error || `${[state.settings.contactOutApiKey ? "ContactOut" : "", state.settings.apolloApiKey ? "Apollo" : ""].filter(Boolean).join(" or ")} did not return a verified email for this profile.`);
+        throw new Error(state.contactDetails.error || `${[state.settings.contactOutSessionEnabled ? "ContactOut session" : "", state.settings.contactOutApiKey ? "ContactOut API" : "", state.settings.apolloApiKey ? "Apollo" : ""].filter(Boolean).join(" or ")} did not return a verified email for this profile.`);
       },
       linkedInLookup: async () => {
+        if (!isCurrentProfile()) throw new Error("Profile changed during lookup.");
+        await appendDiagnostic({ area: "popup", stage: "linkedin_fallback", outcome: "started", profileKind: isLinkedInProfile(profileAtStart.url) ? "linkedin_profile" : "invalid_profile" });
+        if (!isCurrentProfile()) throw new Error("Profile changed during lookup.");
         state.emailSource = "Configured providers did not find an email. Checking LinkedIn Contact Info…";
         renderEmail();
-        const response = await requestLinkedInEmail();
+        const response = await withTimeout(
+          requestLinkedInEmail(activeTabIdAtStart, profileAtStart),
+          12000,
+          "LinkedIn Contact Info did not respond within 12 seconds.",
+        );
+        if (!isCurrentProfile()) throw new Error("Profile changed during lookup.");
         if (!response?.ok) throw new Error(response?.error || "Could not read LinkedIn Contact Info.");
         return response;
       },
     });
+    if (!isCurrentProfile()) return false;
 
     if (!resolution.email) {
+      await appendDiagnostic({ area: "popup", stage: "lookup_complete", outcome: "no_email", message: [resolution.contactOutError, resolution.linkedInError].filter(Boolean).join("; ") });
       const details = [resolution.contactOutError, resolution.linkedInError].filter(Boolean).join(" LinkedIn fallback: ");
       state.email = "";
       state.emailVerified = false;
@@ -490,8 +716,10 @@ async function findProspectEmail({ automatic = false } = {}) {
     }
 
     if (resolution.source === "linkedin") {
+      await appendDiagnostic({ area: "popup", stage: "linkedin_fallback", outcome: "email_visible_unverified" });
       state.email = resolution.email;
       state.emailVerified = false;
+      state.selectedRecipients = new Set();
       state.emailType = "linkedin";
       state.emailSource = resolution.strategy === "rsc" ? "LinkedIn Contact Info" : "LinkedIn Contact Info overlay";
       state.confidence = null;
@@ -502,17 +730,20 @@ async function findProspectEmail({ automatic = false } = {}) {
 
     setFindEmailLoading(true, "Personalizing");
     const written = await generateEmail({ silent: automatic, announce: false });
+    if (!isCurrentProfile()) return false;
     if (!automatic) {
       const lookupLabel = resolution.source === "contactout" ? `${state.emailSource.match(/(?:ContactOut|Apollo)/i)?.[0] || "Provider"} email` : "LinkedIn Contact Info email";
       showToast(written ? `${lookupLabel} and AI personalization are ready.` : `${lookupLabel} found. Configure the AI writer to personalize it.`);
     }
     return true;
   } catch (error) {
+    if (!isCurrentProfile()) return false;
+    await appendDiagnostic({ area: "popup", stage: "lookup_complete", outcome: "error", message: error instanceof Error ? error.message : "Could not finish email lookup." });
     renderEmail();
     if (!automatic) showToast(error instanceof Error ? error.message : "Could not finish email lookup.");
     return false;
   } finally {
-    setFindEmailLoading(false);
+    if (isCurrentProfile()) setFindEmailLoading(false);
   }
 }
 
@@ -527,6 +758,8 @@ function setWriterLoading(loading) {
 
 async function generateEmail({ silent = false, announce = true } = {}) {
   if (!state.profile) return;
+  const profileAtStart = state.profile;
+  const isCurrentProfile = () => state.profile === profileAtStart;
   if (!state.settings.openAIApiKey && !state.settings.writerEndpointUrl) {
     if (!silent) { showToast("Add an OpenAI key or writer endpoint in Settings first."); openSettings(); }
     return false;
@@ -535,30 +768,40 @@ async function generateEmail({ silent = false, announce = true } = {}) {
   try {
     setWriterLoading(true);
 
-    const input = buildWriterRequest(state.profile, state.settings, state.note, { subject: state.subject, body: state.body });
+    const input = buildWriterRequest(profileAtStart, state.settings, state.note, { subject: state.subject, body: state.body });
     let payload;
     if (state.settings.openAIApiKey) {
       const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_PROVIDER_WRITE", input });
+      if (!isCurrentProfile()) return false;
       if (!response?.ok) throw new Error(response?.error || "OpenAI writing failed.");
       payload = { data: response.data, model: state.settings.openAIModel || "gpt-5.4-mini" };
     } else {
       let permitted = await hasEndpointPermission(state.settings.writerEndpointUrl);
       if (!permitted) permitted = await requestEndpointPermission(state.settings.writerEndpointUrl);
+      if (!isCurrentProfile()) return false;
       if (!permitted) throw new Error("Vela GTM needs access to the AI writer endpoint.");
       const headers = { "Content-Type": "application/json", Accept: "application/json" };
       if (state.settings.writerToken) headers.Authorization = `Bearer ${state.settings.writerToken}`;
       const response = await fetch(state.settings.writerEndpointUrl, { method: "POST", headers, body: JSON.stringify(input) });
       payload = await response.json().catch(() => ({}));
+      if (!isCurrentProfile()) return false;
       if (!response.ok) throw new Error(payload.error || `AI writer returned ${response.status}.`);
     }
-    const result = normalizeWriterResponse(payload);
+    const result = normalizeWriterResponse(payload, profileAtStart);
     if (!result.subject || !result.body) throw new Error("The AI writer returned an incomplete draft.");
-    state.subject = result.subject;
-    state.body = result.body;
-    state.composerDirty = true;
+    const openerIssues = openerQualityIssues(result.workNote);
+    if (openerIssues.length) throw new Error(`The AI writer returned a generic opener. ${openerIssues.join(" ")}`);
     if (result.workNote) {
       state.note = result.workNote;
       elements.workNote.value = result.workNote;
+      elements.personalizationStep.classList.add("is-complete");
+    }
+    if (state.settings.aiGenerationMode === "full") {
+      state.subject = result.subject;
+      state.body = result.body;
+      state.composerDirty = true;
+    } else {
+      rebuildComposer({ markClean: true });
     }
     state.personalizationModel = result.model || state.settings.openAIModel || "gpt-5.4-mini";
     const providerLabel = state.emailSource.match(/(?:ContactOut|Apollo)/i)?.[0] || "provider";
@@ -569,23 +812,19 @@ async function generateEmail({ silent = false, announce = true } = {}) {
     elements.templateEyebrow.textContent = `Written with ${result.model || "gpt-5.4-mini"}`;
     updateWordCount();
     queueDraftSave();
-    if (announce) showToast("AI personalization and email draft are ready.");
+    if (announce) showToast(state.settings.aiGenerationMode === "full" ? "AI opener and email draft are ready." : "AI opener updated from this prospect's context.");
     return true;
   } catch (error) {
+    if (!isCurrentProfile()) return false;
     if (!silent) showToast(error instanceof Error ? error.message : "Could not generate the email.");
     return false;
   } finally {
-    setWriterLoading(false);
+    if (isCurrentProfile()) setWriterLoading(false);
   }
 }
 
 function switchTab(tabName) {
-  document.querySelectorAll(".tab-button").forEach((button) => {
-    button.setAttribute("aria-selected", String(button.dataset.tab === tabName));
-  });
-  document.querySelectorAll(".tab-panel").forEach((panel) => {
-    panel.hidden = panel.dataset.panel !== tabName;
-  });
+  if (tabName === "draft") elements.emailDraftDisclosure.open = true;
 }
 
 async function copyText(text, successMessage) {
@@ -706,21 +945,90 @@ async function openCampaigns(campaignId = "") {
   else window.open(page.toString(), "_blank", "noopener,noreferrer");
 }
 
-async function openGmail() {
-  const email = elements.emailInput.value.trim();
-  if (email && !isEmail(email)) {
-    elements.emailInput.classList.add("is-invalid");
-    showToast("Check the email address before composing.");
+async function saveDeliverySettings() {
+  await storage.set({ [DELIVERY_SETTINGS_KEY]: state.deliverySettings });
+}
+
+async function deliverEmail() {
+  const mailto = state.settings.deliveryMethod === "mailto";
+  const recipients = mailto ? manualRecipientEmails() : selectedRecipientEmails();
+  if (!recipients.length) { showToast(mailto ? "Add a valid recipient email." : "Choose at least one provider-verified email."); return; }
+  if (!state.subject.trim() || !state.body.trim()) { showToast("Add a subject and message before sending."); return; }
+
+  const prospect = currentProspect();
+  const prospectId = prospectIdentity(prospect);
+  const saved = await storage.get([QUEUE_STORAGE_KEY]);
+  await storage.set({ [QUEUE_STORAGE_KEY]: upsertProspects(saved[QUEUE_STORAGE_KEY] || [], [prospect]) });
+
+  if (mailto || !state.googleAccount?.id) {
+    const composeUrls = recipients.map((recipient) => (mailto ? mailtoComposeUrl : gmailComposeUrl)({
+      to: recipient,
+      subject: state.subject,
+      body: state.body,
+    }));
+    try {
+      state.deliveryLoading = true;
+      renderDelivery();
+      if (globalThis.chrome?.tabs?.create) {
+        for (const [index, url] of composeUrls.entries()) await chrome.tabs.create({ url, active: index === 0 });
+      } else {
+        composeUrls.forEach((url) => window.open(url, "_blank", "noopener,noreferrer"));
+      }
+      showToast(mailto
+        ? `Opened ${composeUrls.length} draft${composeUrls.length === 1 ? "" : "s"} in your email app.`
+        : `Opened ${composeUrls.length} Gmail draft${composeUrls.length === 1 ? "" : "s"} for review and manual send.`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : `Could not open ${mailto ? "the email app" : "Gmail"}.`);
+    } finally {
+      state.deliveryLoading = false;
+      renderDelivery();
+    }
     return;
   }
-  const url = gmailComposeUrl({ to: email, subject: state.subject, body: state.body });
-  if (globalThis.chrome?.tabs?.create) await chrome.tabs.create({ url });
-  else window.open(url, "_blank", "noopener,noreferrer");
+
+  const delivery = {
+    accountId: state.googleAccount.id,
+    senderEmail: state.googleAccount.email || "",
+    recipients,
+    subject: state.subject,
+    body: state.body,
+    prospectId,
+  };
+  if (state.deliverySettings.scheduleEnabled) delivery.scheduledAt = nextScheduledAt(state.deliverySettings.scheduleTime).toISOString();
+
+  if (state.isPreview) {
+    const action = state.deliverySettings.scheduleEnabled ? `Scheduled for ${formatScheduledTime(new Date(delivery.scheduledAt))}` : "Sent";
+    showToast(`${action} to ${recipients.length} verified address${recipients.length === 1 ? "" : "es"}.`);
+    return;
+  }
+
+  try {
+    state.deliveryLoading = true;
+    renderDelivery();
+    const response = await chrome.runtime.sendMessage({
+      type: state.deliverySettings.scheduleEnabled ? "VELA_GTM_EMAIL_SCHEDULE" : "VELA_GTM_EMAIL_SEND",
+      delivery,
+    });
+    if (!response?.ok) throw new Error(response?.error || "Gmail delivery failed.");
+    if (state.deliverySettings.scheduleEnabled) {
+      showToast(`Scheduled for ${formatScheduledTime(new Date(response.data.scheduledAt))}. Scheduling stays on.`);
+    } else {
+      const sent = response.data.sent?.length || 0;
+      const failed = response.data.failed?.length || 0;
+      showToast(failed ? `Sent to ${sent}; ${failed} failed.` : `Sent to ${sent} verified address${sent === 1 ? "" : "es"}.`);
+    }
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "Gmail delivery failed.");
+  } finally {
+    state.deliveryLoading = false;
+    renderDelivery();
+  }
 }
 
 function bindEvents() {
   elements.settingsButton.addEventListener("click", openSettings);
   elements.queueButton.addEventListener("click", () => openCampaigns());
+  elements.gateWorkspaceButton.addEventListener("click", () => openCampaigns());
   elements.addToCampaignButton.addEventListener("click", openCampaignDialog);
   elements.closeCampaignDialog.addEventListener("click", () => elements.campaignDialog.close());
   elements.openCampaignWorkspace.addEventListener("click", () => openCampaigns(state.lastCampaignId));
@@ -736,10 +1044,6 @@ function bindEvents() {
     elements.newCampaignName.value = "";
     await saveToCampaign(campaign.id);
   });
-  document.querySelectorAll(".tab-button").forEach((button) => {
-    button.addEventListener("click", () => switchTab(button.dataset.tab));
-  });
-
   elements.templateSelect.addEventListener("change", () => {
     state.templateId = elements.templateSelect.value;
     state.composerDirty = false;
@@ -747,8 +1051,15 @@ function bindEvents() {
   });
 
   elements.workNote.addEventListener("input", () => {
+    const previousNote = state.note;
     state.note = elements.workNote.value.trim();
+    elements.personalizationStep.classList.toggle("is-complete", Boolean(state.note));
     if (!state.composerDirty) rebuildComposer();
+    else if (previousNote && state.body.includes(previousNote)) {
+      state.body = state.body.replace(previousNote, state.note);
+      elements.bodyInput.value = state.body;
+      updateWordCount();
+    }
     queueDraftSave();
   });
 
@@ -756,6 +1067,7 @@ function bindEvents() {
     state.subject = elements.subjectInput.value;
     state.composerDirty = true;
     queueDraftSave();
+    renderDelivery();
   });
 
   elements.bodyInput.addEventListener("input", () => {
@@ -763,12 +1075,14 @@ function bindEvents() {
     state.composerDirty = true;
     updateWordCount();
     queueDraftSave();
+    renderDelivery();
   });
 
   elements.emailInput.addEventListener("input", () => {
     state.email = elements.emailInput.value.trim();
     state.emailSource = state.email ? "Entered manually · not provider verified" : "No contact provider has checked this profile yet";
     state.emailVerified = false;
+    state.selectedRecipients = new Set();
     state.emailType = "";
     state.confidence = null;
     renderEmail();
@@ -780,39 +1094,125 @@ function bindEvents() {
   elements.rewritePersonalizationButton.addEventListener("click", () => generateEmail());
   elements.copyEmailButton.addEventListener("click", () => copyText(elements.emailInput.value.trim(), "Email copied."));
   elements.copyDraftButton.addEventListener("click", () =>
-    copyText(`To: ${elements.emailInput.value.trim()}\nSubject: ${state.subject}\n\n${state.body}`, "Draft copied."),
+    copyText(`To: ${(state.settings.deliveryMethod === "mailto" ? manualRecipientEmails() : selectedRecipientEmails()).join(", ")}\nSubject: ${state.subject}\n\n${state.body}`, "Draft copied."),
   );
-  elements.openGmailButton.addEventListener("click", openGmail);
+  elements.deliveryAccountButton.addEventListener("click", openSettings);
+  elements.scheduleToggle.addEventListener("change", async () => {
+    state.deliverySettings = { ...state.deliverySettings, scheduleEnabled: elements.scheduleToggle.checked };
+    await saveDeliverySettings();
+    renderDelivery();
+  });
+  elements.scheduleTime.addEventListener("change", async () => {
+    state.deliverySettings = normalizeDeliverySettings({ ...state.deliverySettings, scheduleTime: elements.scheduleTime.value });
+    await saveDeliverySettings();
+    renderDelivery();
+  });
+  elements.sendEmailButton.addEventListener("click", deliverEmail);
 }
 
-async function initialize() {
-  populateTemplates();
-  bindEvents();
-  showView("loading");
+function resetProfileWorkspace() {
+  clearTimeout(state.draftTimer);
+  setFindEmailLoading(false, "Find verified");
+  setWriterLoading(false);
+  state.draftTimer = null;
+  state.profile = null;
+  state.activeTabId = null;
+  state.email = "";
+  state.emailSource = "No contact provider has checked this profile yet";
+  state.emailVerified = false;
+  state.emailType = "";
+  state.contactDetails = { emails: [], phones: [], emailStatus: "", emailStatuses: {}, error: "" };
+  state.confidence = null;
+  state.selectedRecipients = new Set();
+  state.note = "";
+  state.subject = "";
+  state.body = "";
+  state.personalizationModel = "";
+  state.composerDirty = false;
+  state.contactOutCreditsRemaining = null;
+}
 
+async function refreshActiveProfile() {
+  const refreshSequence = ++state.refreshSequence;
+  showView("loading");
   try {
-    await loadSettings();
-    state.profile = await getActiveProfile();
-    if (!state.profile) {
+    resetProfileWorkspace();
+    const profile = await getActiveProfile();
+    if (refreshSequence !== state.refreshSequence) return;
+    if (!profile) {
       showView("gate");
       return;
     }
 
-    state.email = "";
-    state.emailSource = "No contact provider has checked this profile yet";
-    state.emailVerified = false;
-    state.note = "";
+    state.profile = profile;
     elements.previewBadge.hidden = !state.isPreview;
     renderProfile();
     await loadDraft();
+    if (refreshSequence !== state.refreshSequence) return;
+    if (state.isPreview && !state.email) {
+      state.contactOutCreditsRemaining = 1683;
+      state.email = state.profile.visibleEmail;
+      state.emailVerified = true;
+      state.emailType = "work";
+      state.emailSource = "Work email confirmed by ContactOut";
+      state.contactDetails = {
+        emails: [state.email, "joshua.rivera@streamdatacenters.com"],
+        emailStatuses: { [state.email]: "verified", "joshua.rivera@streamdatacenters.com": "valid" },
+        error: "",
+      };
+      state.selectedRecipients = new Set([state.email]);
+      renderProfile();
+    }
     await loadCampaigns();
+    if (refreshSequence !== state.refreshSequence) return;
     showView("workspace");
     if (previewTab === "draft") switchTab("draft");
 
-    if (!state.email && state.settings.autoEnrich) findProspectEmail({ automatic: true });
+    if (!state.emailVerified && state.settings.autoEnrich && !state.isPreview) {
+      const lookupKey = linkedInProfileIdentity(state.profile.url);
+      if (lookupKey && !state.autoLookupAttempts.has(lookupKey)) {
+        state.autoLookupAttempts.add(lookupKey);
+        findProspectEmail({ automatic: true });
+      }
+    }
   } catch (error) {
+    if (refreshSequence !== state.refreshSequence) return;
     showView("gate");
     showToast(error instanceof Error ? error.message : "Could not read this profile.");
+  }
+}
+
+function queueActiveProfileRefresh(delay = 180) {
+  if (state.isPreview) return;
+  clearTimeout(state.refreshTimer);
+  state.refreshTimer = setTimeout(() => refreshActiveProfile(), delay);
+}
+
+async function initialize() {
+  bindEvents();
+  await loadSettings();
+  await loadCampaigns();
+  await refreshActiveProfile();
+
+  if (!state.isPreview) {
+    chrome.tabs.onActivated.addListener(() => queueActiveProfileRefresh());
+    chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+      if (!tab.active || (!changeInfo.url && changeInfo.status !== "complete")) return;
+      const currentIdentity = linkedInProfileIdentity(state.profile?.url);
+      const nextIdentity = linkedInProfileIdentity(changeInfo.url || tab.url);
+      if (tabId === state.activeTabId && (!changeInfo.url || currentIdentity === nextIdentity)) return;
+      queueActiveProfileRefresh(changeInfo.url ? 80 : 180);
+    });
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== "local") return;
+      if (changes.velaGtmSettings || changes[GOOGLE_ACCOUNT_STORAGE_KEY] || changes[DELIVERY_SETTINGS_KEY]) {
+        loadSettings().catch(() => {});
+      }
+      if (changes[CAMPAIGNS_STORAGE_KEY]) {
+        state.campaigns = normalizeCampaigns(changes[CAMPAIGNS_STORAGE_KEY].newValue || []);
+        renderCampaignList();
+      }
+    });
   }
 }
 

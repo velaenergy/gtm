@@ -1,22 +1,18 @@
-import { buildWriterRequest, normalizeWriterResponse } from "./lib/ai-writer.js";
+import { buildWriterRequest, normalizeWriterResponse, openerQualityIssues } from "./lib/ai-writer.js";
 import {
-  GMAIL_DRAFTS_WEB_URL,
-  GOOGLE_ACCOUNT_STORAGE_KEY,
-  createGmailDraftWithRetry,
-  getGmailAuthToken,
-  getGmailProfile,
-  gmailDraftBatchSummary,
-} from "./lib/gmail.js";
-import { pickGoogleAccount } from "./lib/google-account-picker.js";
-import { createGoogleSpreadsheet } from "./lib/google-sheets.js";
+  IMPORT_FIELDS,
+  exportMailMergeWorkbook,
+  mappedRowsToProspects,
+  readSpreadsheet,
+} from "./lib/mail-merge.js";
 import {
   DEFAULT_SETTINGS,
-  TEMPLATES,
   applyTemplate,
   buildWorkNote,
   initialsFor,
   isEmail,
   normalizeEnrichmentResponse,
+  outreachTemplate,
   resolveTheme,
   templateVariables,
 } from "./lib/message.js";
@@ -26,40 +22,67 @@ import {
   parseBulkProspects,
   queueStats,
   upsertProspects,
+  withActivity,
 } from "./lib/queue.js";
 import {
   CAMPAIGNS_STORAGE_KEY,
   addProspectToCampaign,
   campaignProspects,
   createCampaign,
+  deleteCampaign,
+  duplicateCampaign,
   normalizeCampaigns,
   removeProspectFromAllCampaigns,
   removeProspectFromCampaign,
+  updateCampaign,
 } from "./lib/campaigns.js";
+import {
+  PROVIDER,
+  configuredEnrichmentProviders,
+  configuredSearchProviders,
+  preferredProvider,
+  preferredSearchProvider,
+  providerLabel,
+} from "./lib/provider-priority.js";
+import {
+  SCHEDULED_SENDS_STORAGE_KEY,
+  normalizeScheduledSends,
+} from "./lib/schedule.js";
+import {
+  DELIVERY_LOG_STORAGE_KEY,
+  DELIVERY_STATUS,
+  normalizeDeliveryLog,
+} from "./lib/delivery-ledger.js";
 
 const isExtension = Boolean(globalThis.chrome?.runtime?.id);
 const pageParams = new URLSearchParams(location.search);
 const previewTheme = !isExtension ? pageParams.get("theme") : null;
 const requestedCampaignId = pageParams.get("campaign") || "";
+const requestedView = pageParams.get("view") || "";
 const elements = Object.fromEntries([
   "settingsButton", "searchForm", "searchBrief", "planSearchButton", "searchPlan", "searchStrategy", "searchOptions",
   "captureSearchButton", "openImportButton", "openImportButtonTop", "importDialog", "bulkInput", "importButton", "importHint",
-  "processButton", "draftReadyButton", "queueBody", "emptyState", "totalStat", "readyStat", "draftedStat",
-  "attentionStat", "totalDelta", "progressBar", "progressText", "toast", "navTotal", "navResearch", "navReview", "navDrafted",
+  "spreadsheetImportPanel", "linkedinImportPanel", "importFileInput", "dropZone", "importFileName", "mappingStage", "mappingGrid", "mappingSummary", "mappingIssues", "replaceImportFile",
+  "processButton", "mailMergeReadyButton", "queueBody", "emptyState", "totalStat", "readyStat", "draftedStat",
+  "sentStat", "attentionStat", "totalDelta", "progressBar", "progressText", "toast", "navTotal", "navResearch", "navReview", "navDrafted", "navTracking",
+  "navScheduled", "heroEyebrow", "pageTitle", "pageSubtitle", "agentPanel", "metricsPanel", "overviewPanel", "overviewReviewCount", "overviewScheduledCount", "overviewSentTodayCount", "overviewScheduleList", "overviewActivityList", "overviewReviewList", "pipelineBar",
+  "operationsPanel", "operationsKicker", "operationsTitle", "operationsDescription", "operationsPrimaryAction", "deliveryList", "queueSection",
+  "generationModePill", "trackingPanel", "trackingImported", "trackingResearched", "trackingDrafted", "trackingSent", "trackingActivity",
   "queueHeading", "queueDescription", "tableSearch", "statusFilterButton", "resultCount", "selectAll", "bulkBar",
-  "selectedCount", "bulkResearchButton", "bulkDraftButton", "clearSelectionButton", "exportButton", "exportButtonLabel", "copySheetButton",
+  "selectedCount", "bulkResearchButton", "bulkMailMergeButton", "clearSelectionButton", "exportButton", "exportButtonLabel",
   "collapseSidebar", "drawerBackdrop", "reviewDrawer", "closeDrawerButton", "drawerAvatar", "drawerName", "drawerHeadline",
   "drawerLocation", "drawerLinkedIn", "drawerWorkNote", "drawerEmail", "drawerSubject", "drawerBody", "saveReviewButton", "approveDraftButton",
-  "drawerEmailChoices", "drawerEmailSource", "drawerEmailStatus", "copyDrawerEmail", "retryDrawerLookup", "drawerExperienceCount", "drawerExperienceList",
+  "drawerEmailChoices", "drawerEmailSource", "drawerEmailStatus", "copyDrawerEmail", "retryDrawerLookup", "drawerExperienceCount", "drawerExperienceList", "drawerActivity", "markSentButton",
   "agentActivity", "agentActivityTitle", "agentActivityDetail", "campaignNav", "newCampaignButton", "newCampaignButtonTop",
-  "campaignDialog", "campaignForm", "campaignName", "campaignDescription", "closeCampaignDialog", "cancelCampaignButton",
-  "googleAccountDialog", "googleAccountList",
+  "campaignActions", "campaignActionsButton", "campaignActionsMenu", "editCampaignButton", "duplicateCampaignButton", "deleteCampaignButton",
+  "campaignDialog", "campaignForm", "campaignName", "campaignDescription", "campaignDialogKicker", "campaignDialogTitle", "campaignDialogDescription", "campaignSubmitButton", "closeCampaignDialog", "cancelCampaignButton",
+  "deleteCampaignDialog", "deleteCampaignDescription", "confirmDeleteCampaignButton",
 ].map((id) => [id, document.getElementById(id)]));
 
 const DEMO_QUEUE = [
   { url: "https://www.linkedin.com/in/joshua-rivera", name: "Joshua Rivera", headline: "VP, Critical Operations", location: "Seattle, WA", email: "joshua@northstarinfra.com", emailSource: "ContactOut verified contact", contactDetails: { emails: ["joshua@northstarinfra.com", "josh.rivera@gmail.com", "jrivera@yahoo.com"], workEmails: ["joshua@northstarinfra.com"], personalEmails: ["josh.rivera@gmail.com", "jrivera@yahoo.com"], emailStatus: "Verified" }, status: QUEUE_STATUS.READY, subject: "Your work in critical operations + a quick Vela intro", body: "Hi Joshua,\n\nI came across your work leading critical operations at Northstar Infrastructure and would love to learn from your perspective.\n\nBest,\nTarun", workNote: "your work leading critical operations at Northstar Infrastructure", profile: { experiences: [{ title: "VP, Critical Operations", company: "Northstar Infrastructure", dates: "Apr 2026 - Present" }, { title: "Director, Critical Facilities", company: "Northstar Infrastructure", dates: "Sep 2019 - Apr 2026" }, { title: "Critical Facilities Manager", company: "Meridian Data Centers", dates: "Jan 2017 - Sep 2019" }] }, updatedAt: new Date(Date.now() - 8 * 60_000).toISOString() },
   { url: "https://www.linkedin.com/in/maya-chen", name: "Maya Chen", headline: "Director of Energy Strategy", location: "San Francisco, CA", email: "maya@aperturecompute.com", emailSource: "ContactOut work email", status: QUEUE_STATUS.DRAFTED, subject: "Power strategy at Aperture Compute", body: "Hi Maya,\n\nYour work on energy strategy at Aperture Compute stood out to me.", workNote: "your work on energy strategy for high-density compute", profile: { experiences: [{ title: "Director of Energy Strategy", company: "Aperture Compute" }] }, updatedAt: new Date(Date.now() - 44 * 60_000).toISOString() },
-  { url: "https://www.linkedin.com/in/omar-haddad", name: "Omar Haddad", headline: "Head of Site Selection", location: "Austin, TX", email: "omar@vectorgrid.com", emailSource: "LinkedIn contact info", status: QUEUE_STATUS.READY, subject: "Site selection, power, and a quick introduction", body: "Hi Omar,\n\nI was impressed by your work finding and powering new infrastructure sites.", workNote: "your work leading site selection at VectorGrid", profile: { experiences: [{ title: "Head of Site Selection", company: "VectorGrid" }] }, updatedAt: new Date(Date.now() - 2 * 3_600_000).toISOString() },
+  { url: "https://www.linkedin.com/in/omar-haddad", name: "Omar Haddad", headline: "Head of Site Selection", location: "Austin, TX", email: "omar@vectorgrid.com", emailSource: "LinkedIn contact info", status: QUEUE_STATUS.READY, subject: "Site selection, power, and a quick introduction", body: "Hi Omar,\n\nYou lead site selection at VectorGrid, and I wanted to ask how power availability is changing which markets your team can pursue.", workNote: "You lead site selection at VectorGrid, and I wanted to ask how power availability is changing which markets your team can pursue.", profile: { experiences: [{ title: "Head of Site Selection", company: "VectorGrid" }] }, updatedAt: new Date(Date.now() - 2 * 3_600_000).toISOString() },
   { url: "https://www.linkedin.com/in/elena-rossi", name: "Elena Rossi", headline: "SVP, Infrastructure Development", location: "New York, NY", status: QUEUE_STATUS.PROCESSING, profile: { experiences: [{ title: "SVP, Infrastructure Development", company: "Arcadia Data Centers" }] }, updatedAt: new Date(Date.now() - 4 * 3_600_000).toISOString() },
   { url: "https://www.linkedin.com/in/devon-brooks", name: "Devon Brooks", headline: "Utility Partnerships", location: "Denver, CO", status: QUEUE_STATUS.NEEDS_EMAIL, error: "No verified work email found.", subject: "Utility partnerships at Meridian", body: "Hi Devon,\n\nI’d value your perspective on utility partnership workflows.", profile: { experiences: [{ title: "Director, Utility Partnerships", company: "Meridian Power" }] }, updatedAt: new Date(Date.now() - 23 * 3_600_000).toISOString() },
   { url: "https://www.linkedin.com/in/priya-narayanan", name: "Priya Narayanan", headline: "VP, Power Procurement", location: "Chicago, IL", status: QUEUE_STATUS.NEW, background: "leads power procurement for a large industrial portfolio", profile: { experiences: [{ title: "VP, Power Procurement", company: "Forge Industrial" }] }, updatedAt: new Date(Date.now() - 2 * 86_400_000).toISOString() },
@@ -71,7 +94,62 @@ const DEMO_CAMPAIGNS = [
   createCampaign({ id: "energy-buyers", name: "Energy buyers", description: "Procurement and utility strategy", prospectIds: [DEMO_QUEUE[1].url, DEMO_QUEUE[4].url, DEMO_QUEUE[5].url] }),
 ];
 
-const state = { queue: [], campaigns: [], activeCampaignId: "", settings: { ...DEFAULT_SETTINGS }, googleAccount: null, busy: false, toastTimer: null, view: "all", query: "", selected: new Set(), activeProspectId: null, drawerReturnFocus: null, attentionOnly: false };
+const DEMO_SCHEDULED_SENDS = [
+  {
+    id: "demo-scheduled-1",
+    accountId: "preview",
+    senderEmail: "tarun@vela.energy",
+    recipients: ["omar@vectorgrid.com"],
+    subject: "Site selection, power, and a quick introduction",
+    prospectId: DEMO_QUEUE[2].url,
+    scheduledAt: new Date(Date.now() + 72 * 60_000).toISOString(),
+    status: DELIVERY_STATUS.SCHEDULED,
+    createdAt: new Date(Date.now() - 18 * 60_000).toISOString(),
+    completedAt: "",
+  },
+  {
+    id: "demo-scheduled-2",
+    accountId: "preview",
+    senderEmail: "tarun@vela.energy",
+    recipients: ["joshua@northstarinfra.com"],
+    subject: "Your work in critical operations + a quick Vela intro",
+    prospectId: DEMO_QUEUE[0].url,
+    scheduledAt: new Date(Date.now() + 26 * 60 * 60_000).toISOString(),
+    status: DELIVERY_STATUS.SCHEDULED,
+    createdAt: new Date(Date.now() - 42 * 60_000).toISOString(),
+    completedAt: "",
+  },
+];
+
+const DEMO_DELIVERY_LOG = normalizeDeliveryLog([
+  {
+    id: "demo-delivery-1",
+    mode: "immediate",
+    status: DELIVERY_STATUS.SENT,
+    senderEmail: "tarun@vela.energy",
+    recipients: ["maya@aperturecompute.com"],
+    subject: "Power strategy at Aperture Compute",
+    prospectId: DEMO_QUEUE[1].url,
+    createdAt: new Date(Date.now() - 48 * 60_000).toISOString(),
+    completedAt: new Date(Date.now() - 48 * 60_000).toISOString(),
+    updatedAt: new Date(Date.now() - 48 * 60_000).toISOString(),
+  },
+  {
+    id: "demo-delivery-2",
+    mode: "scheduled",
+    status: DELIVERY_STATUS.SENT,
+    senderEmail: "tarun@vela.energy",
+    recipients: ["liam@helioscolo.com"],
+    subject: "Development at Helios + Vela",
+    prospectId: DEMO_QUEUE[6].url,
+    scheduledAt: new Date(Date.now() - 5 * 60 * 60_000).toISOString(),
+    createdAt: new Date(Date.now() - 26 * 60 * 60_000).toISOString(),
+    completedAt: new Date(Date.now() - 5 * 60 * 60_000).toISOString(),
+    updatedAt: new Date(Date.now() - 5 * 60 * 60_000).toISOString(),
+  },
+]);
+
+const state = { queue: [], campaigns: [], scheduledJobs: [], deliveryLog: [], activeCampaignId: "", editingCampaignId: "", settings: { ...DEFAULT_SETTINGS }, busy: false, toastTimer: null, view: "overview", query: "", selected: new Set(), activeProspectId: null, drawerReturnFocus: null, attentionOnly: false, importSource: "spreadsheet", importData: null };
 
 const storage = {
   async get(keys) {
@@ -102,10 +180,10 @@ function setBusy(busy, label = "Researching queue") {
   elements.progressBar.hidden = !busy;
   elements.progressText.textContent = label;
   elements.processButton.disabled = busy;
-  elements.draftReadyButton.disabled = busy;
+  elements.mailMergeReadyButton.disabled = busy;
   elements.captureSearchButton.disabled = busy;
   elements.agentActivity.hidden = !busy;
-  if (busy) updateAgentActivity(label.toLowerCase().includes("finding") ? "source" : label.toLowerCase().includes("gmail") ? "draft" : "research", label);
+  if (busy) updateAgentActivity(label.toLowerCase().includes("finding") ? "source" : label.toLowerCase().includes("mail merge") ? "draft" : "research", label);
 }
 
 const AGENT_STEP_ORDER = ["plan", "source", "research", "draft"];
@@ -135,7 +213,8 @@ function statusLabel(status) {
     [QUEUE_STATUS.PROCESSING]: "Researching",
     [QUEUE_STATUS.NEEDS_EMAIL]: "Needs email",
     [QUEUE_STATUS.READY]: "Ready to review",
-    [QUEUE_STATUS.DRAFTED]: "In Gmail",
+    [QUEUE_STATUS.DRAFTED]: "Exported",
+    [QUEUE_STATUS.SENT]: "Sent",
     [QUEUE_STATUS.ERROR]: "Try again",
   })[status] || "Queued";
 }
@@ -175,6 +254,7 @@ function prospectMatchesView(prospect) {
   if (state.view === "research" && ![QUEUE_STATUS.NEW, QUEUE_STATUS.PROCESSING, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(prospect.status)) return false;
   if (state.view === "review" && prospect.status !== QUEUE_STATUS.READY) return false;
   if (state.view === "drafted" && prospect.status !== QUEUE_STATUS.DRAFTED) return false;
+  if (state.view === "tracking" && ![QUEUE_STATUS.DRAFTED, QUEUE_STATUS.SENT].includes(prospect.status) && !(prospect.activity || []).length) return false;
   if (state.attentionOnly && ![QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(prospect.status)) return false;
   if (!state.query) return true;
   const details = companyAndRole(prospect);
@@ -207,26 +287,225 @@ function renderCampaignNav() {
   elements.campaignNav.replaceChildren(fragment);
 }
 
+function renderTracking(scope = state.queue) {
+  const allActivity = scope.flatMap((prospect) => (prospect.activity || []).map((event) => ({ ...event, prospect })))
+    .sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+  elements.trackingImported.textContent = scope.filter((item) => item.importedAt || (item.activity || []).some((event) => event.type === "imported")).length;
+  elements.trackingResearched.textContent = scope.filter((item) => item.researchedAt || (item.activity || []).some((event) => event.type === "researched")).length;
+  elements.trackingDrafted.textContent = scope.filter((item) => item.exportedAt || item.status === QUEUE_STATUS.DRAFTED).length;
+  elements.trackingSent.textContent = scope.filter((item) => item.emailSentAt || item.status === QUEUE_STATUS.SENT).length;
+  const fragment = document.createDocumentFragment();
+  for (const event of allActivity.slice(0, 8)) {
+    const row = document.createElement("div");
+    row.className = "tracking-event";
+    appendText(row, "span", initialsFor(event.prospect.name), "tracking-avatar");
+    const copy = document.createElement("div");
+    appendText(copy, "strong", event.prospect.name || event.prospect.email || "Prospect");
+    appendText(copy, "small", event.detail || statusLabel(event.type), "tracking-detail");
+    row.append(copy);
+    appendText(row, "time", relativeTime(event.at), "tracking-time");
+    fragment.append(row);
+  }
+  if (!allActivity.length) appendText(fragment, "p", "Workflow activity will appear here after an import, research run, draft, export, or sent update.", "tracking-empty");
+  elements.trackingActivity.replaceChildren(fragment);
+}
+
+function deliveryProspect(record = {}) {
+  return state.queue.find((prospect) => prospect.id === record.prospectId || prospect.url === record.prospectId) || null;
+}
+
+function deliveryDate(value, { relative = false } = {}) {
+  const date = new Date(value || Date.now());
+  if (!Number.isFinite(date.getTime())) return "Unknown time";
+  if (relative) {
+    const remaining = date.getTime() - Date.now();
+    if (remaining > 0 && remaining < 3_600_000) return `in ${Math.max(1, Math.round(remaining / 60_000))}m`;
+    if (remaining >= 3_600_000 && remaining < 86_400_000) return `in ${Math.round(remaining / 3_600_000)}h`;
+    if (remaining >= 86_400_000) return `in ${Math.round(remaining / 86_400_000)}d`;
+    return relativeTime(date.toISOString());
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function deliveryStatusLabel(status = "") {
+  return ({
+    [DELIVERY_STATUS.SCHEDULED]: "Scheduled",
+    [DELIVERY_STATUS.SENT]: "Delivered",
+    [DELIVERY_STATUS.PARTIAL]: "Partially sent",
+    [DELIVERY_STATUS.FAILED]: "Failed",
+    [DELIVERY_STATUS.CANCELLED]: "Cancelled",
+  })[status] || "Delivery";
+}
+
+async function cancelScheduledDelivery(id, button) {
+  if (!id) return;
+  button.disabled = true;
+  try {
+    if (isExtension) {
+      const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_EMAIL_SCHEDULE_CANCEL", id });
+      if (!response?.ok) throw new Error(response?.error || "Could not cancel this scheduled send.");
+      const saved = await storage.get([SCHEDULED_SENDS_STORAGE_KEY, DELIVERY_LOG_STORAGE_KEY]);
+      state.scheduledJobs = normalizeScheduledSends(saved[SCHEDULED_SENDS_STORAGE_KEY]);
+      state.deliveryLog = normalizeDeliveryLog(saved[DELIVERY_LOG_STORAGE_KEY]);
+    } else {
+      const completedAt = new Date().toISOString();
+      const job = state.scheduledJobs.find((item) => item.id === id);
+      state.scheduledJobs = state.scheduledJobs.map((item) => item.id === id ? { ...item, status: DELIVERY_STATUS.CANCELLED, completedAt } : item);
+      state.deliveryLog = normalizeDeliveryLog(state.deliveryLog.map((item) => item.id === id ? { ...item, ...job, status: DELIVERY_STATUS.CANCELLED, completedAt, updatedAt: completedAt } : item));
+    }
+    renderQueue();
+    showToast("Scheduled send cancelled. Nothing was delivered.");
+  } catch (error) {
+    button.disabled = false;
+    showToast(error instanceof Error ? error.message : "Could not cancel this scheduled send.");
+  }
+}
+
+function createDeliveryRow(record = {}, { compact = false, cancellable = false } = {}) {
+  const prospect = deliveryProspect(record);
+  const row = document.createElement("article");
+  row.className = `delivery-row${compact ? " is-compact" : ""}`;
+  const mark = appendText(row, "span", initialsFor(prospect?.name || record.recipients?.[0]), "delivery-avatar");
+  mark.setAttribute("aria-hidden", "true");
+  const copy = document.createElement("div");
+  copy.className = "delivery-copy";
+  appendText(copy, "strong", prospect?.name || record.recipients?.join(", ") || "Email delivery");
+  appendText(copy, "span", record.subject || "Untitled message", "delivery-subject");
+  if (!compact) appendText(copy, "small", [record.recipients?.join(", "), record.senderEmail ? `from ${record.senderEmail}` : ""].filter(Boolean).join(" · ") || "Recipient unavailable", "delivery-meta");
+  row.append(copy);
+  const timing = document.createElement("div");
+  timing.className = "delivery-timing";
+  appendText(timing, "span", deliveryStatusLabel(record.status), `delivery-state delivery-state-${record.status}`);
+  appendText(timing, "time", compact ? deliveryDate(record.scheduledAt || record.completedAt || record.updatedAt, { relative: true }) : deliveryDate(record.scheduledAt || record.completedAt || record.updatedAt));
+  if (!compact && record.error) appendText(timing, "small", record.error, "delivery-error");
+  row.append(timing);
+  if (cancellable && record.status === DELIVERY_STATUS.SCHEDULED) {
+    const cancel = appendText(row, "button", "Cancel", "delivery-cancel");
+    cancel.type = "button";
+    cancel.addEventListener("click", () => cancelScheduledDelivery(record.id, cancel));
+  }
+  return row;
+}
+
+function renderOverview() {
+  const scheduled = state.scheduledJobs
+    .filter((job) => job.status === DELIVERY_STATUS.SCHEDULED)
+    .sort((a, b) => String(a.scheduledAt).localeCompare(String(b.scheduledAt)));
+  const today = new Date();
+  const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const nextDay = Date.now() + 24 * 60 * 60_000;
+  const deliveredToday = state.deliveryLog.filter((record) => [DELIVERY_STATUS.SENT, DELIVERY_STATUS.PARTIAL].includes(record.status) && Date.parse(record.completedAt || record.updatedAt) >= startOfDay);
+  elements.overviewReviewCount.textContent = state.queue.filter((item) => item.status === QUEUE_STATUS.READY).length;
+  elements.overviewScheduledCount.textContent = scheduled.filter((job) => Date.parse(job.scheduledAt) <= nextDay).length;
+  elements.overviewSentTodayCount.textContent = deliveredToday.length;
+
+  const scheduleFragment = document.createDocumentFragment();
+  for (const record of scheduled.slice(0, 3)) scheduleFragment.append(createDeliveryRow(record, { compact: true }));
+  if (!scheduled.length) appendText(scheduleFragment, "p", "No sends are queued. Review a verified draft in the side panel to schedule one.", "overview-empty");
+  elements.overviewScheduleList.replaceChildren(scheduleFragment);
+
+  const activityFragment = document.createDocumentFragment();
+  const recent = state.deliveryLog.filter((record) => record.status !== DELIVERY_STATUS.SCHEDULED).slice(0, 3);
+  for (const record of recent) activityFragment.append(createDeliveryRow(record, { compact: true }));
+  if (!recent.length) appendText(activityFragment, "p", "Delivered, failed, and cancelled sends will build a permanent local log here.", "overview-empty");
+  elements.overviewActivityList.replaceChildren(activityFragment);
+
+  const readyProspects = state.queue
+    .filter((item) => item.status === QUEUE_STATUS.READY)
+    .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
+    .slice(0, 5);
+  const reviewFragment = document.createDocumentFragment();
+  for (const prospect of readyProspects) {
+    const row = document.createElement("article");
+    row.className = "review-row";
+    appendText(row, "span", initialsFor(prospect.name), "person-avatar");
+    const copy = document.createElement("div");
+    copy.className = "review-row-copy";
+    appendText(copy, "strong", prospect.name || "LinkedIn prospect");
+    appendText(copy, "span", prospect.subject || companyAndRole(prospect).role, "review-row-subject");
+    row.append(copy);
+    appendText(row, "time", relativeTime(prospect.updatedAt || prospect.createdAt));
+    const open = appendText(row, "button", "Review", "row-button");
+    open.type = "button";
+    open.addEventListener("click", (event) => openReviewDrawer(prospect.id, event.currentTarget));
+    reviewFragment.append(row);
+  }
+  if (!readyProspects.length) appendText(reviewFragment, "p", "No drafts are waiting. Research a prospect and its draft lands here for approval.", "overview-empty");
+  elements.overviewReviewList.replaceChildren(reviewFragment);
+}
+
+function renderDeliveryOperations() {
+  if (!["scheduled", "history"].includes(state.view)) return;
+  const scheduledView = state.view === "scheduled";
+  const records = scheduledView
+    ? state.scheduledJobs.filter((job) => job.status === DELIVERY_STATUS.SCHEDULED).sort((a, b) => String(a.scheduledAt).localeCompare(String(b.scheduledAt)))
+    : state.deliveryLog.filter((record) => record.status !== DELIVERY_STATUS.SCHEDULED);
+  elements.operationsKicker.textContent = scheduledView ? "Delivery queue" : "Delivery ledger";
+  elements.operationsTitle.textContent = scheduledView ? "Scheduled sends" : "Every delivery, in one place";
+  elements.operationsDescription.textContent = scheduledView
+    ? "These reviewed messages are persisted in Chrome and will run through Gmail at the listed time."
+    : "A local audit trail of sent, partial, failed, and cancelled deliveries—without inbox-reading access.";
+  elements.operationsPrimaryAction.textContent = scheduledView ? "Review more drafts" : "Open review queue";
+  const fragment = document.createDocumentFragment();
+  for (const record of records) fragment.append(createDeliveryRow(record, { cancellable: scheduledView }));
+  if (!records.length) {
+    const empty = document.createElement("div");
+    empty.className = "delivery-empty";
+    appendText(empty, "h3", scheduledView ? "No sends are scheduled" : "No delivery history yet");
+    appendText(empty, "p", scheduledView ? "Choose Schedule sends in the side panel, review the message, and click Schedule send." : "Once a reviewed email sends, its recipient, subject, sender, and result will appear here.");
+    fragment.append(empty);
+  }
+  elements.deliveryList.replaceChildren(fragment);
+}
+
 function renderQueue() {
   const scope = scopedQueue();
   const stats = queueStats(scope);
   const campaign = activeCampaign();
+  const scheduledCount = state.scheduledJobs.filter((job) => job.status === DELIVERY_STATUS.SCHEDULED).length;
+  const deliveredCount = state.deliveryLog.filter((record) => [DELIVERY_STATUS.SENT, DELIVERY_STATUS.PARTIAL].includes(record.status)).length;
   renderCampaignNav();
   elements.totalStat.textContent = stats.total;
   elements.readyStat.textContent = stats.ready;
-  elements.draftedStat.textContent = stats.drafted;
+  elements.draftedStat.textContent = scheduledCount;
+  elements.sentStat.textContent = deliveredCount;
   elements.attentionStat.textContent = stats.attention;
+  const pipelineSegments = { research: stats.attention, review: stats.ready, scheduled: scheduledCount, delivered: deliveredCount };
+  for (const segment of elements.pipelineBar.children) {
+    const value = pipelineSegments[segment.dataset.stage] || 0;
+    segment.style.flexGrow = value;
+    segment.classList.toggle("is-empty", value === 0);
+  }
   elements.totalDelta.textContent = campaign ? `In ${campaign.name}` : "Across your workspace";
-  elements.exportButtonLabel.textContent = campaign ? "Export campaign" : "Export CSV";
+  elements.exportButtonLabel.textContent = campaign ? "Export campaign" : "Export MailMerge";
+  elements.campaignActions.hidden = !campaign;
+  elements.generationModePill.querySelector("strong").textContent = state.settings.aiGenerationMode === "full" ? "Entire email" : "Personalization only";
   elements.navTotal.textContent = state.queue.length;
   elements.navResearch.textContent = state.queue.filter((item) => [QUEUE_STATUS.NEW, QUEUE_STATUS.PROCESSING, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(item.status)).length;
   elements.navReview.textContent = stats.ready;
   elements.navDrafted.textContent = stats.drafted;
+  elements.navScheduled.textContent = scheduledCount;
+  elements.navTracking.textContent = deliveredCount;
+  elements.agentPanel.hidden = state.view !== "research";
+  elements.metricsPanel.hidden = state.view !== "overview";
+  elements.overviewPanel.hidden = state.view !== "overview";
+  elements.operationsPanel.hidden = !["scheduled", "history"].includes(state.view);
+  elements.queueSection.hidden = ["overview", "scheduled", "history"].includes(state.view);
+  elements.trackingPanel.hidden = state.view !== "tracking";
+  renderTracking(scope);
+  renderOverview();
+  renderDeliveryOperations();
   const visible = visibleProspects();
   elements.emptyState.hidden = visible.length > 0;
   elements.queueBody.hidden = visible.length === 0;
   elements.resultCount.textContent = `${visible.length} prospect${visible.length === 1 ? "" : "s"}`;
-  elements.draftReadyButton.disabled = state.busy || stats.ready === 0;
+  elements.mailMergeReadyButton.disabled = state.busy || stats.ready === 0;
   elements.selectAll.checked = visible.length > 0 && visible.every((item) => state.selected.has(item.id));
   elements.selectAll.indeterminate = visible.some((item) => state.selected.has(item.id)) && !elements.selectAll.checked;
   elements.selectedCount.textContent = state.selected.size;
@@ -259,10 +538,12 @@ function renderQueue() {
     const copy = document.createElement("div");
     copy.className = "person-copy";
     appendText(copy, "strong", prospect.name || "LinkedIn prospect");
-    const linkedIn = appendText(copy, "a", prospect.location || "View LinkedIn");
-    linkedIn.href = prospect.url;
-    linkedIn.target = "_blank";
-    linkedIn.rel = "noreferrer";
+    const linkedIn = appendText(copy, prospect.url ? "a" : "span", prospect.location || (prospect.url ? "View LinkedIn" : "Spreadsheet import"));
+    if (prospect.url) {
+      linkedIn.href = prospect.url;
+      linkedIn.target = "_blank";
+      linkedIn.rel = "noreferrer";
+    }
     person.append(copy);
     personCell.append(person);
 
@@ -295,19 +576,13 @@ function renderQueue() {
       const review = appendText(actions, "button", "Review", "row-button");
       review.type = "button";
       review.addEventListener("click", (event) => openReviewDrawer(prospect.id, event.currentTarget));
-    } else if (prospect.status !== QUEUE_STATUS.DRAFTED) {
+    } else if (![QUEUE_STATUS.DRAFTED, QUEUE_STATUS.SENT].includes(prospect.status) && prospect.url) {
       const research = appendText(actions, "button", prospect.status === QUEUE_STATUS.ERROR ? "Retry" : "Research", "row-button");
       research.type = "button";
       research.addEventListener("click", () => processQueue([prospect.id]));
     }
-    if (prospect.status === QUEUE_STATUS.DRAFTED) {
-      const openGmail = appendText(actions, "button", "Open Gmail", "row-button");
-      openGmail.type = "button";
-      openGmail.title = "Open Gmail drafts to review and send manually";
-      openGmail.addEventListener("click", () => openGmailDrafts().catch((error) => showToast(error instanceof Error ? error.message : "Could not open Gmail.")));
-    }
     if (prospect.subject && prospect.status !== QUEUE_STATUS.READY) {
-      const review = appendText(actions, "button", prospect.status === QUEUE_STATUS.DRAFTED ? "Details" : "Open", "row-button");
+      const review = appendText(actions, "button", [QUEUE_STATUS.DRAFTED, QUEUE_STATUS.SENT].includes(prospect.status) ? "Details" : "Open", "row-button");
       review.type = "button";
       review.addEventListener("click", (event) => openReviewDrawer(prospect.id, event.currentTarget));
     }
@@ -316,11 +591,11 @@ function renderQueue() {
     remove.title = campaign ? `Remove from ${campaign.name}` : "Remove prospect";
     remove.addEventListener("click", async () => {
       if (campaign) {
-        state.campaigns = removeProspectFromCampaign(state.campaigns, campaign.id, prospect.url);
+        state.campaigns = removeProspectFromCampaign(state.campaigns, campaign.id, prospect.url || prospect.email || prospect.id);
         await persistCampaigns();
       } else {
         state.queue = state.queue.filter((item) => item.id !== prospect.id);
-        state.campaigns = removeProspectFromAllCampaigns(state.campaigns, prospect.url);
+        state.campaigns = removeProspectFromAllCampaigns(state.campaigns, prospect.url || prospect.email || prospect.id);
         await storage.set({ [QUEUE_STORAGE_KEY]: state.queue, [CAMPAIGNS_STORAGE_KEY]: state.campaigns });
       }
       state.selected.delete(prospect.id);
@@ -337,11 +612,98 @@ async function addProspects(prospects, message) {
   const before = state.queue.length;
   state.queue = upsertProspects(state.queue, prospects);
   if (state.activeCampaignId) {
-    for (const prospect of prospects) state.campaigns = addProspectToCampaign(state.campaigns, state.activeCampaignId, prospect.url);
+    for (const prospect of prospects) state.campaigns = addProspectToCampaign(state.campaigns, state.activeCampaignId, prospect.url || prospect.email || prospect.id);
   }
   await storage.set({ [QUEUE_STORAGE_KEY]: state.queue, [CAMPAIGNS_STORAGE_KEY]: state.campaigns });
   renderQueue();
   showToast(message || `${state.queue.length - before} prospect${state.queue.length - before === 1 ? "" : "s"} added.`);
+}
+
+function setImportSource(source = "spreadsheet") {
+  state.importSource = source;
+  for (const button of document.querySelectorAll("[data-import-source]")) {
+    const active = button.dataset.importSource === source;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", String(active));
+  }
+  elements.spreadsheetImportPanel.hidden = source !== "spreadsheet";
+  elements.linkedinImportPanel.hidden = source !== "linkedin";
+  elements.importButton.disabled = source === "spreadsheet" ? !state.importData : !parseBulkProspects(elements.bulkInput.value).length;
+  elements.importButton.textContent = source === "spreadsheet" ? "Import prospects" : "Add to workspace";
+}
+
+function mappingValid() {
+  if (!state.importData) return false;
+  const { mapping } = state.importData;
+  const identities = mapping.includes("email") || mapping.includes("linkedInUrl");
+  const duplicates = mapping.filter((field) => field !== "skip" && mapping.indexOf(field) !== mapping.lastIndexOf(field));
+  const messages = [];
+  if (!identities) messages.push("Map at least one Recipient email or LinkedIn URL column.");
+  if (duplicates.length) messages.push(`Each field can only be mapped once: ${[...new Set(duplicates)].join(", ")}.`);
+  elements.mappingIssues.hidden = messages.length === 0;
+  elements.mappingIssues.textContent = messages.join(" ");
+  return !messages.length;
+}
+
+function renderImportMapping() {
+  const data = state.importData;
+  if (!data) return;
+  const fragment = document.createDocumentFragment();
+  data.headers.forEach((header, columnIndex) => {
+    const column = document.createElement("article");
+    column.className = `mapping-column${data.mapping[columnIndex] === "skip" ? " is-skipped" : ""}`;
+    const select = document.createElement("select");
+    select.setAttribute("aria-label", `Map ${header}`);
+    for (const field of IMPORT_FIELDS) {
+      const option = document.createElement("option");
+      option.value = field.value;
+      option.textContent = field.label;
+      option.selected = data.mapping[columnIndex] === field.value;
+      select.append(option);
+    }
+    select.addEventListener("change", () => {
+      data.mapping[columnIndex] = select.value;
+      renderImportMapping();
+    });
+    column.append(select);
+    appendText(column, "strong", header, "mapping-source-name");
+    for (const row of data.rows.slice(0, 4)) appendText(column, "span", row[columnIndex] instanceof Date ? row[columnIndex].toLocaleString() : String(row[columnIndex] ?? "") || "Empty", "mapping-sample");
+    fragment.append(column);
+  });
+  elements.mappingGrid.replaceChildren(fragment);
+  elements.mappingSummary.textContent = `${data.rows.length.toLocaleString()} row${data.rows.length === 1 ? "" : "s"} on ${data.sheetName}. Review the automatic mapping before import.`;
+  elements.mappingStage.hidden = false;
+  elements.dropZone.hidden = true;
+  elements.importButton.disabled = !mappingValid();
+}
+
+async function loadImportFile(file) {
+  if (!file) return;
+  try {
+    elements.importButton.disabled = true;
+    elements.importFileName.textContent = `Reading ${file.name}…`;
+    const parsed = readSpreadsheet(await file.arrayBuffer());
+    state.importData = { ...parsed, fileName: file.name };
+    elements.importFileName.textContent = file.name;
+    renderImportMapping();
+  } catch (error) {
+    state.importData = null;
+    elements.importFileName.textContent = "Drop a spreadsheet here";
+    elements.mappingStage.hidden = true;
+    elements.dropZone.hidden = false;
+    showToast(error instanceof Error ? error.message : "Could not read that spreadsheet.");
+  }
+}
+
+function resetImportDialog() {
+  state.importData = null;
+  elements.importFileInput.value = "";
+  elements.importFileName.textContent = "Drop a spreadsheet here";
+  elements.mappingStage.hidden = true;
+  elements.dropZone.hidden = false;
+  elements.mappingGrid.replaceChildren();
+  elements.mappingIssues.hidden = true;
+  setImportSource("spreadsheet");
 }
 
 function linkedinSearchUrl(brief) {
@@ -375,7 +737,8 @@ function renderSearchPlan(plan) {
     appendText(button, "strong", search.label);
     appendText(button, "p", `${search.query} — ${search.rationale}`);
     appendText(button, "b", "↗");
-    button.title = state.settings.contactOutApiKey || state.settings.apolloApiKey ? `Find candidates with ${state.settings.contactOutApiKey ? "ContactOut" : "Apollo"}` : "Open this search in LinkedIn";
+    const searchProvider = providerLabel(preferredSearchProvider(state.settings));
+    button.title = configuredSearchProviders(state.settings).length ? `Find candidates with ${searchProvider}` : "Open this search in LinkedIn";
     button.addEventListener("click", () => runPlannedSearch(search));
     fragment.append(button);
   }
@@ -384,12 +747,12 @@ function renderSearchPlan(plan) {
 }
 
 async function runPlannedSearch(search) {
-  if (!state.settings.contactOutApiKey && !state.settings.apolloApiKey) {
+  if (!configuredSearchProviders(state.settings).length) {
     await openLinkedInSearch(search.query);
     return;
   }
   try {
-    const provider = state.settings.apolloApiKey ? "Apollo" : "ContactOut";
+    const provider = providerLabel(preferredSearchProvider(state.settings));
     setBusy(true, `Finding people with ${provider}`);
     updateAgentActivity("source", `Searching ${provider}`, "Matching titles, seniority, and profile keywords");
     const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_PROVIDER_PEOPLE_SEARCH", filters: search.filters });
@@ -487,18 +850,25 @@ async function ensureOriginPermission(endpointUrl) {
   return chrome.permissions.request({ origins });
 }
 
-async function callEnrichment(profile) {
-  const providers = [state.settings.apolloApiKey ? "APOLLO" : "", state.settings.contactOutApiKey ? "CONTACTOUT" : ""].filter(Boolean);
+async function callEnrichment(profile, { approveSessionReveal = false } = {}) {
+  const providers = configuredEnrichmentProviders(state.settings);
   if (providers.length) {
     let lastError;
     for (const provider of providers) {
       try {
         const response = await chrome.runtime.sendMessage({ type: `VELA_GTM_PROVIDER_${provider}`, profile });
         if (!response?.ok) throw new Error(response?.error || `${provider} lookup failed.`);
-        const result = normalizeEnrichmentResponse({ ...response.data, emailSource: response.data.source });
+        let providerData = response.data;
+        if (provider === PROVIDER.CONTACTOUT_SESSION && providerData?.requiresReveal) {
+          if (!approveSessionReveal) throw new Error("ContactOut found contact information, but its credit reveal was not approved.");
+          const reveal = await chrome.runtime.sendMessage({ type: "VELA_GTM_PROVIDER_CONTACTOUT_SESSION_REVEAL", revealToken: providerData.revealToken });
+          if (!reveal?.ok) throw new Error(reveal?.error || "ContactOut reveal failed.");
+          providerData = reveal.data;
+        }
+        const result = normalizeEnrichmentResponse({ ...providerData, emailSource: providerData.source });
         const status = String(result.emailStatuses?.[result.email] || result.emailStatus || "").toLowerCase();
         if (result.email && ["verified", "valid"].includes(status)) return result;
-        lastError = new Error(`${provider === "CONTACTOUT" ? "ContactOut" : "Apollo"} did not return an explicitly verified email.`);
+        lastError = new Error(`${providerLabel(provider)} did not return an explicitly verified email.`);
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(`${provider} lookup failed.`);
       }
@@ -516,7 +886,7 @@ async function callEnrichment(profile) {
 }
 
 function templateDraft(profile, workNote) {
-  return applyTemplate(TEMPLATES[0], templateVariables(profile, state.settings, workNote));
+  return applyTemplate(outreachTemplate(state.settings), templateVariables(profile, state.settings, workNote));
 }
 
 async function callWriter(profile, workNote, draft) {
@@ -524,9 +894,12 @@ async function callWriter(profile, workNote, draft) {
     const input = buildWriterRequest(profile, state.settings, workNote, draft);
     const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_PROVIDER_WRITE", input });
     if (!response?.ok) throw new Error(response?.error || "OpenAI writing failed.");
-    return normalizeWriterResponse({ data: response.data, model: state.settings.openAIModel || "gpt-5.4-mini" });
+    const result = normalizeWriterResponse({ data: response.data, model: state.settings.openAIModel || "gpt-5.4-mini" }, profile);
+    const openerIssues = openerQualityIssues(result.workNote);
+    if (openerIssues.length) throw new Error(`The AI writer returned a generic opener. ${openerIssues.join(" ")}`);
+    return state.settings.aiGenerationMode === "full" ? result : { ...templateDraft(profile, result.workNote || workNote), workNote: result.workNote || workNote, model: result.model };
   }
-  if (!state.settings.writerEndpointUrl) return { ...draft, workNote };
+  if (!state.settings.writerEndpointUrl) throw new Error("Configure an OpenAI key or AI writer endpoint before researching prospects.");
   const headers = { "Content-Type": "application/json", Accept: "application/json" };
   if (state.settings.writerToken) headers.Authorization = `Bearer ${state.settings.writerToken}`;
   const response = await fetch(state.settings.writerEndpointUrl, {
@@ -534,12 +907,14 @@ async function callWriter(profile, workNote, draft) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || `AI writer returned ${response.status}.`);
-  const result = normalizeWriterResponse(payload);
+  const result = normalizeWriterResponse(payload, profile);
   if (!result.subject || !result.body) throw new Error("The AI writer returned an incomplete draft.");
-  return result;
+  const openerIssues = openerQualityIssues(result.workNote);
+  if (openerIssues.length) throw new Error(`The AI writer returned a generic opener. ${openerIssues.join(" ")}`);
+  return state.settings.aiGenerationMode === "full" ? result : { ...templateDraft(profile, result.workNote || workNote), workNote: result.workNote || workNote, model: result.model };
 }
 
-async function researchProspect(prospect) {
+async function researchProspect(prospect, { approveSessionReveal = false } = {}) {
   let tab;
   try {
     tab = await chrome.tabs.create({ url: prospect.url, active: false });
@@ -556,9 +931,9 @@ async function researchProspect(prospect) {
     let contactDetails = { emails: [], workEmails: [], personalEmails: [], phones: [], emailStatus: "", emailStatuses: {}, error: "" };
     let contactOutError = "";
     let workNote = prospect.background || buildWorkNote(profile);
-    if (state.settings.contactOutApiKey || state.settings.apolloApiKey || state.settings.endpointUrl) {
+    if (state.settings.contactOutSessionEnabled || state.settings.contactOutApiKey || state.settings.apolloApiKey || state.settings.endpointUrl) {
       try {
-        const enriched = await callEnrichment(profile);
+        const enriched = await callEnrichment(profile, { approveSessionReveal });
         if (enriched.email) { email = enriched.email; emailSource = enriched.emailSource || "Enrichment service"; }
         contactDetails = {
           emails: enriched.emails || [], workEmails: enriched.workEmails || [], personalEmails: enriched.personalEmails || [],
@@ -577,7 +952,7 @@ async function researchProspect(prospect) {
           };
         }
       } catch (error) {
-    const provider = state.settings.apolloApiKey ? "Apollo" : "ContactOut";
+        const provider = providerLabel(preferredProvider(state.settings));
         contactOutError = error instanceof Error ? error.message : `${provider} lookup failed.`;
         contactDetails = { ...contactDetails, source: `${provider} API error`, error: contactOutError };
       }
@@ -592,14 +967,9 @@ async function researchProspect(prospect) {
     }
 
     const fallback = templateDraft(profile, workNote);
-    let written;
-    try {
-      written = await callWriter(profile, workNote, fallback);
-    } catch (error) {
-      written = { ...fallback, workNote };
-      if (state.settings.writerEndpointUrl) showToast(`AI writer unavailable for ${profile.name || "one prospect"}; used the Vela template.`);
-    }
+    const written = await callWriter(profile, workNote, fallback);
 
+    const researchedAt = new Date().toISOString();
     return {
       ...prospect,
       profile,
@@ -614,7 +984,9 @@ async function researchProspect(prospect) {
       body: written.body,
       status: isEmail(email) ? QUEUE_STATUS.READY : QUEUE_STATUS.NEEDS_EMAIL,
       error: isEmail(email) ? "" : contactOutError || "No email was available in LinkedIn Contact info or the configured enrichment service.",
-      updatedAt: new Date().toISOString(),
+      researchedAt,
+      activity: [...(prospect.activity || []), { type: "researched", detail: state.settings.aiGenerationMode === "full" ? "Profile researched and full draft generated" : "Profile researched and personalization prepared", at: researchedAt }].slice(-80),
+      updatedAt: researchedAt,
     };
   } finally {
     if (tab?.id) await chrome.tabs.remove(tab.id).catch(() => {});
@@ -625,15 +997,16 @@ async function processQueue(ids = null) {
   if (state.busy) return;
   if (!isExtension) {
     const targets = new Set(ids || scopedQueue().filter((item) => [QUEUE_STATUS.NEW, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(item.status)).map((item) => item.id));
+    const researchedAt = new Date().toISOString();
     state.queue = state.queue.map((item) => targets.has(item.id) ? {
-      ...item,
+      ...withActivity(item, "researched", "Preview profile researched", researchedAt),
       email: item.email || `${(item.name || "prospect").toLowerCase().replace(/[^a-z]+/g, ".").replace(/^\.|\.$/g, "")}@example.com`,
       subject: item.subject || `A quick Vela introduction for ${item.name || "you"}`,
       body: item.body || `Hi ${(item.name || "there").split(" ")[0]},\n\nI came across your work and would love to learn from your perspective.\n\nBest,\n${state.settings.senderName}`,
       workNote: item.workNote || item.background || `your work in ${item.headline || "energy infrastructure"}`,
       status: QUEUE_STATUS.READY,
       error: "",
-      updatedAt: new Date().toISOString(),
+      researchedAt,
     } : item);
     await persistQueue();
     renderQueue();
@@ -643,7 +1016,16 @@ async function processQueue(ids = null) {
 
   const candidates = scopedQueue().filter((item) => ids ? ids.includes(item.id) : [QUEUE_STATUS.NEW, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(item.status));
   if (!candidates.length) { showToast("There are no prospects waiting for research."); return; }
+  if (!state.settings.openAIApiKey && !state.settings.writerEndpointUrl) {
+    showToast("Configure an OpenAI key or AI writer endpoint before researching prospects.");
+    return;
+  }
   try {
+    let approveSessionReveal = false;
+    if (state.settings.contactOutSessionEnabled) {
+      approveSessionReveal = globalThis.confirm(`ContactOut will preview ${candidates.length} profile${candidates.length === 1 ? "" : "s"} and may use up to ${candidates.length} email credit${candidates.length === 1 ? "" : "s"} if contacts are found. Continue?`);
+      if (!approveSessionReveal) { showToast("ContactOut reveal cancelled. No credits were used."); return; }
+    }
     if (!state.settings.contactOutApiKey && !state.settings.apolloApiKey && state.settings.endpointUrl && !(await ensureOriginPermission(state.settings.endpointUrl))) throw new Error("Email enrichment access was declined.");
     if (!state.settings.openAIApiKey && state.settings.writerEndpointUrl && !(await ensureOriginPermission(state.settings.writerEndpointUrl))) throw new Error("AI writer access was declined.");
     setBusy(true);
@@ -654,7 +1036,7 @@ async function processQueue(ids = null) {
       state.queue = state.queue.map((item) => item.id === current.id ? { ...item, status: QUEUE_STATUS.PROCESSING, error: "" } : item);
       renderQueue();
       try {
-        const result = await researchProspect(current);
+        const result = await researchProspect(current, { approveSessionReveal });
         state.queue = state.queue.map((item) => item.id === current.id ? result : item);
       } catch (error) {
         state.queue = state.queue.map((item) => item.id === current.id ? {
@@ -673,119 +1055,90 @@ async function processQueue(ids = null) {
   }
 }
 
-async function chooseGoogleAccount() {
-  const account = await pickGoogleAccount(chrome.identity, { dialog: elements.googleAccountDialog, list: elements.googleAccountList });
-  if (!account) throw new Error("Choose a Google account to continue.");
-  return account;
-}
-
-async function gmailToken(interactive = false) {
-  let selected = state.googleAccount;
-  if (!selected?.id) selected = await chooseGoogleAccount();
-  const token = await getGmailAuthToken({
-    identity: chrome.identity,
-    manifest: chrome.runtime.getManifest(),
-    interactive,
-    accountId: selected.id,
-  });
-  if (!state.googleAccount?.email) {
-    const profile = await getGmailProfile(token);
-    state.googleAccount = { id: selected.id, email: profile.email || selected.label || "Selected Google account" };
-    await storage.set({ [GOOGLE_ACCOUNT_STORAGE_KEY]: state.googleAccount });
-  }
-  return token;
-}
-
-async function openGmailDrafts() {
-  if (isExtension) await chrome.tabs.create({ url: GMAIL_DRAFTS_WEB_URL });
-  else window.open(GMAIL_DRAFTS_WEB_URL, "_blank", "noopener,noreferrer");
-}
-
-async function createDrafts(ids = null) {
+async function exportReadyMailMerge(ids = null) {
   if (state.busy) return;
-  const ready = scopedQueue().filter((item) => item.status === QUEUE_STATUS.READY && (!ids || ids.includes(item.id)));
-  if (!ready.length) { showToast("No reviewed drafts are ready for Gmail."); return; }
-  if (!isExtension) {
-    state.queue = state.queue.map((item) => ready.some((prospect) => prospect.id === item.id) ? { ...item, status: QUEUE_STATUS.DRAFTED, draftId: "preview", updatedAt: new Date().toISOString() } : item);
-    await persistQueue();
-    renderQueue();
-    showToast(`Prepared ${ready.length} preview draft${ready.length === 1 ? "" : "s"}. Nothing was sent.`);
-    return;
-  }
-  try {
-    setBusy(true, "Connecting to Gmail");
-    const authState = { token: await gmailToken(true), refreshAttempted: false };
-    let created = 0;
-    let failed = 0;
-    let blockingGmailError = "";
-    for (let index = 0; index < ready.length; index += 1) {
-      const prospect = ready[index];
-      elements.progressText.textContent = `Creating Gmail draft ${index + 1} of ${ready.length}`;
-      try {
-        if (blockingGmailError) throw new Error(blockingGmailError);
-        const draftId = await createGmailDraftWithRetry(
-          { to: prospect.email, subject: prospect.subject, body: prospect.body },
-          {
-            authState,
-            removeCachedToken: (token) => chrome.identity.removeCachedAuthToken({ token }),
-            getFreshToken: () => gmailToken(true),
-          },
-        );
-        state.queue = state.queue.map((item) => item.id === prospect.id ? { ...item, draftId, status: QUEUE_STATUS.DRAFTED, error: "", updatedAt: new Date().toISOString() } : item);
-        created += 1;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Gmail draft failed.";
-        if (error?.status === 401 || error?.status === 403) blockingGmailError = message;
-        state.queue = state.queue.map((item) => item.id === prospect.id ? { ...item, error: message, updatedAt: new Date().toISOString() } : item);
-        failed += 1;
-      }
-      await persistQueue();
-      renderQueue();
-    }
-    showToast(gmailDraftBatchSummary(created, failed));
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "Could not connect to Gmail.");
-  } finally {
-    setBusy(false);
-    renderQueue();
-  }
+  const exportableStatuses = ids ? [QUEUE_STATUS.READY, QUEUE_STATUS.DRAFTED] : [QUEUE_STATUS.READY];
+  const ready = scopedQueue().filter((item) => exportableStatuses.includes(item.status) && (!ids || ids.includes(item.id)));
+  if (!ready.length) { showToast("No reviewed messages are ready for mail merge."); return; }
+  await exportMailMergeItems(ready);
 }
 
 const VIEW_COPY = {
-  all: ["All prospects", "Every prospect across research, review, and Gmail."],
-  research: ["Research queue", "Prospects waiting for enrichment, context, or a first draft."],
-  review: ["Review queue", "Personalized drafts that need a human decision before Gmail."],
-  drafted: ["Gmail drafts", "Approved messages prepared in Gmail. Nothing has been sent."],
+  overview: { eyebrow: "Overview", title: "Overview", description: "What needs a decision, what is scheduled, and what already went out.", queueTitle: "All prospects", queueDescription: "Every prospect across research, review, and delivery." },
+  research: { eyebrow: "AI research", title: "AI research", description: "Describe who you want to reach. Vela plans the searches, verifies contact details, and prepares drafts.", queueTitle: "Research queue", queueDescription: "Prospects waiting for enrichment, context, or a first draft." },
+  review: { eyebrow: "Review queue", title: "Review queue", description: "Approve the recipient, personalization, and message before anything can send.", queueTitle: "Review queue", queueDescription: "Drafts that need a human decision before delivery." },
+  scheduled: { eyebrow: "Scheduled sends", title: "Scheduled sends", description: "Queued Gmail sends in delivery order. Cancel any of them until delivery starts.", queueTitle: "Scheduled sends", queueDescription: "Queued Gmail delivery." },
+  history: { eyebrow: "Sent history", title: "Sent history", description: "Every delivery with its recipient, subject, sender, and result.", queueTitle: "Delivery history", queueDescription: "Local delivery log." },
+  all: { eyebrow: "All prospects", title: "All prospects", description: "Everyone in this workspace, across research, review, and delivery.", queueTitle: "All prospects", queueDescription: "Every prospect across research, review, and delivery." },
+  drafted: { eyebrow: "Mail merge exports", title: "Mail merge exports", description: "Approved messages exported for bulk sending, with personalization and sent dates intact.", queueTitle: "Mail merge exports", queueDescription: "Approved messages exported for review and sending in your mail-merge tool." },
+  tracking: { eyebrow: "Activity", title: "Activity", description: "Stored import, research, draft, export, and sent events for every prospect.", queueTitle: "Tracking", queueDescription: "Stored workflow activity for every prospect." },
 };
 
 function setView(view) {
+  setCampaignMenu(false);
   state.view = view;
   state.activeCampaignId = "";
   state.attentionOnly = false;
   state.selected.clear();
   elements.statusFilterButton.classList.remove("is-active");
   for (const button of document.querySelectorAll("[data-view]")) button.classList.toggle("is-active", button.dataset.view === view);
-  [elements.queueHeading.textContent, elements.queueDescription.textContent] = VIEW_COPY[view] || VIEW_COPY.all;
+  const copy = VIEW_COPY[view] || VIEW_COPY.all;
+  elements.heroEyebrow.lastChild.textContent = copy.eyebrow;
+  elements.pageTitle.textContent = copy.title;
+  elements.pageSubtitle.textContent = copy.description;
+  elements.queueHeading.textContent = copy.queueTitle;
+  elements.queueDescription.textContent = copy.queueDescription;
   renderQueue();
 }
 
 function setCampaignView(campaignId) {
   const campaign = state.campaigns.find((item) => item.id === campaignId);
   if (!campaign) return;
+  setCampaignMenu(false);
   state.view = "campaign";
   state.activeCampaignId = campaign.id;
   state.attentionOnly = false;
   state.selected.clear();
   elements.statusFilterButton.classList.remove("is-active");
   for (const button of document.querySelectorAll("[data-view]")) button.classList.remove("is-active");
+  elements.heroEyebrow.lastChild.textContent = "Campaign workspace";
+  elements.pageTitle.textContent = campaign.name;
+  elements.pageSubtitle.textContent = campaign.description || "A focused outreach list with its research, review state, and delivery history intact.";
   elements.queueHeading.textContent = campaign.name;
   elements.queueDescription.textContent = campaign.description || "Prospects saved to this campaign, with their latest personalization notes.";
   renderQueue();
 }
 
+function setCampaignMenu(open) {
+  elements.campaignActionsMenu.hidden = !open;
+  elements.campaignActionsButton.setAttribute("aria-expanded", String(open));
+}
+
 function openCampaignCreator() {
+  state.editingCampaignId = "";
+  elements.campaignDialogKicker.textContent = "Organize outreach";
+  elements.campaignDialogTitle.textContent = "Create campaign";
+  elements.campaignDialogDescription.textContent = "Campaigns collect prospects without duplicating their research or personalization notes.";
+  elements.campaignSubmitButton.textContent = "Create campaign";
+  elements.campaignName.value = "";
+  elements.campaignDescription.value = "";
   elements.campaignDialog.showModal();
   setTimeout(() => elements.campaignName.focus(), 0);
+}
+
+function openCampaignEditor() {
+  const campaign = activeCampaign();
+  if (!campaign) return;
+  setCampaignMenu(false);
+  state.editingCampaignId = campaign.id;
+  elements.campaignDialogKicker.textContent = "Campaign settings";
+  elements.campaignDialogTitle.textContent = "Edit campaign";
+  elements.campaignDialogDescription.textContent = "The campaign keeps its prospects when you change its name or description.";
+  elements.campaignSubmitButton.textContent = "Save changes";
+  elements.campaignName.value = campaign.name;
+  elements.campaignDescription.value = campaign.description || "";
+  elements.campaignDialog.showModal();
+  setTimeout(() => elements.campaignName.select(), 0);
 }
 
 function emailCandidates(prospect) {
@@ -844,6 +1197,23 @@ function renderExperience(prospect) {
   elements.drawerExperienceList.replaceChildren(fragment);
 }
 
+function renderDrawerActivity(prospect) {
+  const fragment = document.createDocumentFragment();
+  const activity = [...(prospect.activity || [])].sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+  for (const event of activity) {
+    const item = document.createElement("div");
+    item.className = "drawer-activity-item";
+    appendText(item, "i", "", `activity-dot activity-${event.type}`);
+    const copy = document.createElement("div");
+    appendText(copy, "strong", event.detail || event.type);
+    appendText(copy, "time", new Date(event.at).toLocaleString());
+    item.append(copy);
+    fragment.append(item);
+  }
+  if (!activity.length) appendText(fragment, "p", "No stored activity yet.", "experience-empty");
+  elements.drawerActivity.replaceChildren(fragment);
+}
+
 function openReviewDrawer(id, trigger = document.activeElement) {
   const prospect = state.queue.find((item) => item.id === id);
   if (!prospect) return;
@@ -854,14 +1224,18 @@ function openReviewDrawer(id, trigger = document.activeElement) {
   elements.drawerHeadline.textContent = prospect.headline || companyAndRole(prospect).role;
   elements.drawerLocation.textContent = prospect.location || "";
   elements.drawerLinkedIn.href = prospect.url;
+  elements.drawerLinkedIn.hidden = !prospect.url;
   elements.drawerWorkNote.value = prospect.workNote || prospect.background || "";
   elements.drawerEmail.value = prospect.email || "";
   renderEmailChoices(prospect);
   renderExperience(prospect);
+  renderDrawerActivity(prospect);
   elements.drawerSubject.value = prospect.subject || "";
   elements.drawerBody.value = prospect.body || "";
   elements.approveDraftButton.disabled = false;
-  elements.approveDraftButton.textContent = prospect.status === QUEUE_STATUS.DRAFTED ? "Open Gmail drafts" : "Approve & create Gmail draft";
+  elements.approveDraftButton.hidden = prospect.status === QUEUE_STATUS.SENT;
+  elements.approveDraftButton.textContent = prospect.status === QUEUE_STATUS.DRAFTED ? "Export again" : "Approve & export";
+  elements.markSentButton.textContent = prospect.status === QUEUE_STATUS.SENT || prospect.emailSentAt ? "Mark as not sent" : "Mark email sent";
   elements.reviewDrawer.inert = false;
   elements.reviewDrawer.setAttribute("aria-hidden", "false");
   elements.drawerBackdrop.hidden = false;
@@ -895,18 +1269,12 @@ async function saveReview() {
   const body = elements.drawerBody.value.trim();
   if (!isEmail(email)) { showToast("Add a valid email before approving this draft."); elements.drawerEmail.focus(); return false; }
   if (!subject || !body) { showToast("The subject and message both need content."); return false; }
-  state.queue = state.queue.map((item) => item.id === id ? { ...item, email, subject, body, workNote: elements.drawerWorkNote.value.trim(), updatedAt: new Date().toISOString() } : item);
+  const reviewedAt = new Date().toISOString();
+  state.queue = state.queue.map((item) => item.id === id ? { ...withActivity(item, "reviewed", "Draft reviewed and saved", reviewedAt), email, subject, body, workNote: elements.drawerWorkNote.value.trim(), reviewedAt } : item);
   await persistQueue();
   renderQueue();
   showToast("Review changes saved.");
   return true;
-}
-
-function exportRows(items) {
-  return items.map((prospect) => {
-    const details = companyAndRole(prospect);
-    return [prospect.name || "", details.company, details.role, prospect.email || "", statusLabel(prospect.status), prospect.subject || "", prospect.body || "", prospect.workNote || "", prospect.url || "", prospect.updatedAt || ""];
-  });
 }
 
 function exportItems() {
@@ -914,53 +1282,43 @@ function exportItems() {
   return state.selected.size ? visible.filter((item) => state.selected.has(item.id)) : visible;
 }
 
-const EXPORT_HEADERS = ["Name", "Company", "Role", "Email", "Stage", "Subject", "Message", "Personalization note", "LinkedIn URL", "Updated at"];
-
-function csvCell(value) {
-  return `"${String(value ?? "").replaceAll('"', '""')}"`;
-}
-
-function exportCsv() {
-  const items = exportItems();
-  if (!items.length) { showToast("There are no prospects to export in this view."); return; }
-  const csv = [EXPORT_HEADERS, ...exportRows(items)].map((row) => row.map(csvCell).join(",")).join("\r\n");
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-  const link = document.createElement("a");
-  link.href = url;
+function exportFilename() {
   const campaign = activeCampaign();
-  const scopeName = campaign ? `vela-${campaign.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}` : "vela-gtm";
-  link.download = `${scopeName}-${new Date().toISOString().slice(0, 10)}.csv`;
-  link.click();
-  URL.revokeObjectURL(url);
-  showToast(`Exported ${items.length} prospect${items.length === 1 ? "" : "s"} for Google Sheets.`);
+  const scopeName = campaign ? campaign.name : "Vela Mail Merge";
+  const slug = scopeName.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "");
+  return `${slug || "Vela-MailMerge"}-${new Date().toISOString().slice(0, 10)}.xlsx`;
 }
 
-async function copyForSheets() {
+async function markExported(items, destination) {
+  const ids = new Set(items.map((item) => item.id));
+  const now = new Date().toISOString();
+  state.queue = state.queue.map((item) => ids.has(item.id) ? {
+    ...withActivity(item, "exported", destination, now),
+    status: item.status === QUEUE_STATUS.SENT ? QUEUE_STATUS.SENT : QUEUE_STATUS.DRAFTED,
+    exportedAt: now,
+  } : item);
+  await persistQueue();
+}
+
+async function exportMailMergeItems(items) {
+  const eligible = items.filter((item) => isEmail(item.email) && item.workNote);
+  const skipped = items.length - eligible.length;
+  if (!eligible.length) { showToast("No prospects have both a recipient email and personalization note yet."); return; }
+  exportMailMergeWorkbook(eligible, exportFilename());
+  await markExported(eligible, "MailMerge workbook exported");
+  renderQueue();
+  showToast(`Exported ${eligible.length} prospect${eligible.length === 1 ? "" : "s"} for MailMerge${skipped ? ` · ${skipped} not ready` : ""}.`);
+}
+
+async function exportXlsx() {
   const items = exportItems();
   if (!items.length) { showToast("There are no prospects to export in this view."); return; }
-  if (!isExtension) {
-    const tsv = [EXPORT_HEADERS, ...exportRows(items)].map((row) => row.map((value) => String(value ?? "").replaceAll("\t", " ").replaceAll("\n", " ")).join("\t")).join("\n");
-    try { await navigator.clipboard.writeText(tsv); showToast(`Copied ${items.length} row${items.length === 1 ? "" : "s"}. Paste directly into Google Sheets.`); }
-    catch { showToast("Clipboard access was blocked. Use Export CSV instead."); }
-    return;
-  }
-  try {
-    setBusy(true, "Creating Google Sheet");
-    const token = await gmailToken(true);
-    const campaign = activeCampaign();
-    const title = `${campaign?.name || "Vela GTM"} mail merge - ${new Date().toISOString().slice(0, 10)}`;
-    const spreadsheet = await createGoogleSpreadsheet(token, { title, rows: [EXPORT_HEADERS, ...exportRows(items)] });
-    await chrome.tabs.create({ url: spreadsheet.url });
-    showToast(`Created a Google Sheet with ${items.length} mail-merge row${items.length === 1 ? "" : "s"}.`);
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "Could not export to Google Sheets.");
-  } finally {
-    setBusy(false);
-  }
+  await exportMailMergeItems(items);
 }
 
 function bindEvents() {
   elements.settingsButton.addEventListener("click", () => isExtension ? chrome.runtime.openOptionsPage() : window.open("options.html", "_blank"));
+  elements.generationModePill.addEventListener("click", () => isExtension ? chrome.runtime.openOptionsPage() : window.open("options.html", "_blank"));
   elements.searchForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const brief = elements.searchBrief.value.trim();
@@ -984,19 +1342,58 @@ function bindEvents() {
     elements.searchBrief.focus();
   });
   for (const navItem of document.querySelectorAll("[data-view]")) navItem.addEventListener("click", () => setView(navItem.dataset.view));
+  for (const jump of document.querySelectorAll("[data-jump-view]")) jump.addEventListener("click", () => setView(jump.dataset.jumpView));
   elements.newCampaignButton.addEventListener("click", openCampaignCreator);
   elements.newCampaignButtonTop.addEventListener("click", openCampaignCreator);
-  elements.closeCampaignDialog.addEventListener("click", () => elements.campaignDialog.close());
-  elements.cancelCampaignButton.addEventListener("click", () => elements.campaignDialog.close());
+  elements.campaignActionsButton.addEventListener("click", () => setCampaignMenu(elements.campaignActionsMenu.hidden));
+  elements.editCampaignButton.addEventListener("click", openCampaignEditor);
+  elements.duplicateCampaignButton.addEventListener("click", async () => {
+    const campaign = activeCampaign();
+    if (!campaign) return;
+    setCampaignMenu(false);
+    const existingIds = new Set(state.campaigns.map((item) => item.id));
+    state.campaigns = duplicateCampaign(state.campaigns, campaign.id);
+    const copy = state.campaigns.find((item) => !existingIds.has(item.id));
+    await persistCampaigns();
+    if (copy) setCampaignView(copy.id); else renderQueue();
+    showToast(`${copy?.name || "Campaign copy"} created with the same prospects.`);
+  });
+  elements.deleteCampaignButton.addEventListener("click", () => {
+    const campaign = activeCampaign();
+    if (!campaign) return;
+    setCampaignMenu(false);
+    elements.deleteCampaignDescription.textContent = `Delete “${campaign.name}”? Its ${campaign.prospectIds.length} prospect${campaign.prospectIds.length === 1 ? "" : "s"} and research will stay in the workspace.`;
+    elements.deleteCampaignDialog.showModal();
+  });
+  elements.confirmDeleteCampaignButton.addEventListener("click", async () => {
+    const campaign = activeCampaign();
+    if (!campaign) return;
+    state.campaigns = deleteCampaign(state.campaigns, campaign.id);
+    await persistCampaigns();
+    setView("all");
+    showToast(`${campaign.name} deleted. Its prospects are still in the workspace.`);
+  });
+  const closeCampaignDialog = () => { state.editingCampaignId = ""; elements.campaignDialog.close(); };
+  elements.closeCampaignDialog.addEventListener("click", closeCampaignDialog);
+  elements.cancelCampaignButton.addEventListener("click", closeCampaignDialog);
   elements.campaignForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const name = elements.campaignName.value.trim();
     if (!name) { elements.campaignName.focus(); return; }
-    const existing = state.campaigns.find((campaign) => campaign.name.toLowerCase() === name.toLowerCase());
+    const existing = state.campaigns.find((campaign) => campaign.id !== state.editingCampaignId && campaign.name.toLowerCase() === name.toLowerCase());
     if (existing) {
-      elements.campaignDialog.close();
-      setCampaignView(existing.id);
       showToast(`${existing.name} already exists.`);
+      elements.campaignName.select();
+      return;
+    }
+    if (state.editingCampaignId) {
+      const campaignId = state.editingCampaignId;
+      state.campaigns = updateCampaign(state.campaigns, campaignId, { name, description: elements.campaignDescription.value.trim() });
+      await persistCampaigns();
+      state.editingCampaignId = "";
+      elements.campaignDialog.close();
+      setCampaignView(campaignId);
+      showToast(`${name} updated.`);
       return;
     }
     const campaign = createCampaign({ name, description: elements.campaignDescription.value.trim() });
@@ -1009,18 +1406,43 @@ function bindEvents() {
     showToast(`${campaign.name} is ready. Add prospects from LinkedIn or import a list.`);
   });
   elements.captureSearchButton.addEventListener("click", captureVisibleSearch);
-  const openImport = () => elements.importDialog.showModal();
+  const openImport = () => { resetImportDialog(); elements.importDialog.showModal(); };
   elements.openImportButton.addEventListener("click", openImport);
   elements.openImportButtonTop.addEventListener("click", openImport);
+  for (const button of document.querySelectorAll("[data-import-source]")) button.addEventListener("click", () => setImportSource(button.dataset.importSource));
+  elements.bulkInput.addEventListener("input", () => {
+    if (state.importSource === "linkedin") elements.importButton.disabled = !parseBulkProspects(elements.bulkInput.value).length;
+  });
+  elements.importFileInput.addEventListener("change", () => loadImportFile(elements.importFileInput.files?.[0]));
+  elements.replaceImportFile.addEventListener("click", () => elements.importFileInput.click());
+  for (const eventName of ["dragenter", "dragover"]) elements.dropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    elements.dropZone.classList.add("is-dragging");
+  });
+  for (const eventName of ["dragleave", "drop"]) elements.dropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    elements.dropZone.classList.remove("is-dragging");
+  });
+  elements.dropZone.addEventListener("drop", (event) => loadImportFile(event.dataTransfer?.files?.[0]));
   elements.importButton.addEventListener("click", async () => {
-    const prospects = parseBulkProspects(elements.bulkInput.value);
-    if (!prospects.length) { showToast("Paste at least one valid LinkedIn profile URL."); return; }
-    await addProspects(prospects, `Added ${prospects.length} unique prospect${prospects.length === 1 ? "" : "s"}.`);
-    elements.bulkInput.value = "";
+    if (state.importSource === "linkedin") {
+      const prospects = parseBulkProspects(elements.bulkInput.value);
+      if (!prospects.length) { showToast("Paste at least one valid LinkedIn profile URL."); return; }
+      const now = new Date().toISOString();
+      const tracked = prospects.map((prospect) => ({ ...prospect, source: "LinkedIn URL import", importedAt: now, activity: [{ type: "imported", detail: "LinkedIn URL import", at: now }] }));
+      await addProspects(tracked, `Added ${tracked.length} unique prospect${tracked.length === 1 ? "" : "s"}.`);
+      elements.bulkInput.value = "";
+      elements.importDialog.close();
+      return;
+    }
+    if (!state.importData || !mappingValid()) return;
+    const result = mappedRowsToProspects({ rows: state.importData.rows, mapping: state.importData.mapping, settings: state.settings, source: state.importData.fileName });
+    if (!result.prospects.length) { showToast(result.rejected[0]?.reason || "No importable spreadsheet rows were found."); return; }
+    await addProspects(result.prospects, `Imported ${result.prospects.length} prospect${result.prospects.length === 1 ? "" : "s"}${result.rejected.length ? ` · ${result.rejected.length} skipped` : ""}.`);
     elements.importDialog.close();
   });
   elements.processButton.addEventListener("click", () => processQueue());
-  elements.draftReadyButton.addEventListener("click", () => createDrafts());
+  elements.mailMergeReadyButton.addEventListener("click", () => exportReadyMailMerge().catch((error) => showToast(error instanceof Error ? error.message : "Could not export MailMerge.")));
   elements.tableSearch.addEventListener("input", () => { state.query = elements.tableSearch.value.trim(); renderQueue(); });
   elements.statusFilterButton.addEventListener("click", () => {
     state.attentionOnly = !state.attentionOnly;
@@ -1035,9 +1457,8 @@ function bindEvents() {
   });
   elements.clearSelectionButton.addEventListener("click", () => { state.selected.clear(); renderQueue(); });
   elements.bulkResearchButton.addEventListener("click", () => processQueue([...state.selected]));
-  elements.bulkDraftButton.addEventListener("click", () => createDrafts([...state.selected]));
-  elements.exportButton.addEventListener("click", exportCsv);
-  elements.copySheetButton.addEventListener("click", copyForSheets);
+  elements.bulkMailMergeButton.addEventListener("click", () => exportReadyMailMerge([...state.selected]).catch((error) => showToast(error instanceof Error ? error.message : "Could not export MailMerge.")));
+  elements.exportButton.addEventListener("click", () => exportXlsx().catch((error) => showToast(error instanceof Error ? error.message : "Could not export the workbook.")));
   elements.collapseSidebar.addEventListener("click", () => {
     document.querySelector(".sidebar").classList.toggle("is-collapsed");
     document.querySelector(".workspace").classList.toggle("sidebar-collapsed");
@@ -1057,39 +1478,60 @@ function bindEvents() {
     closeReviewDrawer();
     await processQueue([id]);
   });
-  elements.approveDraftButton.addEventListener("click", async () => {
+  elements.markSentButton.addEventListener("click", async () => {
     const id = state.activeProspectId;
     const prospect = state.queue.find((item) => item.id === id);
-    if (prospect?.status === QUEUE_STATUS.DRAFTED) {
-      try { await openGmailDrafts(); closeReviewDrawer(); }
-      catch (error) { showToast(error instanceof Error ? error.message : "Could not open Gmail."); }
-      return;
+    if (!prospect) return;
+    const isSent = prospect.status === QUEUE_STATUS.SENT || Boolean(prospect.emailSentAt);
+    const at = new Date().toISOString();
+    state.queue = state.queue.map((item) => item.id === id ? {
+      ...withActivity(item, isSent ? "sent_removed" : "sent", isSent ? "Email sent mark removed" : "Email marked sent manually", at),
+      status: isSent ? (item.exportedAt ? QUEUE_STATUS.DRAFTED : QUEUE_STATUS.READY) : QUEUE_STATUS.SENT,
+      emailSentAt: isSent ? "" : at,
+    } : item);
+    await persistQueue();
+    renderQueue();
+    closeReviewDrawer();
+    showToast(isSent ? "Email returned to the review workflow." : "Email marked sent and stored in tracking.");
+  });
+  elements.approveDraftButton.addEventListener("click", async () => {
+    const id = state.activeProspectId;
+    if (await saveReview()) {
+      await exportReadyMailMerge([id]);
+      closeReviewDrawer();
     }
-    if (await saveReview()) { await createDrafts([id]); closeReviewDrawer(); }
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && state.activeProspectId) closeReviewDrawer();
+    if (event.key === "Escape") setCampaignMenu(false);
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "e" && activeCampaign() && !elements.campaignDialog.open) { event.preventDefault(); openCampaignEditor(); }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); elements.tableSearch.focus(); }
+  });
+  document.addEventListener("click", (event) => {
+    if (!elements.campaignActions.contains(event.target)) setCampaignMenu(false);
   });
 }
 
 async function initialize() {
-  const saved = await storage.get([QUEUE_STORAGE_KEY, CAMPAIGNS_STORAGE_KEY, "velaGtmSettings", GOOGLE_ACCOUNT_STORAGE_KEY]);
+  const saved = await storage.get([QUEUE_STORAGE_KEY, CAMPAIGNS_STORAGE_KEY, SCHEDULED_SENDS_STORAGE_KEY, DELIVERY_LOG_STORAGE_KEY, "velaGtmSettings"]);
   state.settings = { ...DEFAULT_SETTINGS, ...(saved.velaGtmSettings || {}) };
-  state.googleAccount = saved[GOOGLE_ACCOUNT_STORAGE_KEY] || null;
   if (["light", "dark"].includes(previewTheme)) state.settings.theme = previewTheme;
   applyTheme(state.settings.theme);
   state.queue = saved[QUEUE_STORAGE_KEY] || (!isExtension ? upsertProspects([], DEMO_QUEUE) : []);
   state.campaigns = normalizeCampaigns(saved[CAMPAIGNS_STORAGE_KEY] || (!isExtension ? DEMO_CAMPAIGNS : []));
+  state.scheduledJobs = normalizeScheduledSends(saved[SCHEDULED_SENDS_STORAGE_KEY] || (!isExtension ? DEMO_SCHEDULED_SENDS : []));
+  state.deliveryLog = normalizeDeliveryLog(saved[DELIVERY_LOG_STORAGE_KEY] || (!isExtension ? [...DEMO_SCHEDULED_SENDS, ...DEMO_DELIVERY_LOG] : []));
   bindEvents();
   if (requestedCampaignId && state.campaigns.some((campaign) => campaign.id === requestedCampaignId)) setCampaignView(requestedCampaignId);
-  else renderQueue();
+  else setView(VIEW_COPY[requestedView] ? requestedView : "overview");
   if (isExtension && chrome.storage?.onChanged) chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "local") return;
     if (changes[QUEUE_STORAGE_KEY]) state.queue = changes[QUEUE_STORAGE_KEY].newValue || [];
     if (changes[CAMPAIGNS_STORAGE_KEY]) state.campaigns = normalizeCampaigns(changes[CAMPAIGNS_STORAGE_KEY].newValue || []);
+    if (changes[SCHEDULED_SENDS_STORAGE_KEY]) state.scheduledJobs = normalizeScheduledSends(changes[SCHEDULED_SENDS_STORAGE_KEY].newValue || []);
+    if (changes[DELIVERY_LOG_STORAGE_KEY]) state.deliveryLog = normalizeDeliveryLog(changes[DELIVERY_LOG_STORAGE_KEY].newValue || []);
     if (state.activeCampaignId && !state.campaigns.some((campaign) => campaign.id === state.activeCampaignId)) setView("all");
-    else if (changes[QUEUE_STORAGE_KEY] || changes[CAMPAIGNS_STORAGE_KEY]) renderQueue();
+    else if (changes[QUEUE_STORAGE_KEY] || changes[CAMPAIGNS_STORAGE_KEY] || changes[SCHEDULED_SENDS_STORAGE_KEY] || changes[DELIVERY_LOG_STORAGE_KEY]) renderQueue();
   });
 }
 

@@ -2,16 +2,56 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  DEFAULT_SETTINGS,
   TEMPLATES,
   applyTemplate,
   buildWorkNote,
+  contactOutConnectionState,
+  emailTemplates,
   gmailComposeUrl,
+  mailtoComposeUrl,
   initialsFor,
   isEmail,
+  migrateLegacyQuickIntroDraft,
   normalizeEnrichmentResponse,
+  normalizeEmailTemplates,
+  normalizeRecipientSelection,
   resolveTheme,
   templateVariables,
 } from "../lib/message.js";
+
+test("ContactOut connection failures distinguish signed-out from broken sessions", () => {
+  assert.equal(contactOutConnectionState({ checking: true }), "checking");
+  assert.equal(contactOutConnectionState({ connected: true }), "connected");
+  assert.equal(contactOutConnectionState({ disabled: true }), "disabled");
+  assert.equal(contactOutConnectionState({ code: "login_required", detail: "No ContactOut tab is signed in." }), "signed-out");
+  assert.equal(contactOutConnectionState({ detail: "ContactOut returned HTTP 500." }), "error");
+});
+
+test("recipient selection defaults to exactly one verified address", () => {
+  const recipients = ["primary@example.com", "alternate@example.com"];
+  assert.equal(DEFAULT_SETTINGS.allowMultipleRecipients, false);
+  assert.equal(DEFAULT_SETTINGS.deliveryMethod, "gmail");
+  assert.deepEqual(
+    normalizeRecipientSelection(recipients, recipients),
+    ["primary@example.com"],
+  );
+  assert.deepEqual(
+    normalizeRecipientSelection(recipients, [], { preferred: "alternate@example.com" }),
+    ["alternate@example.com"],
+  );
+});
+
+test("recipient selection keeps multiple addresses only after opt-in", () => {
+  assert.deepEqual(
+    normalizeRecipientSelection(
+      ["primary@example.com", "alternate@example.com"],
+      ["alternate@example.com", "primary@example.com"],
+      { allowMultiple: true },
+    ),
+    ["alternate@example.com", "primary@example.com"],
+  );
+});
 
 const profile = {
   name: "Joshua Rivera",
@@ -31,14 +71,59 @@ test("buildWorkNote turns experience into a specific, grammatical phrase", () =>
 });
 
 test("the default outreach play resolves all variables", () => {
-  const variables = templateVariables(profile, { senderName: "Tarun", calendarUrl: "https://cal.com/team/velaenergy" });
+  const opener = "You have led operations across Stream Data Centers, AWS, and the Navy; I wanted to ask where large loads lose the most time getting powered.";
+  const variables = templateVariables(profile, { senderName: "Tarun", calendarUrl: "https://cal.com/team/velaenergy" }, opener);
   const message = applyTemplate(TEMPLATES[0], variables);
   assert.match(message.subject, /Quick intro/);
   assert.match(message.body, /^Hi Joshua,/);
   assert.match(message.body, /a16z Speedrun and Z Fellows/);
+  assert.ok(message.body.indexOf("I'm Tarun, CEO") < message.body.indexOf(opener));
+  assert.ok(message.body.indexOf(opener) < message.body.indexOf("We're building AI agents"));
+  assert.doesNotMatch(message.body, /impressed by/i);
   assert.match(message.body, /20-30 minutes/);
+  assert.doesNotMatch(message.body, /\[[^\]]+\]\(https?:\/\//);
   assert.doesNotMatch(message.body, /20[–—]30/);
   assert.doesNotMatch(message.body, /{{\w+}}/);
+});
+
+test("migrates only the untouched legacy quick-intro template", () => {
+  const legacyBody = `Hi {{firstName}},
+
+Came across your profile and was really impressed by {{workNote}}.
+
+A bit about me: I'm {{senderName}}, CEO of Vela Energy. Tony (my co-founder) and I both come from energy-intensive backgrounds. I’m a nationally recognized inventor in energy, and Tony actually left his role at Tesla to build Vela with me full-time. We recently raised $1.3M from a16z Speedrun and Z Fellows to build AI agent products that help large energy loads get powered on faster.
+
+Super interested in learning more about your work, and would love to pick your brain as we build this out. Would you have 20-30 minutes in the coming week for a chat? {{calendarUrl}}
+
+Looking forward to hearing from you.
+
+Best,
+{{senderName}}`;
+  const [migrated] = emailTemplates({ emailTemplates: [{
+    id: "quick-intro",
+    name: "Quick intro",
+    eyebrow: "Pick their brain",
+    subject: "Quick intro + would love to pick your brain",
+    body: legacyBody,
+  }] });
+  assert.equal(migrated.subject, TEMPLATES[0].subject);
+  assert.equal(migrated.body, TEMPLATES[0].body);
+
+  const [custom] = emailTemplates({ emailTemplates: [{
+    id: "quick-intro",
+    name: "Quick intro",
+    subject: "Quick intro + would love to pick your brain",
+    body: `${legacyBody}\n\nCustom line`,
+  }] });
+  assert.match(custom.body, /Custom line$/);
+
+  const variables = templateVariables(profile, { senderName: "Tarun", calendarUrl: "https://cal.com/team/velaenergy" });
+  const migratedDraft = migrateLegacyQuickIntroDraft(
+    applyTemplate({ subject: "Quick intro + would love to pick your brain", body: legacyBody }, variables),
+    variables,
+  );
+  assert.equal(migratedDraft.subject, TEMPLATES[0].subject);
+  assert.match(migratedDraft.body, /I'm Tarun, CEO of Vela Energy/);
 });
 
 test("gmailComposeUrl safely encodes message fields", () => {
@@ -47,6 +132,24 @@ test("gmailComposeUrl safely encodes message fields", () => {
   assert.equal(url.searchParams.get("to"), "josh@example.com");
   assert.equal(url.searchParams.get("su"), "A + B");
   assert.equal(url.searchParams.get("body"), "Hi Josh,\nTalk soon?");
+});
+
+test("mailtoComposeUrl safely encodes a default email-app draft", () => {
+  const url = new URL(mailtoComposeUrl({ to: "josh@example.com", subject: "A + B", body: "Hi Josh,\nTalk soon?" }));
+  assert.equal(url.protocol, "mailto:");
+  assert.equal(url.pathname, "josh@example.com");
+  assert.equal(url.searchParams.get("subject"), "A + B");
+  assert.equal(url.searchParams.get("body"), "Hi Josh,\nTalk soon?");
+});
+
+test("normalizes reusable named templates and keeps stable unique IDs", () => {
+  const templates = normalizeEmailTemplates([
+    { id: "operator", name: "Operator", subject: "Hi {{firstName}}", body: "About {{shortRole}}" },
+    { id: "operator", name: "Follow up", subject: "Following up", body: "Hi again" },
+    { id: "incomplete", name: "Incomplete", subject: "", body: "Missing subject" },
+  ]);
+  assert.deepEqual(templates.map((template) => template.id), ["operator", "operator-2"]);
+  assert.equal(emailTemplates({ emailTemplates: templates })[1].name, "Follow up");
 });
 
 test("normalizes common enrichment response shapes and confidence scales", () => {

@@ -2,10 +2,11 @@
   "manifest_version": 3,
   "name": "Vela GTM",
   "description": "Turn LinkedIn profiles into researched, personalized Vela outreach drafts.",
-  "version": "0.5.1",
+  "version": "0.7.0",
+  "minimum_chrome_version": "114",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAp2D/uJTiDm0NiLu356b+tP6IKX2G/e4bV1fXipyUhDORfWrDpWNO4W40XHl2W5RXu/1qCctUiVEiSIZEzaysQ183wbB9xPn0pXdbmljJI7a1HW9wWxuDSxxBLw+Bz3sfS2vrVHgZbOybo4vMeslEeHPPiOuk7774wbhwri8lOLJElMRTxqImiA2LmEwLqK9Cffpd6mwjr+08O/C6JSAwG758JKQ9J4pFySPP5RPQz25SR8ACDeIR6ZV5K0hl3RUtpCk2l6kEYZyRJGa4fJQQevqz7/Az1j6Clit3rV/yWjeOYe4UNh3VpGgQtbdfE4hV9YtYCVo+P5tYs9eayAjJ+wIDAQAB",
   "action": {
     "default_title": "Open Vela GTM",
-    "default_popup": "popup.html",
     "default_icon": {
       "16": "assets/icon-16.png",
       "32": "assets/icon-32.png",
@@ -17,17 +18,21 @@
     "service_worker": "background.js",
     "type": "module"
   },
+  "side_panel": {
+    "default_path": "popup.html"
+  },
   "icons": {
     "16": "assets/icon-16.png",
     "32": "assets/icon-32.png",
     "48": "assets/icon-48.png",
     "128": "assets/icon-128.png"
   },
-  "permissions": ["activeTab", "identity", "identity.email", "scripting", "storage", "tabs"],
+  "permissions": ["activeTab", "alarms", "identity", "identity.email", "scripting", "sidePanel", "storage", "tabs"],
   "host_permissions": [
     "https://www.linkedin.com/*",
+    "https://contactout.com/*",
     "https://gmail.googleapis.com/*",
-    "https://sheets.googleapis.com/*",
+    "https://www.googleapis.com/*",
     "https://api.contactout.com/*",
     "https://api.apollo.io/*",
     "https://api.openai.com/*",
@@ -43,11 +48,8 @@
     }
   ],
   "oauth2": {
-    "client_id": "1088169803258-bv0d48d7ftb9429eeprg27baqmadaukq.apps.googleusercontent.com",
-    "scopes": [
-      "https://www.googleapis.com/auth/gmail.compose",
-      "https://www.googleapis.com/auth/spreadsheets"
-    ]
+    "client_id": "185496922277-aoi4hsbke7el382uk559uotlvo9478fj.apps.googleusercontent.com",
+    "scopes": ["https://www.googleapis.com/auth/gmail.send"]
   },
   "options_page": "options.html",
   "content_security_policy": {

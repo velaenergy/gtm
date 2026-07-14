@@ -26,22 +26,40 @@
 
         <nav class="nav-groups">
           <div class="nav-group">
-            <p class="nav-label">Workspace</p>
-            <button class="nav-item is-active" type="button" data-view="all">
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 4.5h13v11h-13zM3.5 8h13M8 8v7.5"/></svg>
-              <span>Prospects</span><b id="navTotal">0</b>
+            <p class="nav-label">Operate</p>
+            <button class="nav-item is-active" type="button" data-view="overview">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 10h5.5V3.5H3.5zM11 16.5h5.5V10H11zM3.5 16.5h5.5V12H3.5zM11 8h5.5V3.5H11z"/></svg>
+              <span>Overview</span>
             </button>
             <button class="nav-item" type="button" data-view="research">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m14.5 14.5 3 3M16 9a7 7 0 1 1-14 0 7 7 0 0 1 14 0ZM6.5 9h5M9 6.5v5"/></svg>
-              <span>Research queue</span><b id="navResearch">0</b>
+              <span>AI research</span><b id="navResearch">0</b>
             </button>
             <button class="nav-item" type="button" data-view="review">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h9l3 3v10H4zM13 3.5v3h3M7 10h6M7 13h4"/></svg>
               <span>Review queue</span><b id="navReview">0</b>
             </button>
+          </div>
+          <div class="nav-group">
+            <p class="nav-label">Delivery</p>
+            <button class="nav-item" type="button" data-view="scheduled">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M10 6v4l2.8 1.8"/></svg>
+              <span>Scheduled</span><b id="navScheduled">0</b>
+            </button>
+            <button class="nav-item" type="button" data-view="history">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 5.5h13v10h-13zM3.5 6l6.5 5 6.5-5"/><path d="M14.5 3.5h2v2"/></svg>
+              <span>Sent history</span><b id="navTracking">0</b>
+            </button>
             <button class="nav-item" type="button" data-view="drafted">
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5.5h14v10H3zM3.5 6l6.5 5 6.5-5"/></svg>
-              <span>Gmail drafts</span><b id="navDrafted">0</b>
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h12v13H4zM4 8h12M8 3.5v13"/></svg>
+              <span>Mail merge exports</span><b id="navDrafted">0</b>
+            </button>
+          </div>
+          <div class="nav-group">
+            <p class="nav-label">Records</p>
+            <button class="nav-item" type="button" data-view="all">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 4.5h13v11h-13zM3.5 8h13M8 8v7.5"/></svg>
+              <span>All prospects</span><b id="navTotal">0</b>
             </button>
           </div>
           <div class="nav-group campaign-nav-group">
@@ -75,35 +93,29 @@
 
       <main class="workspace">
         <header class="workspace-topbar">
-          <div class="crumb"><span>Vela Energy</span><i>/</i><strong>GTM</strong></div>
+          <div class="crumb"><span>Vela Energy</span><i>/</i><strong>GTM control room</strong></div>
           <div class="top-actions">
-            <button id="copySheetButton" class="button button-ghost" type="button">
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h12v13H4zM4 8h12M8 3.5v13"/></svg>
-              Export to Sheets
-            </button>
+            <button id="generationModePill" class="generation-mode-pill" type="button" title="AI drafting mode · open settings"><span>AI</span><strong>Personalization only</strong></button>
             <button id="exportButton" class="button button-outline" type="button">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9M6.5 8.5 10 12l3.5-3.5M3.5 14v2.5h13V14"/></svg>
-              <span id="exportButtonLabel">Export CSV</span>
+              <span id="exportButtonLabel">Export MailMerge</span>
             </button>
             <span class="avatar-user" aria-label="Tarun">TR</span>
           </div>
         </header>
 
         <div class="workspace-content">
-          <section class="hero" aria-labelledby="pageTitle">
-            <div class="hero-heading">
-              <p class="eyebrow"><span></span>Agent workspace</p>
-              <h1 id="pageTitle">Vela GTM agents</h1>
-              <p>Find the right people, verify their contact details, and prepare drafts for review.</p>
-            </div>
-            <div class="activity-note"><span class="activity-pulse"></span><div><strong>Ready</strong><small>Sources connected</small></div></div>
-          </section>
+          <header class="page-head">
+            <p id="heroEyebrow" class="page-context" hidden><span></span>Overview</p>
+            <h1 id="pageTitle">Overview</h1>
+            <p id="pageSubtitle">What needs a decision, what is scheduled, and what already went out.</p>
+          </header>
 
-          <section class="agent-panel" aria-label="Vela agent search">
+          <section id="agentPanel" class="agent-panel" aria-label="Vela agent search" hidden>
             <form id="searchForm" class="agent-form">
               <div class="agent-mark" aria-hidden="true"><span></span><span></span><span></span></div>
               <label class="sr-only" for="searchBrief">Describe the people you want to find</label>
-              <textarea id="searchBrief" rows="2" autocomplete="off" placeholder="Find data center leaders responsible for power, site selection, or critical operations at growing operators..."></textarea>
+              <textarea id="searchBrief" rows="2" autocomplete="off" placeholder="Describe the people you want to find, e.g. leaders responsible for power, site selection, or critical operations..."></textarea>
               <button id="planSearchButton" class="agent-submit" type="submit" aria-label="Plan search">
                 <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"/></svg>
               </button>
@@ -127,23 +139,97 @@
             </div>
           </section>
 
-          <section class="metrics" aria-label="Pipeline summary">
-            <article><div><span>Prospects</span><strong id="totalStat">0</strong></div><small id="totalDelta">Across your workspace</small></article>
-            <article><div><span>Needs research</span><strong id="attentionStat">0</strong></div><small><i class="dot dot-amber"></i>Waiting on the agent</small></article>
-            <article><div><span>Ready to review</span><strong id="readyStat">0</strong></div><small><i class="dot dot-blue"></i>Human decision required</small></article>
-            <article><div><span>In Gmail</span><strong id="draftedStat">0</strong></div><small><i class="dot dot-green"></i>Prepared, never auto-sent</small></article>
+          <section id="metricsPanel" class="pipeline" aria-label="Pipeline summary">
+            <div class="pipeline-stages">
+              <button class="pipeline-stage" type="button" data-jump-view="all">
+                <span>Prospects</span><strong id="totalStat">0</strong><small id="totalDelta">Across your workspace</small>
+              </button>
+              <button class="pipeline-stage" type="button" data-jump-view="research">
+                <span><i class="dot dot-amber"></i>In research</span><strong id="attentionStat">0</strong><small>Waiting on the agent</small>
+              </button>
+              <button class="pipeline-stage" type="button" data-jump-view="review">
+                <span><i class="dot dot-blue"></i>Ready to review</span><strong id="readyStat">0</strong><small>Needs your decision</small>
+              </button>
+              <button class="pipeline-stage" type="button" data-jump-view="scheduled">
+                <span><i class="dot dot-violet"></i>Scheduled</span><strong id="draftedStat">0</strong><small>Queued for Gmail</small>
+              </button>
+              <button class="pipeline-stage" type="button" data-jump-view="history">
+                <span><i class="dot dot-green"></i>Delivered</span><strong id="sentStat">0</strong><small>In the delivery log</small>
+              </button>
+            </div>
+            <div id="pipelineBar" class="pipeline-bar" aria-hidden="true">
+              <i data-stage="research"></i><i data-stage="review"></i><i data-stage="scheduled"></i><i data-stage="delivered"></i>
+            </div>
           </section>
 
-          <section class="queue-section" aria-labelledby="queueHeading">
+          <section id="overviewPanel" class="overview" aria-label="Outreach overview">
+            <article class="panel overview-main">
+              <header class="panel-head">
+                <div><h2>Needs your review</h2><p><span id="overviewReviewCount">0</span> drafts waiting for a decision</p></div>
+                <button class="panel-link" type="button" data-jump-view="review">Open review queue</button>
+              </header>
+              <div id="overviewReviewList" class="review-list"></div>
+            </article>
+            <div class="overview-side">
+              <article class="panel">
+                <header class="panel-head">
+                  <div><h2>Next sends</h2><p><span id="overviewScheduledCount">0</span> in the next 24 hours</p></div>
+                  <button class="panel-link" type="button" data-jump-view="scheduled">See schedule</button>
+                </header>
+                <div id="overviewScheduleList" class="overview-list"></div>
+              </article>
+              <article class="panel">
+                <header class="panel-head">
+                  <div><h2>Recent deliveries</h2><p><span id="overviewSentTodayCount">0</span> delivered today</p></div>
+                  <button class="panel-link" type="button" data-jump-view="history">See history</button>
+                </header>
+                <div id="overviewActivityList" class="overview-list"></div>
+              </article>
+            </div>
+          </section>
+
+          <section id="trackingPanel" class="tracking-panel" hidden aria-labelledby="trackingHeading">
+            <div class="tracking-head">
+              <div><h2 id="trackingHeading">Stored workflow activity</h2><p>Vela records imports, research, drafts, exports, and sent marks in this Chrome profile. Nothing here triggers an email.</p></div>
+            </div>
+            <div class="tracking-grid">
+              <article><span>Imported</span><strong id="trackingImported">0</strong><small>Spreadsheet + LinkedIn</small></article>
+              <article><span>Researched</span><strong id="trackingResearched">0</strong><small>Profile context prepared</small></article>
+              <article><span>Mail merge</span><strong id="trackingDrafted">0</strong><small>Exported for sending</small></article>
+              <article><span>Email sent</span><strong id="trackingSent">0</strong><small>Imported or marked manually</small></article>
+            </div>
+            <div id="trackingActivity" class="tracking-activity"></div>
+          </section>
+
+          <section id="operationsPanel" class="operations-panel" hidden aria-labelledby="operationsTitle">
+            <header class="operations-head">
+              <div><p id="operationsKicker" class="section-kicker">Delivery</p><h2 id="operationsTitle">Scheduled sends</h2><p id="operationsDescription">Every queued Gmail send, in the order Vela will run it.</p></div>
+              <button id="operationsPrimaryAction" class="button button-outline" type="button" data-jump-view="review">Review more drafts</button>
+            </header>
+            <div id="deliveryList" class="delivery-list"></div>
+          </section>
+
+          <section id="queueSection" class="queue-section" aria-labelledby="queueHeading" hidden>
             <div class="queue-titlebar">
-              <div><h2 id="queueHeading">All prospects</h2><p id="queueDescription">Every prospect across research, review, and Gmail.</p></div>
+              <div class="queue-heading-wrap">
+                <div><h2 id="queueHeading">All prospects</h2><p id="queueDescription">Every prospect across research, review, and mail merge.</p></div>
+                <div id="campaignActions" class="campaign-actions" hidden>
+                  <button id="campaignActionsButton" class="button button-ghost campaign-actions-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="campaignActionsMenu">
+                    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="4" cy="10" r="1"/><circle cx="10" cy="10" r="1"/><circle cx="16" cy="10" r="1"/></svg>
+                    Campaign
+                  </button>
+                  <div id="campaignActionsMenu" class="dropdown-menu" role="menu" hidden>
+                    <button id="editCampaignButton" type="button" role="menuitem"><span>Edit name &amp; details</span><kbd>⌘E</kbd></button>
+                    <button id="duplicateCampaignButton" type="button" role="menuitem"><span>Duplicate campaign</span></button>
+                    <div class="dropdown-separator" role="separator"></div>
+                    <button id="deleteCampaignButton" class="destructive" type="button" role="menuitem"><span>Delete campaign</span></button>
+                  </div>
+                </div>
+              </div>
               <div class="queue-actions">
                 <button id="newCampaignButtonTop" class="button button-ghost" type="button">+ Campaign</button>
-                <button id="draftReadyButton" class="button button-outline" type="button">Create Gmail drafts</button>
-                <button id="processButton" class="button button-primary" type="button">
-                  <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m10 2 .9 3.1L14 6l-3.1.9L10 10l-.9-3.1L6 6l3.1-.9zM15.5 11l.6 2.4 2.4.6-2.4.6-.6 2.4-.6-2.4-2.4-.6 2.4-.6zM5 11.5l.7 2.1 2.1.7-2.1.7-.7 2.1-.7-2.1-2.1-.7 2.1-.7z"/></svg>
-                  Research queue
-                </button>
+                <button id="mailMergeReadyButton" class="button button-outline" type="button">Export ready</button>
+                <button id="processButton" class="button button-primary" type="button">Research queue</button>
               </div>
             </div>
 
@@ -155,7 +241,7 @@
                 <kbd>⌘K</kbd>
               </label>
               <div class="toolbar-right">
-                <button id="statusFilterButton" class="button button-ghost filter-button" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M5.5 10h9M8 15h4"/></svg> Filter</button>
+                <button id="statusFilterButton" class="button button-ghost filter-button" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M5.5 10h9M8 15h4"/></svg> Needs attention</button>
                 <button id="openImportButtonTop" class="button button-ghost" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 7l4-4 4 4M3.5 12.5v4h13v-4"/></svg> Import</button>
               </div>
             </div>
@@ -163,7 +249,7 @@
             <div id="bulkBar" class="bulk-bar" hidden>
               <span><strong id="selectedCount">0</strong> selected</span>
               <button id="bulkResearchButton" type="button">Research</button>
-              <button id="bulkDraftButton" type="button">Create drafts</button>
+              <button id="bulkMailMergeButton" type="button">Export MailMerge</button>
               <button id="clearSelectionButton" type="button">Clear</button>
             </div>
 
@@ -194,7 +280,7 @@
         <button id="closeDrawerButton" class="icon-button" type="button" aria-label="Close review panel"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg></button>
       </header>
       <div class="drawer-content">
-        <div class="prospect-summary"><span id="drawerAvatar" class="person-avatar">VG</span><div><strong id="drawerName">Prospect</strong><p id="drawerHeadline"></p><p id="drawerLocation" class="prospect-location"></p><a id="drawerLinkedIn" href="#" target="_blank" rel="noreferrer">Live page ↗</a></div></div>
+        <div class="prospect-summary"><span id="drawerAvatar" class="person-avatar">VG</span><div><strong id="drawerName">Prospect</strong><p id="drawerHeadline"></p><p id="drawerLocation" class="prospect-location"></p><a id="drawerLinkedIn" href="#" target="_blank" rel="noreferrer">Open LinkedIn profile ↗</a></div></div>
         <div class="review-status"><span><i></i>Human review required</span><small>Nothing is sent from this screen</small></div>
 
         <section class="drawer-section email-review" aria-labelledby="emailReviewTitle">
@@ -214,55 +300,80 @@
           <div id="drawerExperienceList" class="experience-list"></div>
         </section>
 
+        <section class="drawer-section" aria-labelledby="activityTitle">
+          <div class="drawer-section-head"><div><p class="section-kicker">Activity</p><h3 id="activityTitle">Stored on this prospect</h3></div><span class="section-count">Local only</span></div>
+          <div id="drawerActivity" class="drawer-activity"></div>
+        </section>
+
         <div class="message-fields">
         <label class="field"><span>Subject</span><input id="drawerSubject" type="text" /></label>
         <label class="field"><span>Message</span><textarea id="drawerBody" rows="13"></textarea></label>
         </div>
       </div>
       <footer class="drawer-footer">
+        <button id="markSentButton" class="button button-ghost" type="button">Mark email sent</button>
         <button id="saveReviewButton" class="button button-outline" type="button">Save changes</button>
-        <button id="approveDraftButton" class="button button-primary" type="button">Approve & create Gmail draft</button>
+        <button id="approveDraftButton" class="button button-primary" type="button">Approve &amp; export</button>
       </footer>
     </aside>
 
-    <dialog id="importDialog" class="modal">
-      <form method="dialog" class="modal-card">
-        <header><div><p class="eyebrow">Bring your own list</p><h2>Import prospects</h2></div><button class="icon-button" value="cancel" aria-label="Close import dialog"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg></button></header>
-        <div class="modal-body">
-          <p>Paste one LinkedIn profile per line. Add context after a vertical bar to give the agent a head start.</p>
-          <label class="field"><span>LinkedIn profiles</span><textarea id="bulkInput" rows="8" placeholder="https://www.linkedin.com/in/example | leads critical operations at a data center"></textarea></label>
-          <span id="importHint">Duplicates are merged automatically using the LinkedIn URL.</span>
+    <dialog id="importDialog" class="modal import-modal">
+      <form method="dialog" class="modal-card import-card">
+        <header><div><h2>Import prospects</h2></div><button class="icon-button" value="cancel" aria-label="Close import dialog"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg></button></header>
+        <div class="import-source-tabs" role="tablist" aria-label="Import source">
+          <button class="is-active" type="button" role="tab" aria-selected="true" data-import-source="spreadsheet"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h12v13H4zM4 8h12M8 3.5v13"/></svg> Spreadsheet</button>
+          <button type="button" role="tab" aria-selected="false" data-import-source="linkedin"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5h12M4 10h12M4 15h8"/></svg> LinkedIn URLs</button>
         </div>
-        <footer><button class="button button-ghost" value="cancel">Cancel</button><button id="importButton" class="button button-primary" type="button">Add to workspace</button></footer>
+        <div class="modal-body import-body">
+          <section id="spreadsheetImportPanel" class="import-panel">
+            <label id="dropZone" class="drop-zone" for="importFileInput">
+              <input id="importFileInput" type="file" accept=".xlsx,.xls,.csv" />
+              <span class="drop-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V5M8 9l4-4 4 4M5 15v4h14v-4"/></svg></span>
+              <strong id="importFileName">Drop a spreadsheet here</strong>
+              <small>or choose an .xlsx, .xls, or .csv file</small>
+              <em>MailMerge.xlsx columns are recognized automatically</em>
+            </label>
+            <div id="mappingStage" class="mapping-stage" hidden>
+              <div class="mapping-head"><div><strong>Map columns</strong><span id="mappingSummary">Match each source column to a Vela field.</span></div><button id="replaceImportFile" type="button">Choose another file</button></div>
+              <div id="mappingGrid" class="mapping-grid"></div>
+              <div id="mappingIssues" class="mapping-issues" hidden></div>
+            </div>
+          </section>
+          <section id="linkedinImportPanel" class="import-panel" hidden>
+            <p>Paste one LinkedIn profile per line. Add context after a vertical bar to give the research agent a head start.</p>
+            <label class="field"><span>LinkedIn profiles</span><textarea id="bulkInput" rows="9" placeholder="https://www.linkedin.com/in/example | leads critical operations at a data center"></textarea></label>
+            <span id="importHint">Duplicates are merged automatically using the LinkedIn URL.</span>
+          </section>
+        </div>
+        <footer><div class="import-footnote"><span class="safety-icon"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5 16 5v4.7c0 3.5-2.4 6.2-6 7.8-3.6-1.6-6-4.3-6-7.8V5zM7.2 10l1.8 1.8 3.8-4"/></svg></span><span><strong>Review first</strong><small>Imported rows never send automatically.</small></span></div><div><button class="button button-ghost" value="cancel">Cancel</button><button id="importButton" class="button button-primary" type="button" disabled>Import prospects</button></div></footer>
       </form>
     </dialog>
 
     <dialog id="campaignDialog" class="modal campaign-modal">
       <form id="campaignForm" class="modal-card">
-        <header><div><p class="eyebrow">Organize outreach</p><h2>Create campaign</h2></div><button id="closeCampaignDialog" class="icon-button" type="button" aria-label="Close campaign dialog"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg></button></header>
+        <header><div><p id="campaignDialogKicker" class="modal-kicker">Organize outreach</p><h2 id="campaignDialogTitle">Create campaign</h2></div><button id="closeCampaignDialog" class="icon-button" type="button" aria-label="Close campaign dialog"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg></button></header>
         <div class="modal-body">
-          <p>Campaigns collect prospects without duplicating their research or personalization notes.</p>
+          <p id="campaignDialogDescription">Campaigns collect prospects without duplicating their research or personalization notes.</p>
           <label class="field"><span>Campaign name</span><input id="campaignName" type="text" maxlength="70" autocomplete="off" placeholder="Data center operators" /></label>
           <label class="field"><span>Description <em>Optional</em></span><input id="campaignDescription" type="text" maxlength="140" autocomplete="off" placeholder="Leaders to contact before the infrastructure summit" /></label>
         </div>
-        <footer><button id="cancelCampaignButton" class="button button-ghost" type="button">Cancel</button><button class="button button-primary" type="submit">Create campaign</button></footer>
+        <footer><button id="cancelCampaignButton" class="button button-ghost" type="button">Cancel</button><button id="campaignSubmitButton" class="button button-primary" type="submit">Create campaign</button></footer>
       </form>
     </dialog>
 
-    <dialog id="googleAccountDialog" class="modal google-account-modal">
+    <dialog id="deleteCampaignDialog" class="modal alert-dialog">
       <form method="dialog" class="modal-card">
-        <header><div><p class="eyebrow">Google connection</p><h2>Choose an account</h2></div><button class="icon-button" value="cancel" aria-label="Close account chooser"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg></button></header>
+        <header><div><h2>Remove this campaign?</h2></div></header>
         <div class="modal-body">
-          <p>Vela will create Gmail drafts and mail-merge spreadsheets in the account you choose. Nothing is sent automatically.</p>
-          <div id="googleAccountList" class="google-account-list"></div>
-          <span>To use a different address, sign it into this Chrome profile first, then reopen this chooser.</span>
+          <p id="deleteCampaignDescription">This removes the campaign only. Its prospects and research stay in the workspace.</p>
         </div>
-        <footer><button class="button button-ghost" value="cancel">Cancel</button></footer>
+        <footer><button class="button button-ghost" value="cancel">Cancel</button><button id="confirmDeleteCampaignButton" class="button button-destructive" value="default">Delete campaign</button></footer>
       </form>
     </dialog>
 
     <div id="progressBar" class="progress-bar" hidden><i></i><span id="progressText">Researching queue</span></div>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="vendor/xlsx.full.min.js"></script>
     <script type="module" src="dashboard.js"></script>
   </body>
 </html>

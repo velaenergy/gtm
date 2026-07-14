@@ -5,7 +5,10 @@ import {
   campaignProspects,
   campaignsForProspect,
   createCampaign,
+  deleteCampaign,
+  duplicateCampaign,
   removeProspectFromCampaign,
+  updateCampaign,
 } from "../lib/campaigns.js";
 import { upsertProspects } from "../lib/queue.js";
 
@@ -44,4 +47,43 @@ test("campaign totals and removal stay scoped to campaign members", () => {
   assert.deepEqual(campaignProspects(queue, campaigns[0]).map((prospect) => prospect.workNote), ["critical operations leadership"]);
   campaigns = removeProspectFromCampaign(campaigns, "operators", queue[0].url, NOW);
   assert.equal(campaignProspects(queue, campaigns[0]).length, 0);
+});
+
+test("edits campaign details without changing identity or membership", () => {
+  const original = createCampaign({
+    id: "operators",
+    name: "Operators",
+    description: "Original description",
+    prospectIds: ["https://www.linkedin.com/in/joshua-rivera"],
+  }, NOW);
+  const [updated] = updateCampaign([original], "operators", {
+    name: "Critical infrastructure operators",
+    description: "Power and uptime leaders",
+  }, "2026-07-13T13:00:00.000Z");
+  assert.equal(updated.id, "operators");
+  assert.equal(updated.name, "Critical infrastructure operators");
+  assert.equal(updated.description, "Power and uptime leaders");
+  assert.deepEqual(updated.prospectIds, original.prospectIds);
+});
+
+test("duplicates and deletes campaigns without changing the source", () => {
+  const source = createCampaign({
+    id: "operators",
+    name: "Operators",
+    prospectIds: ["https://www.linkedin.com/in/joshua-rivera"],
+  }, NOW);
+  const campaigns = duplicateCampaign([source], source.id, "2026-07-13T13:00:00.000Z");
+  assert.equal(campaigns.length, 2);
+  assert.equal(campaigns[1].name, "Operators copy");
+  assert.deepEqual(campaigns[1].prospectIds, source.prospectIds);
+  assert.notEqual(campaigns[1].prospectIds, source.prospectIds);
+  assert.deepEqual(deleteCampaign(campaigns, source.id).map((campaign) => campaign.name), ["Operators copy"]);
+});
+
+test("adds and removes spreadsheet-only prospects by email identity", () => {
+  let campaigns = [createCampaign({ id: "buyers", name: "Energy buyers" }, NOW)];
+  campaigns = addProspectToCampaign(campaigns, "buyers", "Maya@Example.com", NOW);
+  assert.deepEqual(campaigns[0].prospectIds, ["email:maya@example.com"]);
+  campaigns = removeProspectFromCampaign(campaigns, "buyers", "maya@example.com", NOW);
+  assert.deepEqual(campaigns[0].prospectIds, []);
 });
