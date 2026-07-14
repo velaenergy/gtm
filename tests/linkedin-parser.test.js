@@ -2,8 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 await import("../lib/linkedin-parser.js");
+await import("../lib/linkedin-launcher.js");
 
 const { emailFromFlightResponse, emailFromMailto, memberIdFromMarkup, parseExperienceLines, parseTopCardLines } = globalThis.VelaLinkedInParser;
+const { launcherVisibleForPath } = globalThis.VelaLinkedInLauncher;
+
+test("V24 shows the Vela launcher only on supported LinkedIn people surfaces", () => {
+  assert.equal(launcherVisibleForPath("/in/ben-kurian/"), true);
+  assert.equal(launcherVisibleForPath("/search/results/people/"), true);
+  assert.equal(launcherVisibleForPath("/feed/"), false);
+});
 
 test("V3 extracts and validates an email from the rendered contact overlay mailto", () => {
   assert.equal(emailFromMailto("mailto:alex%40relay.energy?subject=Hello"), "alex@relay.energy");

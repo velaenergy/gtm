@@ -17,6 +17,7 @@ import {
   normalizeEnrichmentResponse,
   normalizeEmailTemplates,
   normalizeRecipientSelection,
+  recipientSelectionContext,
   resolveTheme,
   templateVariables,
 } from "../lib/message.js";
@@ -52,6 +53,23 @@ test("recipient selection keeps multiple addresses only after opt-in", () => {
     ),
     ["alternate@example.com", "primary@example.com"],
   );
+});
+
+test("V22 selecting an alternate verified recipient promotes it into compose context", () => {
+  assert.deepEqual(recipientSelectionContext("BEN.KURIAN@DWS.COM", {
+    emails: ["benkurian@gmail.com", "ben.kurian@dws.com"],
+    workEmails: ["ben.kurian@dws.com"],
+    personalEmails: ["benkurian@gmail.com"],
+    emailStatuses: {
+      "benkurian@gmail.com": "verified",
+      "ben.kurian@dws.com": "valid",
+    },
+  }, "Personal email confirmed by ContactOut"), {
+    email: "ben.kurian@dws.com",
+    emailVerified: true,
+    emailType: "work",
+    emailSource: "Work email selected · confirmed by ContactOut",
+  });
 });
 
 test("V19 manual Gmail compose accepts a valid visible email while direct send stays verified-only", () => {
@@ -161,6 +179,25 @@ test("normalizes reusable named templates and keeps stable unique IDs", () => {
   ]);
   assert.deepEqual(templates.map((template) => template.id), ["operator", "operator-2"]);
   assert.equal(emailTemplates({ emailTemplates: templates })[1].name, "Follow up");
+});
+
+test("keeps sender identity and calendar URL with each email template", () => {
+  const [template] = emailTemplates({
+    senderName: "Legacy sender",
+    calendarUrl: "https://cal.example/legacy",
+    emailTemplates: [{
+      id: "founder-note",
+      name: "Founder note",
+      senderName: "Maya",
+      calendarUrl: "https://cal.example/maya",
+      subject: "Hello {{firstName}}",
+      body: "Best, {{senderName}} — {{calendarUrl}}",
+    }],
+  });
+  const variables = templateVariables(profile, DEFAULT_SETTINGS, "", template);
+  assert.equal(template.senderName, "Maya");
+  assert.equal(template.calendarUrl, "https://cal.example/maya");
+  assert.equal(applyTemplate(template, variables).body, "Best, Maya — https://cal.example/maya");
 });
 
 test("normalizes common enrichment response shapes and confidence scales", () => {

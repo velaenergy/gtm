@@ -1,14 +1,14 @@
-import { contactOutAccountStatus, enrichViaContactOut, peopleSearch } from "./lib/contactout.js";
+import { contactOutAccountStatus, enrichViaContactOut } from "./lib/contactout.js";
 import { writeOutreach } from "./server/openai-writer.mjs";
 import { planProspectSearch } from "./server/search-planner.mjs";
-import { apolloAccountStatus, enrichViaApollo, peopleSearchViaApollo } from "./lib/apollo.js";
+import { apolloAccountStatus, enrichViaApollo } from "./lib/apollo.js";
 import {
   contactOutSessionStatus,
   openContactOutSessionLogin,
   previewContactOutSession,
   revealContactOutSession,
 } from "./lib/contactout-session.js";
-import { PROVIDER, preferredSearchProvider } from "./lib/provider-priority.js";
+import { searchPeopleWithProviders } from "./lib/people-search.js";
 import { appendDiagnostic } from "./lib/diagnostics.js";
 import {
   GOOGLE_ACCOUNT_AUTH_MODE,
@@ -37,6 +37,18 @@ import {
 async function enablePersistentSidePanel() {
   if (!chrome.sidePanel?.setPanelBehavior) return;
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+}
+
+function alarmsApi() {
+  return globalThis.chrome?.alarms || null;
+}
+
+function requireAlarmsApi() {
+  const api = alarmsApi();
+  if (!api?.create || !api?.clear || !api?.getAll) {
+    throw new Error("Chrome scheduling is unavailable. Reload Vela GTM from chrome://extensions so the alarms permission is applied.");
+  }
+  return api;
 }
 
 enablePersistentSidePanel().catch((error) => console.error("Could not enable the Vela side panel.", error));
@@ -165,7 +177,7 @@ async function scheduleDelivery(input = {}) {
   const saved = await chrome.storage.local.get(SCHEDULED_SENDS_STORAGE_KEY);
   const jobs = normalizeScheduledSends(saved[SCHEDULED_SENDS_STORAGE_KEY]);
   await chrome.storage.local.set({ [SCHEDULED_SENDS_STORAGE_KEY]: [...jobs, job].slice(-100) });
-  await chrome.alarms.create(alarmNameForJob(job.id), { when: new Date(job.scheduledAt).getTime() });
+  await requireAlarmsApi().create(alarmNameForJob(job.id), { when: new Date(job.scheduledAt).getTime() });
   await recordDelivery({ ...job, mode: "scheduled", status: DELIVERY_STATUS.SCHEDULED, updatedAt: job.createdAt });
   await recordProspectDelivery(job.prospectId, "scheduled", `Gmail send scheduled for ${job.scheduledAt}`);
   return job;
@@ -202,7 +214,7 @@ async function cancelScheduledJob(id) {
   if (!job) throw new Error("That scheduled send no longer exists.");
   if (job.status !== "scheduled") throw new Error("Only queued sends can be cancelled.");
   const completedAt = new Date().toISOString();
-  await chrome.alarms.clear(alarmNameForJob(id));
+  await requireAlarmsApi().clear(alarmNameForJob(id));
   await updateScheduledJob(id, { status: DELIVERY_STATUS.CANCELLED, completedAt });
   await recordDelivery({ ...job, status: DELIVERY_STATUS.CANCELLED, completedAt, updatedAt: completedAt });
   await recordProspectDelivery(job.prospectId, "schedule_cancelled", "Scheduled Gmail send cancelled", { at: completedAt });
@@ -210,12 +222,14 @@ async function cancelScheduledJob(id) {
 }
 
 async function restoreScheduledAlarms() {
+  const api = alarmsApi();
+  if (!api?.getAll || !api?.create) return;
   const saved = await chrome.storage.local.get(SCHEDULED_SENDS_STORAGE_KEY);
   const jobs = normalizeScheduledSends(saved[SCHEDULED_SENDS_STORAGE_KEY]).filter((job) => job.status === "scheduled");
-  const alarms = new Set((await chrome.alarms.getAll()).map((alarm) => alarm.name));
+  const alarms = new Set((await api.getAll()).map((alarm) => alarm.name));
   for (const job of jobs) {
     const name = alarmNameForJob(job.id);
-    if (!alarms.has(name)) await chrome.alarms.create(name, { when: Math.max(Date.parse(job.scheduledAt), Date.now() + 250) });
+    if (!alarms.has(name)) await api.create(name, { when: Math.max(Date.parse(job.scheduledAt), Date.now() + 250) });
   }
 }
 
@@ -262,9 +276,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return planProspectSearch(message.brief, { apiKey: configured.openAIApiKey, model: configured.openAIModel || "gpt-5.4-mini" });
     }
     if (message.type === "VELA_GTM_PROVIDER_PEOPLE_SEARCH") {
-      return preferredSearchProvider(configured) === PROVIDER.CONTACTOUT
-        ? peopleSearch(message.filters, { apiKey: configured.contactOutApiKey })
-        : peopleSearchViaApollo(message.filters, { apiKey: configured.apolloApiKey });
+      return searchPeopleWithProviders(message.filters, configured);
     }
     throw new Error("Unknown Vela provider action.");
   })()
@@ -294,16 +306,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true;
 });
 
-chrome.alarms.onAlarm.addListener((alarm) => {
-  const id = jobIdFromAlarm(alarm.name);
-  if (id) processScheduledJob(id);
-});
+if (alarmsApi()?.onAlarm?.addListener) {
+  alarmsApi().onAlarm.addListener((alarm) => {
+    const id = jobIdFromAlarm(alarm.name);
+    if (id) processScheduledJob(id);
+  });
+}
 
 chrome.runtime.onInstalled.addListener(() => {
   enablePersistentSidePanel().catch(() => {});
-  restoreScheduledAlarms();
+  restoreScheduledAlarms().catch(() => {});
 });
 chrome.runtime.onStartup.addListener(() => {
   enablePersistentSidePanel().catch(() => {});
-  restoreScheduledAlarms();
+  restoreScheduledAlarms().catch(() => {});
 });

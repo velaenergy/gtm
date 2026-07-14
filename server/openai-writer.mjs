@@ -25,7 +25,9 @@ The workNote must be a standalone, ready-to-send opener of one or two short sent
 
 Do not default to praise. Do not use phrases such as "I was impressed by", "your background is impressive", "caught my eye", "stood out to me", or "I came across your profile". Avoid AI-sounding language such as "at the intersection of", "your journey", "deep expertise", "track record", "fascinating", "incredible", and "I'd love to pick your brain". Do not claim to have followed their work. When context is thin, be honest and specific: name their current responsibility and ask a grounded question instead of inventing admiration. The opener must be grammatical, directly address the recipient, start with a capital letter, and end with punctuation.`;
 
-const GENERATION_MODE_INSTRUCTIONS = `If generationMode is "personalization", write only the complete, standalone opener in workNote. Return currentDraft.subject and currentDraft.body verbatim in the required subject and body fields; do not rewrite, polish, or otherwise change them. If generationMode is "full", follow the complete-email instructions above.`;
+const GENERATION_MODE_INSTRUCTIONS = `If generationMode is "personalization", write only the complete, standalone opener in workNote. Return currentDraft.subject and currentDraft.body verbatim in the required subject and body fields; do not rewrite, polish, or otherwise change them.
+
+If generationMode is "full", rewrite the complete subject and body using all supplied profile, recipient, sender, template, current opener, and current draft context. Treat the current draft as material to improve, not text to append to. Produce exactly one greeting, one concise founder introduction, one prospect-specific reason for reaching out, one ask, and one sign-off. Never repeat the greeting, founder story, Vela description, ask, calendar URL, or sign-off. The workNote must contain only the prospect-specific opener used inside the returned body; it must not include a greeting, founder introduction, scheduling link, or sign-off.`;
 
 export function buildOpenAIRequest(input, model = "gpt-5.4-mini") {
   return {

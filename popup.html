@@ -46,7 +46,6 @@
           <div class="profile-copy">
             <div class="profile-heading">
               <h1 id="profileName">LinkedIn prospect</h1>
-              <span id="captureStatus" class="capture-status"><i></i> Live</span>
             </div>
             <p id="profileHeadline">Work history visible on LinkedIn</p>
             <span id="profileLocationText" class="profile-location">Location not visible</span>
@@ -57,7 +56,6 @@
           <section id="contactStep" class="block workflow-step email-block">
             <div class="block-heading">
               <div class="step-heading">
-                <span class="step-number" aria-hidden="true">1</span>
                 <div><h2>Choose an email</h2><p id="emailSource">ContactOut has not checked this profile yet</p></div>
               </div>
               <div class="contact-status">
@@ -73,34 +71,25 @@
             <div id="contactDetails" class="contact-details" hidden></div>
           </section>
 
-          <section id="personalizationStep" class="block workflow-step personalization-block">
-            <div class="block-heading personalization-heading">
-              <div class="step-heading">
-                <span class="step-number" aria-hidden="true">2</span>
-                <div><h2>Review the opener</h2><p id="personalizationSource">Grounded in profile research</p></div>
+          <section id="personalizationStep" class="block workflow-step draft-composer">
+            <div class="block-heading draft-heading">
+              <div>
+                <h2>Email draft</h2>
+                <p id="personalizationSource">Writing from this LinkedIn profile</p>
               </div>
-              <button id="rewritePersonalizationButton" class="writer-button" type="button"><span>Rewrite</span></button>
+              <button id="generateEmailButton" class="writer-button" type="button"><span>Rewrite with AI</span></button>
             </div>
-            <div class="personalization-preview"><span>Why I'm reaching out</span><textarea id="workNote" class="work-note" rows="3" aria-label="AI-written personalized opener" placeholder="A specific, natural reason for reaching out will appear here…"></textarea></div>
-          </section>
-
-          <details id="emailDraftDisclosure" class="block draft-disclosure">
-            <summary>
-              <span class="step-number" aria-hidden="true">3</span>
-              <span class="draft-summary-copy"><strong>Review email</strong><small id="templateEyebrow">Pick their brain</small></span>
-              <span class="disclosure-label">Optional</span>
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6.5 8 3.5 3.5L13.5 8"/></svg>
-            </summary>
+            <textarea id="workNote" hidden aria-hidden="true" tabindex="-1"></textarea>
             <div class="composer-block">
               <div class="composer-tools">
                 <label class="template-control"><span>Template</span><select id="templateSelect" aria-label="Outreach template"></select></label>
-                <button id="generateEmailButton" class="writer-button" type="button"><span>Write with AI</span></button>
+                <span id="templateEyebrow" class="template-eyebrow">Pick their brain</span>
               </div>
               <label class="composer-field"><span>Subject</span><input id="subjectInput" type="text" autocomplete="off" /></label>
               <label class="composer-field"><span>Message</span><textarea id="bodyInput" rows="12"></textarea></label>
-              <div class="composer-meta"><span>Your template remains editable</span><span id="wordCount">0 words</span></div>
+              <div class="composer-meta"><span>Your draft is fully editable</span><span id="wordCount">0 words</span></div>
             </div>
-          </details>
+          </section>
 
           <div class="secondary-workflow">
             <button id="addToCampaignButton" class="campaign-save-button" type="button">

@@ -84,7 +84,7 @@ Only high-confidence, non-guessed internal ContactOut addresses are promoted. Gu
 
 After a verified lookup, Vela passes the bounded LinkedIn and Apollo/ContactOut work context to the configured OpenAI Responses API writer. The default **Personalization only** mode asks AI for the short work note while keeping the reviewed workspace subject and message template intact. **Entire email** mode is available when the team deliberately wants AI to rewrite the note, subject, and body together. The side panel labels generated copy with the model used.
 
-No ContactOut API token is required for profile reveals when the browser session is connected. An official ContactOut API token may still be saved as an optional fallback and is currently required for ContactOut People Search; otherwise Vela opens a native LinkedIn People search and researches the captured profiles through the session bridge. **Test ContactOut API** validates that optional token and its credits.
+No ContactOut API token is required for profile reveals when the browser session is connected. An official ContactOut API token may still be saved as an optional fallback and is currently required for ContactOut People Search. AI research searches ContactOut first and falls back to Apollo when both are configured; provider-sourced profiles continue through API enrichment without opening LinkedIn. LinkedIn remains an explicit manual fallback beside each planned search. **Test ContactOut API** validates the optional token and its credits.
 
 Optional direct ContactOut API requests include the documented `authorization: basic` and `token` headers. A `429` honors `Retry-After` and retries once. Browser-session and API modes both preserve ContactOut credit and account restrictions.
 

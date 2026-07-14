@@ -10,6 +10,7 @@ import {
   migrateLegacyQuickIntroDraft,
   normalizeEnrichmentResponse,
   normalizeRecipientSelection,
+  recipientSelectionContext,
   resolveTheme,
   templateVariables,
 } from "./lib/message.js";
@@ -27,7 +28,7 @@ import {
   nextScheduledAt,
   normalizeDeliverySettings,
 } from "./lib/schedule.js";
-import { buildWriterRequest, mergeEnrichedProfile, normalizeWorkNote, normalizeWriterResponse, openerQualityIssues } from "./lib/ai-writer.js";
+import { buildWriterRequest, mergeEnrichedProfile, normalizeWorkNote, normalizeWriterResponse, openerQualityIssues, writerGenerationMode } from "./lib/ai-writer.js";
 import { resolveContactEmail } from "./lib/contact-resolution.js";
 import { PROVIDER, configuredEnrichmentProviders, providerLabel } from "./lib/provider-priority.js";
 import { appendDiagnostic } from "./lib/diagnostics.js";
@@ -58,11 +59,11 @@ const DEMO_PROFILE = {
 
 const elements = Object.fromEntries(
   [
-    "loadingView", "pageGate", "workspace", "actionBar", "previewBadge", "settingsButton", "queueButton", "gateWorkspaceButton", "captureStatus",
+    "loadingView", "pageGate", "workspace", "actionBar", "previewBadge", "settingsButton", "queueButton", "gateWorkspaceButton",
     "avatar", "profileName", "profileHeadline", "profileLocationText", "emailSource", "emailConfidence", "emailInput",
-    "contactStep", "personalizationStep", "contactOutBalance", "emailDraftDisclosure",
+    "contactStep", "personalizationStep", "contactOutBalance",
     "findEmailButton", "copyEmailButton", "contactDetails", "workNote", "signalCount", "experienceList", "templateSelect",
-    "personalizationSource", "rewritePersonalizationButton", "templateEyebrow", "generateEmailButton", "subjectInput", "bodyInput", "wordCount", "copyDraftButton", "sendEmailButton", "toast",
+    "personalizationSource", "templateEyebrow", "generateEmailButton", "subjectInput", "bodyInput", "wordCount", "copyDraftButton", "sendEmailButton", "toast",
     "deliveryAccountButton", "deliveryAccount", "scheduleToggle", "scheduleTime", "scheduleHint",
     "addToCampaignButton", "campaignDialog", "closeCampaignDialog", "campaignList", "createCampaignForm", "newCampaignName",
     "createCampaignButton", "openCampaignWorkspace",
@@ -155,10 +156,19 @@ function activeTemplate() {
   return state.templates.find((template) => template.id === state.templateId) || state.templates[0];
 }
 
+function activeTemplateSettings() {
+  const template = activeTemplate();
+  return {
+    ...state.settings,
+    senderName: template?.senderName || state.settings.senderName,
+    calendarUrl: template?.calendarUrl || state.settings.calendarUrl,
+  };
+}
+
 function rebuildComposer({ markClean = true } = {}) {
   if (!state.profile) return;
   const template = activeTemplate();
-  const variables = templateVariables(state.profile, state.settings, state.note);
+  const variables = templateVariables(state.profile, state.settings, state.note, template);
   const composed = applyTemplate(template, variables);
   state.subject = composed.subject;
   state.body = composed.body;
@@ -303,16 +313,22 @@ function renderEmail() {
     const address = document.createElement("strong");
     address.textContent = email;
     const status = document.createElement("small");
-    status.textContent = email === state.email ? "Primary · provider verified" : "Alternative · provider verified";
+    status.textContent = email === state.email ? "Selected · provider verified" : "Alternative · provider verified";
     copy.append(address, status);
     option.append(checkbox, mark, copy);
     checkbox.addEventListener("change", () => {
-      if (!allowMultiple && checkbox.checked) state.selectedRecipients = new Set([email]);
-      else if (checkbox.checked) state.selectedRecipients.add(email);
+      if (!allowMultiple && checkbox.checked) {
+        state.selectedRecipients = new Set([email]);
+        Object.assign(state, recipientSelectionContext(email, state.contactDetails, state.emailSource));
+      } else if (checkbox.checked) {
+        state.selectedRecipients.add(email);
+        Object.assign(state, recipientSelectionContext(email, state.contactDetails, state.emailSource));
+      }
       else if (selectedRecipientEmails().length > 1) state.selectedRecipients.delete(email);
       else checkbox.checked = true;
       renderEmail();
       queueDraftSave();
+      if (checkbox.checked) showToast(`Using ${email} for this draft.`);
     });
     fragment.append(option);
   }
@@ -357,8 +373,6 @@ function renderProfile() {
   setText(elements.profileHeadline, profile.headline, "Work history visible on LinkedIn");
   setText(elements.profileLocationText, profile.location, "Location not visible");
   elements.avatar.textContent = initialsFor(profile.name);
-  const statusDot = document.createElement("i");
-  elements.captureStatus.replaceChildren(statusDot, document.createTextNode(state.isPreview ? " Demo data" : " Live page"));
   elements.workNote.value = state.note;
   elements.personalizationStep.classList.toggle("is-complete", Boolean(state.note));
   const savedProvider = state.emailSource.match(/(?:ContactOut|Apollo)/i)?.[0] || "provider";
@@ -404,7 +418,7 @@ async function loadDraft() {
   if (noteWasNormalized && state.body.includes(savedNote)) state.body = state.body.replace(savedNote, state.note);
   const migratedDraft = migrateLegacyQuickIntroDraft(
     { subject: state.subject, body: state.body },
-    templateVariables(state.profile, state.settings, state.note),
+    templateVariables(state.profile, state.settings, state.note, activeTemplate()),
   );
   const draftWasMigrated = migratedDraft.subject !== state.subject || migratedDraft.body !== state.body;
   state.subject = migratedDraft.subject;
@@ -797,27 +811,43 @@ async function findProspectEmail({ automatic = false, personalize = true } = {})
 }
 
 function setWriterLoading(loading) {
-  for (const button of [elements.generateEmailButton, elements.rewritePersonalizationButton]) {
-    button.disabled = loading;
-    button.classList.toggle("is-loading", loading);
-    const label = button.querySelector("span");
-    if (label) label.textContent = loading ? "Writing" : button === elements.generateEmailButton ? "Write with AI" : "Rewrite with AI";
-  }
+  const button = elements.generateEmailButton;
+  button.disabled = loading;
+  button.classList.toggle("is-loading", loading);
+  const label = button.querySelector("span");
+  if (label) label.textContent = loading ? "Writing" : "Rewrite with AI";
 }
 
-async function generateEmail({ silent = false, announce = true } = {}) {
+async function generateEmail({ silent = false, announce = true, explicitRewrite = false } = {}) {
   if (!state.profile) return;
   const profileAtStart = state.profile;
   const isCurrentProfile = () => state.profile === profileAtStart;
   if (!state.settings.openAIApiKey && !state.settings.writerEndpointUrl) {
-    if (!silent) { showToast("Add an OpenAI key or writer endpoint in Settings first."); openSettings(); }
+    if (!silent) { showToast("Add an OpenAI key in Settings first."); openSettings(); }
     return false;
   }
 
   try {
     setWriterLoading(true);
 
-    const input = buildWriterRequest(profileAtStart, state.settings, state.note, { subject: state.subject, body: state.body });
+    const generationMode = writerGenerationMode(state.settings.aiGenerationMode, { explicitRewrite });
+    const template = activeTemplate();
+    const input = buildWriterRequest(
+      profileAtStart,
+      activeTemplateSettings(),
+      state.note,
+      { subject: state.subject, body: state.body },
+      {
+        generationMode,
+        recipient: {
+          email: selectedRecipientEmails()[0] || state.email,
+          type: state.emailType,
+          source: state.emailSource,
+          verified: state.emailVerified,
+        },
+        template,
+      },
+    );
     let payload;
     if (state.settings.openAIApiKey) {
       const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_PROVIDER_WRITE", input });
@@ -845,7 +875,7 @@ async function generateEmail({ silent = false, announce = true } = {}) {
       elements.workNote.value = result.workNote;
       elements.personalizationStep.classList.add("is-complete");
     }
-    if (state.settings.aiGenerationMode === "full") {
+    if (generationMode === "full") {
       state.subject = result.subject;
       state.body = result.body;
       state.composerDirty = true;
@@ -861,7 +891,7 @@ async function generateEmail({ silent = false, announce = true } = {}) {
     elements.templateEyebrow.textContent = `Written with ${result.model || "gpt-5.4-mini"}`;
     updateWordCount();
     queueDraftSave();
-    if (announce) showToast(state.settings.aiGenerationMode === "full" ? "AI opener and email draft are ready." : "AI opener updated from this prospect's context.");
+    if (announce) showToast(generationMode === "full" ? "AI rewrote the full draft from this prospect's context." : "AI opener updated from this prospect's context.");
     return true;
   } catch (error) {
     if (!isCurrentProfile()) return false;
@@ -870,10 +900,6 @@ async function generateEmail({ silent = false, announce = true } = {}) {
   } finally {
     if (isCurrentProfile()) setWriterLoading(false);
   }
-}
-
-function switchTab(tabName) {
-  if (tabName === "draft") elements.emailDraftDisclosure.open = true;
 }
 
 async function copyText(text, successMessage) {
@@ -1139,9 +1165,8 @@ function bindEvents() {
     queueDraftSave();
   });
 
-  elements.findEmailButton.addEventListener("click", () => findProspectEmail());
-  elements.generateEmailButton.addEventListener("click", () => generateEmail());
-  elements.rewritePersonalizationButton.addEventListener("click", () => generateEmail());
+  elements.findEmailButton.addEventListener("click", () => findProspectEmail({ personalize: false }));
+  elements.generateEmailButton.addEventListener("click", () => generateEmail({ explicitRewrite: true }));
   elements.copyEmailButton.addEventListener("click", () => copyText(elements.emailInput.value.trim(), "Email copied."));
   elements.copyDraftButton.addEventListener("click", () =>
     copyText(`To: ${deliveryRecipients().join(", ")}\nSubject: ${state.subject}\n\n${state.body}`, "Draft copied."),
@@ -1232,7 +1257,7 @@ async function refreshActiveProfile() {
     await loadCampaigns();
     if (refreshSequence !== state.refreshSequence) return;
     showView("workspace");
-    if (previewTab === "draft") switchTab("draft");
+    if (previewTab === "draft") elements.bodyInput.focus({ preventScroll: true });
 
     if (!state.isPreview) {
       const lookupKey = linkedInProfileIdentity(state.profile.url);

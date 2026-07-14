@@ -19,45 +19,46 @@
             </span>
             <span class="brand-copy"><strong>Vela</strong><small>GTM workspace</small></span>
           </a>
-          <button id="collapseSidebar" class="icon-button sidebar-toggle" type="button" aria-label="Collapse sidebar">
-            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 4.5 7 10l5.5 5.5M4 3.5h12v13H4z"/></svg>
-          </button>
         </div>
 
         <nav class="nav-groups">
           <div class="nav-group">
             <p class="nav-label">Operate</p>
-            <button class="nav-item is-active" type="button" data-view="overview">
+            <button class="nav-item is-active" type="button" data-view="overview" data-tooltip="Overview">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 10h5.5V3.5H3.5zM11 16.5h5.5V10H11zM3.5 16.5h5.5V12H3.5zM11 8h5.5V3.5H11z"/></svg>
               <span>Overview</span>
             </button>
-            <button class="nav-item" type="button" data-view="research">
+            <button class="nav-item" type="button" data-view="research" data-tooltip="AI research">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m14.5 14.5 3 3M16 9a7 7 0 1 1-14 0 7 7 0 0 1 14 0ZM6.5 9h5M9 6.5v5"/></svg>
               <span>AI research</span><b id="navResearch">0</b>
             </button>
-            <button class="nav-item" type="button" data-view="review">
+            <button class="nav-item" type="button" data-view="review" data-tooltip="Review queue">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h9l3 3v10H4zM13 3.5v3h3M7 10h6M7 13h4"/></svg>
               <span>Review queue</span><b id="navReview">0</b>
             </button>
           </div>
           <div class="nav-group">
             <p class="nav-label">Delivery</p>
-            <button class="nav-item" type="button" data-view="scheduled">
+            <button class="nav-item" type="button" data-view="analytics" data-tooltip="Analytics">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 16.5h13M5.5 14V9.5M10 14V4M14.5 14V7"/></svg>
+              <span>Analytics</span>
+            </button>
+            <button class="nav-item" type="button" data-view="scheduled" data-tooltip="Scheduled">
               <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M10 6v4l2.8 1.8"/></svg>
               <span>Scheduled</span><b id="navScheduled">0</b>
             </button>
-            <button class="nav-item" type="button" data-view="history">
+            <button class="nav-item" type="button" data-view="history" data-tooltip="Sent history">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 5.5h13v10h-13zM3.5 6l6.5 5 6.5-5"/><path d="M14.5 3.5h2v2"/></svg>
               <span>Sent history</span><b id="navTracking">0</b>
             </button>
-            <button class="nav-item" type="button" data-view="drafted">
+            <button class="nav-item" type="button" data-view="drafted" data-tooltip="Mail merge exports">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h12v13H4zM4 8h12M8 3.5v13"/></svg>
               <span>Mail merge exports</span><b id="navDrafted">0</b>
             </button>
           </div>
           <div class="nav-group">
             <p class="nav-label">Records</p>
-            <button class="nav-item" type="button" data-view="all">
+            <button class="nav-item" type="button" data-view="all" data-tooltip="All prospects">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 4.5h13v11h-13zM3.5 8h13M8 8v7.5"/></svg>
               <span>All prospects</span><b id="navTotal">0</b>
             </button>
@@ -68,11 +69,11 @@
           </div>
           <div class="nav-group">
             <p class="nav-label">Sources</p>
-            <button id="captureSearchButton" class="nav-item" type="button">
+            <button id="captureSearchButton" class="nav-item" type="button" data-tooltip="Capture LinkedIn">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15ZM2.8 8h14.4M2.8 12h14.4M10 2.5c2 2 2 13 0 15M10 2.5c-2 2-2 13 0 15"/></svg>
               <span>Capture LinkedIn</span>
             </button>
-            <button id="openImportButton" class="nav-item" type="button">
+            <button id="openImportButton" class="nav-item" type="button" data-tooltip="Import list">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 7l4-4 4 4M3.5 12.5v4h13v-4"/></svg>
               <span>Import list</span>
             </button>
@@ -80,28 +81,20 @@
         </nav>
 
         <div class="sidebar-foot">
-          <div class="safety-card">
-            <span class="safety-icon"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5 16 5v4.7c0 3.5-2.4 6.2-6 7.8-3.6-1.6-6-4.3-6-7.8V5zM7.2 10l1.8 1.8 3.8-4"/></svg></span>
-            <div><strong>Human review on</strong><span>Nothing sends automatically</span></div>
-          </div>
-          <button id="settingsButton" class="nav-item" type="button">
+          <button id="settingsButton" class="nav-item" type="button" data-tooltip="Settings">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM10 2.5v2M10 15.5v2M17.5 10h-2M4.5 10h-2M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4M15.3 15.3l-1.4-1.4M6.1 6.1 4.7 4.7"/></svg>
             <span>Settings</span>
           </button>
         </div>
       </aside>
 
+      <button id="collapseSidebar" class="sidebar-rail-toggle" type="button" aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5 7 10l5 5"/></svg>
+      </button>
+
       <main class="workspace">
         <header class="workspace-topbar">
-          <div class="crumb"><span>Vela Energy</span><i>/</i><strong>GTM control room</strong></div>
-          <div class="top-actions">
-            <button id="generationModePill" class="generation-mode-pill" type="button" title="AI drafting mode · open settings"><span>AI</span><strong>Personalization only</strong></button>
-            <button id="exportButton" class="button button-outline" type="button">
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9M6.5 8.5 10 12l3.5-3.5M3.5 14v2.5h13V14"/></svg>
-              <span id="exportButtonLabel">Export MailMerge</span>
-            </button>
-            <span class="avatar-user" aria-label="Tarun">TR</span>
-          </div>
+          <div class="crumb"><span>Vela Energy</span><i>/</i><strong id="workspaceCrumb">Overview</strong></div>
         </header>
 
         <div class="workspace-content">
@@ -162,15 +155,83 @@
             </div>
           </section>
 
+          <section id="analyticsPanel" class="analytics-page" hidden aria-label="GTM analytics">
+            <article class="engagement-panel" aria-labelledby="engagementHeading">
+              <header class="engagement-head">
+                <div>
+                  <p class="section-kicker-visible">Outreach performance</p>
+                  <h2 id="engagementHeading">From first send to conversation</h2>
+                </div>
+                <span id="engagementWindow" class="metric-window">All time</span>
+              </header>
+              <div class="engagement-metrics">
+                <article>
+                  <span>Emails sent</span>
+                  <strong id="engagementSent">0</strong>
+                  <small>Delivered successfully</small>
+                </article>
+                <article>
+                  <span>Replies</span>
+                  <strong id="engagementReplies">0</strong>
+                  <small>Conversations started</small>
+                </article>
+                <article>
+                  <span>Response rate</span>
+                  <strong id="engagementRate">0%</strong>
+                  <small id="engagementRateDetail">No sends yet</small>
+                </article>
+                <article>
+                  <span>Meetings booked</span>
+                  <strong id="engagementMeetings">0</strong>
+                  <small>Calendar outcomes</small>
+                </article>
+              </div>
+              <div class="conversion-track" aria-label="Outreach conversion funnel">
+                <span id="conversionSent" style="--value:0%"><i></i><small>Sent</small></span>
+                <span id="conversionReplied" style="--value:0%"><i></i><small>Replied</small></span>
+                <span id="conversionBooked" style="--value:0%"><i></i><small>Booked</small></span>
+              </div>
+            </article>
+
+            <div class="analytics-grid">
+              <article class="panel analytics-chart-panel">
+                <header class="panel-head analytics-panel-head">
+                  <div><h2>GTM sent per day</h2><p>Successful sends from this Chrome workspace</p></div>
+                  <span class="metric-window">Last 14 days</span>
+                </header>
+                <div id="dailySendChart" class="daily-send-chart" role="img" aria-label="Emails sent per day for the last 14 days"></div>
+                <footer class="analytics-chart-summary">
+                  <span><small>Last 7 days</small><strong id="analyticsWeekSent">0</strong></span>
+                  <span><small>Daily average</small><strong id="analyticsDailyAverage">0</strong></span>
+                  <span><small>Best day</small><strong id="analyticsBestDay">—</strong></span>
+                </footer>
+              </article>
+
+              <article class="panel analytics-outcomes-panel">
+                <header class="panel-head">
+                  <div><h2>Delivery outcomes</h2><p>Current local send ledger</p></div>
+                </header>
+                <div id="analyticsDeliveryBreakdown" class="analytics-outcomes"></div>
+              </article>
+            </div>
+          </section>
+
           <section id="overviewPanel" class="overview" aria-label="Outreach overview">
             <article class="panel overview-main">
               <header class="panel-head">
-                <div><h2>Needs your review</h2><p><span id="overviewReviewCount">0</span> drafts waiting for a decision</p></div>
-                <button class="panel-link" type="button" data-jump-view="review">Open review queue</button>
+                <div><h2>Needs a response</h2><p><span id="overviewResponseCount">0</span> conversations waiting on you</p></div>
+                <button id="refreshResponsesButton" class="panel-link" type="button">Gmail settings</button>
               </header>
-              <div id="overviewReviewList" class="review-list"></div>
+              <div id="overviewResponseList" class="response-list"></div>
             </article>
             <div class="overview-side">
+              <article class="panel">
+                <header class="panel-head">
+                  <div><h2>Needs your review</h2><p><span id="overviewReviewCount">0</span> drafts waiting for a decision</p></div>
+                  <button class="panel-link" type="button" data-jump-view="review">Open queue</button>
+                </header>
+                <div id="overviewReviewList" class="review-list"></div>
+              </article>
               <article class="panel">
                 <header class="panel-head">
                   <div><h2>Next sends</h2><p><span id="overviewScheduledCount">0</span> in the next 24 hours</p></div>

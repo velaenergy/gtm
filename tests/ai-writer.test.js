@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildWriterRequest, mergeEnrichedProfile, normalizeWorkNote, normalizeWriterResponse, openerQualityIssues } from "../lib/ai-writer.js";
+import { buildWriterRequest, mergeEnrichedProfile, normalizeWorkNote, normalizeWriterResponse, openerQualityIssues, writerGenerationMode } from "../lib/ai-writer.js";
 import { buildOpenAIRequest, responseOutputText, writeOutreach } from "../server/openai-writer.mjs";
 
 test("builds a bounded writer payload from visible profile data", () => {
@@ -42,6 +42,32 @@ test("grounds the writer in richer ContactOut profile context", () => {
   assert.deepEqual(request.profile.skills, ["Power", "Critical Facilities"]);
 });
 
+test("V22 an explicit rewrite sends the selected recipient, template, and complete draft in full mode", () => {
+  assert.equal(writerGenerationMode("personalization", { explicitRewrite: true }), "full");
+  assert.equal(writerGenerationMode("personalization"), "personalization");
+  const request = buildWriterRequest(
+    { name: "Ben Kurian", headline: "Global Head of Cybersecurity" },
+    { senderName: "Tarun", aiGenerationMode: "personalization" },
+    "You lead cybersecurity across DWS.",
+    { subject: "Current subject", body: "Hi Ben,\n\nCurrent full draft." },
+    {
+      generationMode: "full",
+      recipient: { email: "ben.kurian@dws.com", type: "work", source: "ContactOut", verified: true },
+      template: { id: "quick-intro", name: "Quick intro", subject: "Template subject", body: "Template body" },
+    },
+  );
+  assert.equal(request.generationMode, "full");
+  assert.equal(request.recipient.email, "ben.kurian@dws.com");
+  assert.equal(request.recipient.type, "work");
+  assert.equal(request.currentDraft.body, "Hi Ben,\n\nCurrent full draft.");
+  assert.deepEqual(request.template, {
+    id: "quick-intro",
+    name: "Quick intro",
+    subject: "Template subject",
+    body: "Template body",
+  });
+});
+
 test("uses gpt-5.4-mini and strict structured output without storing the response", () => {
   const request = buildOpenAIRequest({ profile: { name: "Alex" } });
   assert.equal(request.model, "gpt-5.4-mini");
@@ -65,6 +91,7 @@ test("rejects short and generic AI outreach patterns", () => {
   ]);
   assert.match(openerQualityIssues("Your work leading site selection across energy markets and critical infrastructure teams.").join(" "), /legacy personalization fragment/);
   assert.deepEqual(openerQualityIssues("You lead site selection at VectorGrid, and I wanted to ask how power availability is changing which markets your team can pursue."), []);
+  assert.match(openerQualityIssues("Hi Ben, I’m reaching out because you lead cybersecurity across DWS and I wanted to ask how your team approaches critical infrastructure risk.").join(" "), /greeting/i);
 });
 
 test("reads Responses API output and normalizes the server envelope", async () => {

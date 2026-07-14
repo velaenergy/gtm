@@ -8,34 +8,34 @@
 
 :root {
   color-scheme: light;
-  --bg: #f5f5f1;
+  --bg: #f7f7f7;
   --surface: #ffffff;
-  --surface-hover: #f0f1ec;
-  --text: #181916;
-  --secondary: #60635c;
-  --tertiary: #898d84;
-  --border: #e0e1db;
-  --border-strong: #ced1c8;
-  --blue: #1672dc;
-  --green: #159361;
-  --danger: #d8453e;
+  --surface-hover: #eeeeee;
+  --text: #111111;
+  --secondary: #666666;
+  --tertiary: #929292;
+  --border: #e3e3e3;
+  --border-strong: #d4d4d4;
+  --blue: #0088f5;
+  --green: #1fa36a;
+  --danger: #c94943;
   font-family: "Aeonik Pro", sans-serif;
   font-synthesis: none;
 }
 
 html[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #10120f;
-  --surface: #181a16;
-  --surface-hover: #22251f;
-  --text: #f3f4ee;
-  --secondary: #adb1a7;
-  --tertiary: #777d72;
-  --border: #292d26;
-  --border-strong: #3a4035;
-  --blue: #58a6ff;
-  --green: #52c88a;
-  --danger: #ff7770;
+  --bg: #111111;
+  --surface: #181818;
+  --surface-hover: #292929;
+  --text: #f5f5f5;
+  --secondary: #a2a2a2;
+  --tertiary: #747474;
+  --border: #2b2b2b;
+  --border-strong: #3a3a3a;
+  --blue: #1595ff;
+  --green: #3bc687;
+  --danger: #ff7972;
 }
 
 * { box-sizing: border-box; }
@@ -677,4 +677,155 @@ body { font-size: 13px; }
   .delivery-controls { grid-template-columns: 1fr; }
   .schedule-control { min-width: 0; }
   .toast { bottom: 205px; }
+}
+
+/* Larger, flatter outreach workspace */
+body { font-size: 14px; }
+
+.topbar {
+  height: 68px;
+  padding-inline: 18px;
+  border-bottom-color: color-mix(in srgb, var(--border) 76%, transparent);
+}
+
+.brand > span:last-child { font-size: 12px; }
+.queue-button { height: 38px; padding-inline: 14px; font-size: 12px; }
+.icon-button { width: 38px; height: 38px; }
+
+.profile-summary {
+  gap: 14px;
+  padding: 22px 20px 19px;
+  border-bottom-color: color-mix(in srgb, var(--border) 76%, transparent);
+}
+
+.avatar { width: 48px; height: 48px; font-size: 13px; }
+.profile-heading h1 { font-size: 20px; letter-spacing: -.03em; }
+.profile-copy > p { margin: 5px 0; font-size: 12.5px; line-height: 1.35; }
+.profile-location { font-size: 11px; }
+
+.workflow {
+  gap: 14px;
+  padding: 16px 16px 190px;
+}
+
+.block,
+.secondary-workflow .campaign-save-button,
+.signals-block {
+  border-color: color-mix(in srgb, var(--border-strong) 74%, transparent);
+  border-radius: 16px;
+  box-shadow: 0 1px 2px color-mix(in srgb, #000 7%, transparent), 0 12px 30px color-mix(in srgb, #000 3%, transparent);
+}
+
+.workflow-step.is-complete { border-color: color-mix(in srgb, var(--green) 30%, var(--border)); }
+.block-heading { min-height: 70px; padding: 18px 17px 14px; }
+.step-heading { gap: 0; }
+.block-heading h2 { margin-bottom: 5px; font-size: 16px; letter-spacing: -.02em; }
+.block-heading p { max-width: 290px; font-size: 11px; line-height: 1.35; }
+.contact-status { gap: 8px; }
+.credit-balance { font-size: 10px; }
+.confidence { padding: 5px 8px; font-size: 9px; }
+
+.email-row { gap: 8px; padding: 0 17px 17px; }
+.email-row input { height: 46px; padding-inline: 12px; border-radius: 11px; font-size: 13px; }
+.quiet-button,
+.primary-small,
+.secondary-button,
+.gmail-button { height: 46px; border-radius: 11px; font-size: 12px; }
+.quiet-button { padding-inline: 13px; }
+.primary-small { min-width: 104px; padding-inline: 15px; }
+.primary-small,
+.gmail-button,
+.gate-workspace-button {
+  border-color: #0b76e9;
+  background: linear-gradient(180deg, #309dff 0%, #1184f2 48%, #0874e7 100%);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .38), 0 7px 16px rgba(8, 116, 231, .2);
+  text-shadow: 0 1px 1px rgba(0, 59, 134, .26);
+}
+.primary-small:hover,
+.gmail-button:hover,
+.gate-workspace-button:hover { filter: brightness(1.05); opacity: 1; }
+.primary-small:active,
+.gmail-button:active,
+.gate-workspace-button:active { transform: translateY(1px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .25), 0 3px 8px rgba(8, 116, 231, .18); }
+
+.contact-details { gap: 8px; padding: 0 17px 17px; }
+.recipient-picker-head { font-size: 10px; }
+.recipient-picker-head button { font-size: 10px; }
+.recipient-option { min-height: 52px; padding: 10px 11px; border-radius: 11px; }
+.recipient-option strong { font-size: 12px; }
+.recipient-option small { font-size: 9.5px; }
+
+.draft-heading { align-items: center; border-bottom: 1px solid var(--border); }
+.draft-heading > div { min-width: 0; }
+.draft-heading p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.writer-button {
+  height: 40px;
+  flex: 0 0 auto;
+  padding-inline: 13px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.composer-tools { justify-content: space-between; padding: 14px 17px 1px; }
+.template-control { gap: 8px; font-size: 10px; }
+.template-control select { max-width: 170px; height: 36px; border-radius: 9px; font-size: 11px; }
+.template-eyebrow { overflow: hidden; color: var(--tertiary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.composer-field { gap: 7px; padding: 14px 17px 0; }
+.composer-field > span { font-size: 10.5px; }
+.composer-field input { height: 44px; padding-inline: 12px; border-radius: 11px; font-size: 13px; }
+.composer-field textarea { min-height: 310px; padding: 13px; border-radius: 11px; font-size: 13px; line-height: 1.58; }
+.composer-meta { padding: 12px 17px 16px; font-size: 10px; }
+
+.secondary-workflow { gap: 10px; }
+.secondary-workflow .campaign-save-button { min-height: 60px; padding: 11px 14px; }
+.campaign-save-copy strong { font-size: 12px; }
+.campaign-save-copy small { font-size: 10px; }
+.signals-block > summary { min-height: 52px; padding-inline: 15px; font-size: 11px; }
+
+.action-bar {
+  gap: 10px;
+  padding: 11px 16px 14px;
+  border-top-color: color-mix(in srgb, var(--border-strong) 78%, transparent);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: 0 -14px 36px color-mix(in srgb, #000 9%, transparent);
+}
+.delivery-controls { grid-template-columns: minmax(0, 1fr) minmax(176px, .72fr); gap: 9px; }
+.delivery-account { min-height: 58px; gap: 4px; padding: 9px 28px 9px 11px; border-radius: 11px; background: var(--surface); }
+.delivery-account > span { font-size: 9px; }
+.delivery-account select { font-size: 11px; }
+.schedule-control {
+  min-width: 0;
+  min-height: 58px;
+  gap: 4px 9px;
+  padding: 8px 9px 8px 11px;
+  border-radius: 11px;
+  background: var(--surface);
+}
+.schedule-copy strong { font-size: 11px; }
+.schedule-copy small { max-width: 130px; font-size: 8.5px; }
+.schedule-switch { width: 32px; height: 18px; }
+.schedule-switch::after { width: 14px; height: 14px; }
+.schedule-control input:checked + .schedule-switch::after { transform: translateX(14px); }
+.schedule-control input[type="time"] { height: 26px; padding-inline: 7px; border-radius: 6px; font-size: 9.5px; }
+.delivery-actions { grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 9px; }
+.delivery-actions > button { min-width: 0; }
+.gmail-button { position: relative; font-weight: 500; }
+.gmail-button::after { margin-left: 10px; font-size: 17px; line-height: 0; content: "→"; }
+.gmail-button:disabled { border-color: var(--border-strong); background: var(--border-strong); color: var(--tertiary); box-shadow: none; filter: none; text-shadow: none; transform: none; }
+.gmail-button:disabled::after { opacity: .5; }
+.secondary-button { background: var(--surface); font-weight: 500; }
+.toast { right: 16px; bottom: 176px; max-width: 360px; padding: 12px 14px; border-radius: 11px; font-size: 11px; }
+
+@media (max-width: 380px) {
+  .workflow { padding-inline: 11px; padding-bottom: 240px; }
+  .profile-summary { padding-inline: 14px; }
+  .block-heading { align-items: flex-start; }
+  .contact-status { flex-direction: column; align-items: flex-end; }
+  .email-row { grid-template-columns: 1fr auto; }
+  .email-row input { grid-column: 1 / -1; }
+  .primary-small { min-width: 0; }
+  .delivery-controls { grid-template-columns: 1fr; }
+  .schedule-control { min-height: 62px; }
+  .toast { bottom: 230px; }
 }

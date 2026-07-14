@@ -127,110 +127,86 @@
             <input id="includeContactOutPhone" type="checkbox" />
             <i aria-hidden="true"></i>
           </label>
-        </section>
-
-        <section class="settings-section generation-section" aria-labelledby="generationHeading">
-          <div class="section-heading inline-heading">
-            <div>
-              <h2 id="generationHeading">Email generation</h2>
-              <p>Decide exactly how much of the final message AI is allowed to write.</p>
-            </div>
-            <span class="permission-state has-access">Human review</span>
-          </div>
-          <div class="generation-options" role="radiogroup" aria-label="AI generation mode">
-            <label class="generation-option">
-              <input type="radio" name="aiGenerationMode" value="personalization" />
-              <span class="generation-radio" aria-hidden="true"></span>
-              <span><strong>Personalization only</strong><small>AI writes the short <code>{{workNote}}</code> phrase. Your template stays unchanged.</small></span>
-              <em>Recommended</em>
-            </label>
-            <label class="generation-option">
-              <input type="radio" name="aiGenerationMode" value="full" />
-              <span class="generation-radio" aria-hidden="true"></span>
-              <span><strong>Entire email</strong><small>AI may rewrite the subject, message, and personalization phrase from grounded profile context.</small></span>
-            </label>
-          </div>
-          <div class="template-editor">
-            <div class="template-editor-head">
-              <div><strong>Email templates</strong><small>Create reusable plays, then choose one from the profile popup.</small></div>
-              <button id="addTemplateButton" class="template-add" type="button">+ Add template</button>
-            </div>
-            <div id="templateList" class="template-list" role="tablist" aria-label="Email templates"></div>
-            <div class="template-variable-row"><span>Available variables</span><code>{{firstName}}</code> <code>{{workNote}}</code> <code>{{workNoteSentence}}</code> <code>{{shortRole}}</code> <code>{{senderName}}</code> <code>{{calendarUrl}}</code></div>
-            <label class="field"><span>Template name</span><input id="templateName" type="text" maxlength="60" autocomplete="off" /></label>
-            <label class="field"><span>Subject</span><input id="templateSubject" type="text" autocomplete="off" placeholder="Quick intro + would love to pick your brain" /></label>
-            <label class="field"><span>Message</span><textarea id="templateBody" rows="11" spellcheck="true"></textarea></label>
-            <div class="template-actions"><button id="deleteTemplateButton" type="button">Delete template</button><span>At least one template is required.</span></div>
-          </div>
-        </section>
-
-        <section class="settings-section" aria-labelledby="enrichmentHeading">
-          <div class="section-heading inline-heading">
-            <div>
-              <h2 id="enrichmentHeading">Advanced enrichment endpoint</h2>
-              <p>Optional server override. Leave empty for direct ContactOut or Apollo.</p>
-            </div>
-            <span id="permissionState" class="permission-state">Not configured</span>
-          </div>
-
-          <label class="field">
-            <span>Webhook URL</span>
-            <input id="endpointUrl" type="url" inputmode="url" autocomplete="url" placeholder="http://127.0.0.1:8787/enrich" />
-            <small>Chrome will request access only to this endpoint’s origin.</small>
-          </label>
-
-          <label class="field">
-            <span>Bearer token <em>Optional</em></span>
-            <div class="password-wrap">
-              <input id="apiToken" type="password" autocomplete="off" placeholder="Stored on this Chrome profile" />
-              <button id="toggleToken" type="button">Show</button>
-            </div>
-          </label>
-
           <label class="switch-row">
             <span>
               <strong>Research contacts automatically</strong>
-              <small>Opening a new LinkedIn profile always starts AI personalization. Turn this on to also run ContactOut and configured email fallbacks first.</small>
+              <small>When you open a new LinkedIn profile, run the connected contact providers before writing the draft.</small>
             </span>
             <input id="autoEnrich" type="checkbox" />
             <i aria-hidden="true"></i>
           </label>
-
-          <details class="contract-details">
-            <summary>Webhook contract</summary>
-            <pre><code>POST { "source": "vela-gtm-extension", "profile": { … } }
-
-→ { "email": "…", "confidence": 0.94, "note": "…" }</code></pre>
-          </details>
         </section>
 
-        <section class="settings-section" aria-labelledby="writerHeading">
+        <section class="settings-section generation-section" aria-labelledby="templatesHeading">
           <div class="section-heading inline-heading">
             <div>
-              <h2 id="writerHeading">Advanced writer endpoint</h2>
-              <p>Optional server override. Leave empty for direct OpenAI.</p>
+              <h2 id="templatesHeading">Email templates</h2>
+              <p>Create, rename, and delete the outreach drafts available in the profile popup.</p>
             </div>
-            <div class="writer-statuses">
-              <span class="model-chip">gpt-5.4-mini</span>
-              <span id="writerPermissionState" class="permission-state">Needs permission</span>
+            <span id="templateCount" class="permission-state has-access">0 templates</span>
+          </div>
+          <div class="template-manager">
+            <aside class="template-sidebar" aria-label="Saved email templates">
+              <div class="template-sidebar-head">
+                <strong>Saved templates</strong>
+                <button id="addTemplateButton" class="template-add" type="button"><span aria-hidden="true">+</span> New</button>
+              </div>
+              <div id="templateList" class="template-list" role="tablist" aria-label="Email templates"></div>
+            </aside>
+            <div class="template-workspace" role="tabpanel" aria-labelledby="templateEditorHeading">
+              <div class="template-workspace-head">
+                <div>
+                  <span>Editing template</span>
+                  <h3 id="templateEditorHeading">Template details</h3>
+                </div>
+                <button id="deleteTemplateButton" class="template-delete" type="button">Delete template</button>
+              </div>
+              <label class="field template-name-field">
+                <span>Template name</span>
+                <input id="templateName" type="text" maxlength="60" autocomplete="off" />
+                <small>Rename the template here. The name updates in the popup as you type.</small>
+              </label>
+              <label class="field"><span>Subject</span><input id="templateSubject" type="text" autocomplete="off" placeholder="Quick intro + would love to pick your brain" /></label>
+              <div class="template-sender-block">
+                <div class="template-sender-heading">
+                  <strong>Sender for this template</strong>
+                  <small>These values stay with this template and fill <code>{{senderName}}</code> and <code>{{calendarUrl}}</code>.</small>
+                </div>
+                <div class="field-grid">
+                  <label class="field">
+                    <span>Sender name</span>
+                    <input id="templateSenderName" type="text" autocomplete="name" placeholder="Tarun" />
+                  </label>
+                  <label class="field">
+                    <span>Calendar URL</span>
+                    <input id="templateCalendarUrl" type="url" inputmode="url" placeholder="https://cal.com/team/velaenergy" />
+                  </label>
+                </div>
+              </div>
+              <div class="template-variable-row"><span>Insert a variable</span><code>{{firstName}}</code> <code>{{workNote}}</code> <code>{{workNoteSentence}}</code> <code>{{shortRole}}</code> <code>{{senderName}}</code> <code>{{calendarUrl}}</code></div>
+              <label class="field"><span>Message</span><textarea id="templateBody" rows="11" spellcheck="true"></textarea></label>
+              <p class="template-required-note">Vela keeps at least one complete template so new drafts always have a fallback.</p>
             </div>
           </div>
-
-          <label class="field">
-            <span>Writer endpoint</span>
-            <input id="writerEndpointUrl" type="url" inputmode="url" autocomplete="url" placeholder="http://127.0.0.1:8787/generate" />
-            <small>Run the included writer server locally or point this at Vela’s internal deployment.</small>
-          </label>
-
-          <label class="field">
-            <span>Writer server token <em>Optional</em></span>
-            <div class="password-wrap">
-              <input id="writerToken" type="password" autocomplete="off" placeholder="Not your OpenAI API key" />
-              <button id="toggleWriterToken" type="button">Show</button>
+          <div class="template-ai-settings">
+            <div>
+              <strong>AI writing</strong>
+              <small>Choose how much Vela may change when personalizing any template.</small>
             </div>
-          </label>
-
-          <p class="security-note"><strong>Server mode only.</strong> When this field is set, the extension uses Vela’s writer service instead of calling OpenAI from the background worker.</p>
+            <div class="generation-options" role="radiogroup" aria-label="AI generation mode">
+              <label class="generation-option">
+                <input type="radio" name="aiGenerationMode" value="personalization" />
+                <span class="generation-radio" aria-hidden="true"></span>
+                <span><strong>Personalization only</strong><small>AI writes <code>{{workNote}}</code>; the rest of your template stays exact.</small></span>
+                <em>Recommended</em>
+              </label>
+              <label class="generation-option">
+                <input type="radio" name="aiGenerationMode" value="full" />
+                <span class="generation-radio" aria-hidden="true"></span>
+                <span><strong>Entire email</strong><small>AI may rewrite the subject and message from grounded profile context.</small></span>
+              </label>
+            </div>
+          </div>
         </section>
 
         <section class="settings-section" aria-labelledby="gmailHeading">
@@ -255,28 +231,37 @@
             </label>
           </div>
           <div id="gmailConnectionSetup">
-            <p class="security-note gmail-note">Chrome extension ID: <code id="extensionId">preview</code>. Google asks for Gmail send access and the selected account's email label; Vela cannot read the inbox.</p>
-            <div class="google-chooser-setup">
-              <div class="google-chooser-heading">
-                <div><span>Google authorization</span><strong id="googleChooserState">Checking OAuth setup</strong></div>
-                <span class="permission-state">Chrome OAuth ready</span>
+            <div class="gmail-account-panel">
+              <div class="gmail-account-panel-head">
+                <div>
+                  <h3>Gmail senders</h3>
+                  <p>Add an account, then choose which address Vela sends from.</p>
+                </div>
+                <button id="connectGmailButton" class="gmail-connect" type="button">Add Gmail account</button>
               </div>
-              <label class="field google-client-field">
-                <span>Google Web OAuth client ID <em>Optional account chooser</em></span>
-                <input id="googleWebClientId" type="text" inputmode="text" autocomplete="off" placeholder="…apps.googleusercontent.com" />
-                <small>Leave blank to use the Chrome profile through the manifest OAuth client. For an account chooser, enter a separate Web application client—never the manifest's Chrome-extension client ID.</small>
-              </label>
-              <div class="google-redirect-row">
-                <div><span>Authorized redirect URI</span><code id="googleRedirectUri">Available after loading the extension</code></div>
-                <button id="copyGoogleRedirectButton" class="provider-test" type="button">Copy URI</button>
+              <p id="gmailAccountDetail" class="gmail-account-detail">No Gmail sender connected.</p>
+              <div id="gmailAccountsList" class="gmail-accounts-list" aria-label="Connected Gmail senders"></div>
+            </div>
+            <p class="gmail-privacy-note">Google asks only for permission to send mail and identify the selected address. Vela cannot read the inbox.</p>
+            <details class="connection-details">
+              <summary>Google connection setup</summary>
+              <div class="google-chooser-setup">
+                <div class="google-chooser-heading">
+                  <div><span>Google authorization</span><strong id="googleChooserState">Checking OAuth setup</strong></div>
+                  <span class="permission-state">Chrome OAuth ready</span>
+                </div>
+                <label class="field google-client-field">
+                  <span>Google Web OAuth client ID <em>Optional account chooser</em></span>
+                  <input id="googleWebClientId" type="text" inputmode="text" autocomplete="off" placeholder="…apps.googleusercontent.com" />
+                  <small>Add a Web application client only when you need to choose accounts outside the current Chrome profile.</small>
+                </label>
+                <div class="google-redirect-row">
+                  <div><span>Authorized redirect URI</span><code id="googleRedirectUri">Available after loading the extension</code></div>
+                  <button id="copyGoogleRedirectButton" class="provider-test" type="button">Copy URI</button>
+                </div>
+                <p class="extension-id-note">Extension ID: <code id="extensionId">preview</code></p>
               </div>
-            </div>
-            <p id="gmailAccountDetail" class="security-note gmail-account-detail">No Gmail sender connected.</p>
-            <div id="gmailAccountsList" class="gmail-accounts-list" aria-label="Connected Gmail senders"></div>
-            <div class="gmail-actions">
-              <button id="connectGmailButton" class="gmail-connect" type="button">Add Gmail account</button>
-              <button id="disconnectGmailButton" class="gmail-disconnect" type="button" hidden>Remove selected</button>
-            </div>
+            </details>
           </div>
           <label class="switch-row recipient-mode-switch">
             <span><strong>Allow multiple recipient emails</strong><small>Off by default. Turn this on to select and send separate copies to more than one verified address for a prospect.</small></span>
@@ -300,23 +285,6 @@
           </div>
           <pre id="diagnosticLog" class="diagnostic-log" aria-live="polite">No diagnostic events yet.</pre>
           <p class="security-note"><strong>Redacted by design.</strong> This log never stores cookies, CSRF values, API keys, email addresses, phone numbers, names, LinkedIn URLs, or ContactOut UUIDs.</p>
-        </section>
-
-        <section class="settings-section" aria-labelledby="senderHeading">
-          <div class="section-heading">
-            <h2 id="senderHeading">Sender defaults</h2>
-            <p>Used when a template is added to a prospect.</p>
-          </div>
-          <div class="field-grid">
-            <label class="field">
-              <span>Sender name</span>
-              <input id="senderName" type="text" autocomplete="name" placeholder="Tarun" />
-            </label>
-            <label class="field">
-              <span>Calendar URL</span>
-              <input id="calendarUrl" type="url" inputmode="url" placeholder="https://cal.com/team/velaenergy" />
-            </label>
-          </div>
         </section>
 
         <div class="form-actions">

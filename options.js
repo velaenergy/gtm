@@ -21,20 +21,9 @@ import { GMAIL_SEND_SCOPE } from "./lib/gmail-send.js";
 import { clearDiagnostics, formatDiagnostic, readDiagnostics } from "./lib/diagnostics.js";
 
 const form = document.getElementById("settingsForm");
-const endpointUrl = document.getElementById("endpointUrl");
-const apiToken = document.getElementById("apiToken");
-const writerEndpointUrl = document.getElementById("writerEndpointUrl");
-const writerToken = document.getElementById("writerToken");
 const autoEnrich = document.getElementById("autoEnrich");
-const senderName = document.getElementById("senderName");
-const calendarUrl = document.getElementById("calendarUrl");
-const permissionState = document.getElementById("permissionState");
-const writerPermissionState = document.getElementById("writerPermissionState");
-const toggleToken = document.getElementById("toggleToken");
-const toggleWriterToken = document.getElementById("toggleWriterToken");
 const resetButton = document.getElementById("resetButton");
 const connectGmailButton = document.getElementById("connectGmailButton");
-const disconnectGmailButton = document.getElementById("disconnectGmailButton");
 const gmailState = document.getElementById("gmailState");
 const gmailAccountDetail = document.getElementById("gmailAccountDetail");
 const gmailAccountsList = document.getElementById("gmailAccountsList");
@@ -69,7 +58,11 @@ const gmailConnectionSetup = document.getElementById("gmailConnectionSetup");
 const templateName = document.getElementById("templateName");
 const templateSubject = document.getElementById("templateSubject");
 const templateBody = document.getElementById("templateBody");
+const templateSenderName = document.getElementById("templateSenderName");
+const templateCalendarUrl = document.getElementById("templateCalendarUrl");
 const templateList = document.getElementById("templateList");
+const templateCount = document.getElementById("templateCount");
+const templateEditorHeading = document.getElementById("templateEditorHeading");
 const addTemplateButton = document.getElementById("addTemplateButton");
 const deleteTemplateButton = document.getElementById("deleteTemplateButton");
 const toast = document.getElementById("toast");
@@ -115,6 +108,8 @@ function commitTemplateFields() {
   active.name = templateName.value.trim() || "Untitled template";
   active.subject = templateSubject.value;
   active.body = templateBody.value;
+  active.senderName = templateSenderName.value.trim();
+  active.calendarUrl = templateCalendarUrl.value.trim();
 }
 
 function renderTemplateList() {
@@ -125,7 +120,11 @@ function renderTemplateList() {
     button.role = "tab";
     button.className = template.id === activeTemplateId ? "is-active" : "";
     button.setAttribute("aria-selected", String(template.id === activeTemplateId));
-    button.textContent = template.name || "Untitled template";
+    const name = document.createElement("span");
+    const action = document.createElement("small");
+    name.textContent = template.name || "Untitled template";
+    action.textContent = template.id === activeTemplateId ? "Editing" : "Edit";
+    button.append(name, action);
     button.addEventListener("click", () => {
       commitTemplateFields();
       activeTemplateId = template.id;
@@ -134,6 +133,7 @@ function renderTemplateList() {
     fragment.append(button);
   }
   templateList.replaceChildren(fragment);
+  templateCount.textContent = `${editableTemplates.length} template${editableTemplates.length === 1 ? "" : "s"}`;
 }
 
 function renderTemplateEditor() {
@@ -142,6 +142,9 @@ function renderTemplateEditor() {
   templateName.value = active.name;
   templateSubject.value = active.subject;
   templateBody.value = active.body;
+  templateSenderName.value = active.senderName || DEFAULT_SETTINGS.senderName;
+  templateCalendarUrl.value = active.calendarUrl || DEFAULT_SETTINGS.calendarUrl;
+  templateEditorHeading.textContent = active.name || "Untitled template";
   deleteTemplateButton.disabled = editableTemplates.length <= 1;
   renderTemplateList();
 }
@@ -199,38 +202,7 @@ clearDiagnosticsButton.addEventListener("click", async () => {
   showToast("Diagnostic log cleared.");
 });
 
-function originPatternFor(value) {
-  const url = new URL(value);
-  if (!["https:", "http:"].includes(url.protocol)) throw new Error("The endpoint must use http:// or https://.");
-  return `${url.protocol}//${url.host}/*`;
-}
-
-async function updatePermissionState(value, stateElement) {
-  if (!value) {
-    stateElement.textContent = "Not configured";
-    stateElement.classList.remove("has-access");
-    return;
-  }
-  if (!isExtension || !chrome.permissions) {
-    stateElement.textContent = "Preview mode";
-    stateElement.classList.add("has-access");
-    return;
-  }
-  try {
-    const hasAccess = await chrome.permissions.contains({ origins: [originPatternFor(value)] });
-    stateElement.textContent = hasAccess ? "Origin allowed" : "Needs permission";
-    stateElement.classList.toggle("has-access", hasAccess);
-  } catch {
-    stateElement.textContent = "Invalid URL";
-    stateElement.classList.remove("has-access");
-  }
-}
-
 function fillForm(settings) {
-  endpointUrl.value = settings.endpointUrl || "";
-  apiToken.value = settings.apiToken || "";
-  writerEndpointUrl.value = settings.writerEndpointUrl || "";
-  writerToken.value = settings.writerToken || "";
   googleWebClientId.value = settings.googleWebClientId || "";
   renderGoogleChooserSetup({ saved: true });
   renderGmailConnection({ oauthConfigured: Boolean(googleOAuthStrategy({
@@ -253,28 +225,17 @@ function fillForm(settings) {
   const generationInput = generationInputs.find((input) => input.value === generationMode);
   if (generationInput) generationInput.checked = true;
   autoEnrich.checked = Boolean(settings.autoEnrich);
-  senderName.value = settings.senderName || DEFAULT_SETTINGS.senderName;
-  calendarUrl.value = settings.calendarUrl || DEFAULT_SETTINGS.calendarUrl;
   const savedTheme = ["light", "dark", "system"].includes(settings.theme) ? settings.theme : DEFAULT_SETTINGS.theme;
   const theme = ["light", "dark"].includes(previewTheme) ? previewTheme : savedTheme;
   const themeInput = themeInputs.find((input) => input.value === theme);
   if (themeInput) themeInput.checked = true;
   applyTheme(theme);
-  updatePermissionState(endpointUrl.value.trim(), permissionState);
-  updatePermissionState(writerEndpointUrl.value.trim(), writerPermissionState);
   updateAgentKeyState();
 }
 
 async function loadSettings() {
   const result = await storage.get("velaGtmSettings");
   fillForm({ ...DEFAULT_SETTINGS, ...(result.velaGtmSettings || {}) });
-}
-
-async function requestOriginAccess(value) {
-  if (!value || !isExtension || !chrome.permissions) return true;
-  const origin = originPatternFor(value);
-  if (await chrome.permissions.contains({ origins: [origin] })) return true;
-  return chrome.permissions.request({ origins: [origin] });
 }
 
 function updateAgentKeyState() {
@@ -304,8 +265,6 @@ function updateAgentKeyState() {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const endpoint = endpointUrl.value.trim();
-  const writerEndpoint = writerEndpointUrl.value.trim();
 
   try {
     commitTemplateFields();
@@ -314,21 +273,13 @@ form.addEventListener("submit", async (event) => {
     }
     const savedTemplates = normalizeEmailTemplates(editableTemplates);
     if (!savedTemplates.length) throw new Error("Keep at least one complete email template.");
-    if (endpoint) new URL(endpoint);
-    if (writerEndpoint) new URL(writerEndpoint);
-    const enrichmentAllowed = await requestOriginAccess(endpoint);
-    const writerAllowed = await requestOriginAccess(writerEndpoint);
-    if (!enrichmentAllowed || !writerAllowed) {
-      showToast("Settings were not saved because endpoint access was declined.");
-      return;
-    }
 
     await storage.set({
       velaGtmSettings: {
-        endpointUrl: endpoint,
-        apiToken: apiToken.value.trim(),
-        writerEndpointUrl: writerEndpoint,
-        writerToken: writerToken.value.trim(),
+        endpointUrl: "",
+        apiToken: "",
+        writerEndpointUrl: "",
+        writerToken: "",
         googleWebClientId: googleWebClientId.value.trim(),
         contactOutSessionEnabled: contactOutSessionEnabled.checked,
         contactOutApiKey: contactOutApiKey.value.trim(),
@@ -344,12 +295,10 @@ form.addEventListener("submit", async (event) => {
         templateBody: savedTemplates[0].body,
         autoEnrich: autoEnrich.checked,
         theme: selectedTheme(),
-        senderName: senderName.value.trim() || DEFAULT_SETTINGS.senderName,
-        calendarUrl: calendarUrl.value.trim() || DEFAULT_SETTINGS.calendarUrl,
+        senderName: savedTemplates[0].senderName || DEFAULT_SETTINGS.senderName,
+        calendarUrl: savedTemplates[0].calendarUrl || DEFAULT_SETTINGS.calendarUrl,
       },
     });
-    await updatePermissionState(endpoint, permissionState);
-    await updatePermissionState(writerEndpoint, writerPermissionState);
     renderContactOutApiStatus({ state: contactOutApiKey.value.trim() ? "ready" : "unconfigured" });
     renderGoogleChooserSetup({ saved: true });
     if (isExtension) await probeGmailConnection();
@@ -360,18 +309,29 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
-endpointUrl.addEventListener("input", () => updatePermissionState(endpointUrl.value.trim(), permissionState));
-writerEndpointUrl.addEventListener("input", () =>
-  updatePermissionState(writerEndpointUrl.value.trim(), writerPermissionState),
-);
 themeInputs.forEach((input) => input.addEventListener("change", () => applyTheme(selectedTheme())));
-templateName.addEventListener("input", () => { commitTemplateFields(); renderTemplateList(); });
+templateName.addEventListener("input", () => {
+  commitTemplateFields();
+  templateEditorHeading.textContent = templateName.value.trim() || "Untitled template";
+  renderTemplateList();
+});
 templateSubject.addEventListener("input", commitTemplateFields);
 templateBody.addEventListener("input", commitTemplateFields);
+templateSenderName.addEventListener("input", commitTemplateFields);
+templateCalendarUrl.addEventListener("input", commitTemplateFields);
 addTemplateButton.addEventListener("click", () => {
   commitTemplateFields();
   const id = `custom-${Date.now().toString(36)}`;
-  editableTemplates.push({ id, name: "New template", eyebrow: "Saved template", subject: "", body: "" });
+  const previous = activeEditableTemplate();
+  editableTemplates.push({
+    id,
+    name: "New template",
+    eyebrow: "Saved template",
+    subject: "",
+    body: "",
+    senderName: previous?.senderName || DEFAULT_SETTINGS.senderName,
+    calendarUrl: previous?.calendarUrl || DEFAULT_SETTINGS.calendarUrl,
+  });
   activeTemplateId = id;
   renderTemplateEditor();
   templateName.select();
@@ -382,18 +342,6 @@ deleteTemplateButton.addEventListener("click", () => {
   editableTemplates = editableTemplates.filter((template) => template.id !== activeTemplateId);
   activeTemplateId = editableTemplates[Math.max(0, index - 1)]?.id || editableTemplates[0].id;
   renderTemplateEditor();
-});
-
-toggleToken.addEventListener("click", () => {
-  const reveal = apiToken.type === "password";
-  apiToken.type = reveal ? "text" : "password";
-  toggleToken.textContent = reveal ? "Hide" : "Show";
-});
-
-toggleWriterToken.addEventListener("click", () => {
-  const reveal = writerToken.type === "password";
-  writerToken.type = reveal ? "text" : "password";
-  toggleWriterToken.textContent = reveal ? "Hide" : "Show";
 });
 
 for (const button of document.querySelectorAll("[data-secret-toggle]")) {
@@ -673,9 +621,8 @@ function renderGmailConnection({ connected = false, oauthConfigured = true, chec
   gmailState.classList.toggle("has-access", connected);
   gmailState.classList.toggle("has-warning", !connected && !checking && !oauthConfigured);
   gmailState.title = detail;
-  connectGmailButton.textContent = authMode === GOOGLE_CHROME_PROFILE_AUTH_MODE ? "Reconnect Gmail" : "Add Gmail account";
+  connectGmailButton.textContent = connectedGoogleAccounts.length ? "Add another Gmail" : "Add Gmail account";
   connectGmailButton.disabled = checking || !oauthConfigured;
-  disconnectGmailButton.hidden = !connected;
   renderConnectedGoogleAccounts();
   gmailAccountDetail.textContent = email
     ? `${connectedGoogleAccounts.length} connected · sending from ${email}${authMode === GOOGLE_ACCOUNT_AUTH_MODE ? " · explicitly selected" : " · Chrome profile account"}`
@@ -760,28 +707,6 @@ connectGmailButton.addEventListener("click", async () => {
     showToast(error instanceof Error ? error.message : "Could not connect Google delivery.");
   } finally {
     connectGmailButton.disabled = false;
-  }
-});
-
-disconnectGmailButton.addEventListener("click", async () => {
-  if (!isExtension) return;
-  try {
-    connectGmailButton.disabled = true;
-    disconnectGmailButton.disabled = true;
-    const selected = selectedGoogleAccount(connectedGoogleAccounts, selectedGoogleAccountId);
-    if (!selected) return;
-    await disconnectGoogle(chrome.identity, { authMode: selected.authMode });
-    const next = await persistGoogleAccounts(connectedGoogleAccounts.filter((account) => account.id !== selected.id));
-    const configuredSettings = (await storage.get("velaGtmSettings")).velaGtmSettings || {};
-    const strategy = googleOAuthStrategy({ manifest: chrome.runtime.getManifest(), webClientId: configuredSettings.googleWebClientId });
-    renderGmailConnection({ connected: Boolean(next), oauthConfigured: Boolean(strategy), email: next?.email, authMode: next?.authMode });
-    showToast(`${selected.email} removed from Vela GTM.`);
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "Could not disconnect Google delivery.");
-  } finally {
-    const configuredSettings = (await storage.get("velaGtmSettings")).velaGtmSettings || {};
-    connectGmailButton.disabled = !googleOAuthStrategy({ manifest: chrome.runtime.getManifest(), webClientId: configuredSettings.googleWebClientId });
-    disconnectGmailButton.disabled = false;
   }
 });
 
