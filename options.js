@@ -1,8 +1,10 @@
 import { DEFAULT_SETTINGS, contactOutConnectionState, emailTemplates, normalizeEmailTemplates, resolveTheme } from "./lib/message.js";
 import {
   GOOGLE_ACCOUNT_AUTH_MODE,
+  GOOGLE_ACCOUNTS_STORAGE_KEY,
   GOOGLE_ACCOUNT_STORAGE_KEY,
   GOOGLE_CHROME_PROFILE_AUTH_MODE,
+  GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY,
   chooseGoogleAccount,
   disconnectGoogle,
   getGoogleAuthToken,
@@ -11,6 +13,9 @@ import {
   googleOAuthConfigured,
   googleOAuthStrategy,
   googleWebRedirectUri,
+  normalizeGoogleAccounts,
+  selectedGoogleAccount,
+  upsertGoogleAccount,
 } from "./lib/google-auth.js";
 import { GMAIL_SEND_SCOPE } from "./lib/gmail-send.js";
 import { clearDiagnostics, formatDiagnostic, readDiagnostics } from "./lib/diagnostics.js";
@@ -32,6 +37,7 @@ const connectGmailButton = document.getElementById("connectGmailButton");
 const disconnectGmailButton = document.getElementById("disconnectGmailButton");
 const gmailState = document.getElementById("gmailState");
 const gmailAccountDetail = document.getElementById("gmailAccountDetail");
+const gmailAccountsList = document.getElementById("gmailAccountsList");
 const extensionId = document.getElementById("extensionId");
 const googleWebClientId = document.getElementById("googleWebClientId");
 const googleChooserState = document.getElementById("googleChooserState");
@@ -83,6 +89,8 @@ let contactOutSessionConnected = false;
 let contactOutSessionMode = "checking";
 let editableTemplates = [];
 let activeTemplateId = "";
+let connectedGoogleAccounts = [];
+let selectedGoogleAccountId = "";
 
 extensionId.textContent = isExtension ? chrome.runtime.id : "available after loading the extension";
 googleRedirectUri.textContent = isExtension ? googleWebRedirectUri(chrome.identity) : "Available after loading the extension";
@@ -605,6 +613,57 @@ function renderGoogleChooserSetup({ saved = false } = {}) {
   googleChooserState.dataset.state = strategy ? saved ? "ready" : "needs-save" : "missing";
 }
 
+function renderConnectedGoogleAccounts(accounts = connectedGoogleAccounts, selectedId = selectedGoogleAccountId) {
+  const fragment = document.createDocumentFragment();
+  for (const account of accounts) {
+    const row = document.createElement("div");
+    row.className = `gmail-account-row${account.id === selectedId ? " is-selected" : ""}`;
+
+    const select = document.createElement("button");
+    select.type = "button";
+    select.className = "gmail-account-select";
+    select.dataset.accountId = account.id;
+    select.innerHTML = `<strong></strong><small>${account.id === selectedId ? "Selected sender" : "Use this sender"}</small>`;
+    select.querySelector("strong").textContent = account.email;
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "gmail-account-remove";
+    remove.dataset.removeAccountId = account.id;
+    remove.setAttribute("aria-label", `Remove ${account.email}`);
+    remove.textContent = "Remove";
+
+    row.append(select, remove);
+    fragment.append(row);
+  }
+  gmailAccountsList.replaceChildren(fragment);
+}
+
+async function persistGoogleAccounts(accounts, preferredAccountId = "") {
+  connectedGoogleAccounts = normalizeGoogleAccounts(accounts);
+  const selected = selectedGoogleAccount(connectedGoogleAccounts, preferredAccountId);
+  selectedGoogleAccountId = selected?.id || "";
+  await storage.set({
+    [GOOGLE_ACCOUNTS_STORAGE_KEY]: connectedGoogleAccounts,
+    [GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY]: selectedGoogleAccountId,
+  });
+  if (selected) await storage.set({ [GOOGLE_ACCOUNT_STORAGE_KEY]: selected });
+  else await storage.remove(GOOGLE_ACCOUNT_STORAGE_KEY);
+  return selected;
+}
+
+async function readGoogleAccounts() {
+  const saved = await storage.get([
+    GOOGLE_ACCOUNTS_STORAGE_KEY,
+    GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY,
+    GOOGLE_ACCOUNT_STORAGE_KEY,
+  ]);
+  const accounts = normalizeGoogleAccounts(saved[GOOGLE_ACCOUNTS_STORAGE_KEY], saved[GOOGLE_ACCOUNT_STORAGE_KEY]);
+  const selected = selectedGoogleAccount(accounts, saved[GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY], saved[GOOGLE_ACCOUNT_STORAGE_KEY]);
+  await persistGoogleAccounts(accounts, selected?.id || "");
+  return { accounts: connectedGoogleAccounts, selected };
+}
+
 function renderGmailConnection({ connected = false, oauthConfigured = true, checking = false, detail = "", email = "", authMode = "" } = {}) {
   if (deliveryMethodInputs.find((input) => input.checked)?.value === "mailto") {
     renderDeliveryMethod();
@@ -614,13 +673,12 @@ function renderGmailConnection({ connected = false, oauthConfigured = true, chec
   gmailState.classList.toggle("has-access", connected);
   gmailState.classList.toggle("has-warning", !connected && !checking && !oauthConfigured);
   gmailState.title = detail;
-  connectGmailButton.textContent = connected
-    ? authMode === GOOGLE_ACCOUNT_AUTH_MODE ? "Choose a different sender" : "Reconnect Gmail"
-    : "Connect Gmail";
+  connectGmailButton.textContent = authMode === GOOGLE_CHROME_PROFILE_AUTH_MODE ? "Reconnect Gmail" : "Add Gmail account";
   connectGmailButton.disabled = checking || !oauthConfigured;
   disconnectGmailButton.hidden = !connected;
+  renderConnectedGoogleAccounts();
   gmailAccountDetail.textContent = email
-    ? `Sending from: ${email}${authMode === GOOGLE_ACCOUNT_AUTH_MODE ? " · explicitly selected" : " · Chrome profile account"}`
+    ? `${connectedGoogleAccounts.length} connected · sending from ${email}${authMode === GOOGLE_ACCOUNT_AUTH_MODE ? " · explicitly selected" : " · Chrome profile account"}`
     : detail || (oauthConfigured ? "No Gmail sender connected." : "Configure the Chrome extension OAuth client in manifest.json.");
 }
 
@@ -632,26 +690,33 @@ async function probeGmailConnection() {
   const oauthConfigured = Boolean(strategy);
   renderGmailConnection({ checking: true, oauthConfigured });
   try {
-    const saved = (await storage.get(GOOGLE_ACCOUNT_STORAGE_KEY))[GOOGLE_ACCOUNT_STORAGE_KEY];
-    if (!saved?.id) { renderGmailConnection({ oauthConfigured }); return; }
-    let account = saved;
-    if (strategy === GOOGLE_ACCOUNT_AUTH_MODE && saved.authMode === GOOGLE_ACCOUNT_AUTH_MODE) {
+    const state = await readGoogleAccounts();
+    if (!state.selected?.id) { renderGmailConnection({ oauthConfigured }); return; }
+    let account = state.selected;
+    if (strategy === GOOGLE_ACCOUNT_AUTH_MODE) {
+      if (account.authMode !== GOOGLE_ACCOUNT_AUTH_MODE) {
+        renderGmailConnection({ oauthConfigured, detail: "Google delivery configuration changed. Add this Gmail sender with the Web account chooser." });
+        return;
+      }
       await getGoogleWebAuthToken({
         identity: chrome.identity,
         clientId: configuredSettings.googleWebClientId,
         scopes: [GMAIL_SEND_SCOPE],
-        expectedEmail: saved.email,
+        expectedEmail: account.email,
       });
     } else {
+      if (account.authMode === GOOGLE_ACCOUNT_AUTH_MODE) {
+        renderGmailConnection({ oauthConfigured, detail: "Google delivery configuration changed. Reconnect the Chrome profile sender." });
+        return;
+      }
       if (!googleOAuthConfigured(manifest)) {
         renderGmailConnection({ oauthConfigured, detail: "The Chrome-extension OAuth client is not configured." });
         return;
       }
       await getGoogleAuthToken({ identity: chrome.identity, manifest, scopes: [GMAIL_SEND_SCOPE], interactive: false });
       account = { ...(await getPrimaryGoogleAccount(chrome.identity)), authMode: GOOGLE_CHROME_PROFILE_AUTH_MODE };
-      if (saved.authMode !== GOOGLE_CHROME_PROFILE_AUTH_MODE || saved.id !== account.id) {
-        await storage.set({ [GOOGLE_ACCOUNT_STORAGE_KEY]: account });
-      }
+      const accounts = connectedGoogleAccounts.filter((item) => item.authMode !== GOOGLE_CHROME_PROFILE_AUTH_MODE || item.id === account.id);
+      await persistGoogleAccounts(upsertGoogleAccount(accounts, account), account.id);
     }
     renderGmailConnection({ connected: true, oauthConfigured, email: account.email || "Google account", authMode: account.authMode });
   } catch (error) {
@@ -687,7 +752,7 @@ connectGmailButton.addEventListener("click", async () => {
     if (strategy === GOOGLE_CHROME_PROFILE_AUTH_MODE) {
       await getGoogleAuthToken({ identity: chrome.identity, manifest, scopes: [GMAIL_SEND_SCOPE], interactive: true });
     }
-    await storage.set({ [GOOGLE_ACCOUNT_STORAGE_KEY]: selected });
+    await persistGoogleAccounts(upsertGoogleAccount(connectedGoogleAccounts, selected), selected.id);
     renderGmailConnection({ connected: true, oauthConfigured: true, email: selected.email, authMode: selected.authMode });
     showToast(`${selected.email} connected for direct Gmail sending.`);
   } catch (error) {
@@ -703,13 +768,14 @@ disconnectGmailButton.addEventListener("click", async () => {
   try {
     connectGmailButton.disabled = true;
     disconnectGmailButton.disabled = true;
-    const saved = (await storage.get(GOOGLE_ACCOUNT_STORAGE_KEY))[GOOGLE_ACCOUNT_STORAGE_KEY] || {};
-    await disconnectGoogle(chrome.identity, { authMode: saved.authMode });
-    await storage.remove(GOOGLE_ACCOUNT_STORAGE_KEY);
+    const selected = selectedGoogleAccount(connectedGoogleAccounts, selectedGoogleAccountId);
+    if (!selected) return;
+    await disconnectGoogle(chrome.identity, { authMode: selected.authMode });
+    const next = await persistGoogleAccounts(connectedGoogleAccounts.filter((account) => account.id !== selected.id));
     const configuredSettings = (await storage.get("velaGtmSettings")).velaGtmSettings || {};
     const strategy = googleOAuthStrategy({ manifest: chrome.runtime.getManifest(), webClientId: configuredSettings.googleWebClientId });
-    renderGmailConnection({ oauthConfigured: Boolean(strategy) });
-    showToast("Google delivery disconnected from Vela GTM.");
+    renderGmailConnection({ connected: Boolean(next), oauthConfigured: Boolean(strategy), email: next?.email, authMode: next?.authMode });
+    showToast(`${selected.email} removed from Vela GTM.`);
   } catch (error) {
     showToast(error instanceof Error ? error.message : "Could not disconnect Google delivery.");
   } finally {
@@ -717,6 +783,26 @@ disconnectGmailButton.addEventListener("click", async () => {
     connectGmailButton.disabled = !googleOAuthStrategy({ manifest: chrome.runtime.getManifest(), webClientId: configuredSettings.googleWebClientId });
     disconnectGmailButton.disabled = false;
   }
+});
+
+gmailAccountsList.addEventListener("click", async (event) => {
+  const removeButton = event.target.closest("[data-remove-account-id]");
+  if (removeButton) {
+    const account = connectedGoogleAccounts.find((item) => item.id === removeButton.dataset.removeAccountId);
+    if (!account) return;
+    await disconnectGoogle(chrome.identity, { authMode: account.authMode });
+    const next = await persistGoogleAccounts(connectedGoogleAccounts.filter((item) => item.id !== account.id), selectedGoogleAccountId);
+    const configuredSettings = (await storage.get("velaGtmSettings")).velaGtmSettings || {};
+    renderGmailConnection({ connected: Boolean(next), oauthConfigured: Boolean(googleOAuthStrategy({ manifest: chrome.runtime.getManifest(), webClientId: configuredSettings.googleWebClientId })), email: next?.email, authMode: next?.authMode });
+    showToast(`${account.email} removed.`);
+    return;
+  }
+
+  const selectButton = event.target.closest("[data-account-id]");
+  if (!selectButton) return;
+  const selected = await persistGoogleAccounts(connectedGoogleAccounts, selectButton.dataset.accountId);
+  renderGmailConnection({ connected: Boolean(selected), oauthConfigured: true, email: selected?.email, authMode: selected?.authMode });
+  showToast(`${selected.email} selected for new Gmail sends.`);
 });
 
 copyGoogleRedirectButton.addEventListener("click", async () => {

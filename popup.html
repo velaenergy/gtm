@@ -119,11 +119,11 @@
 
     <footer id="actionBar" class="action-bar" hidden>
       <div class="delivery-controls">
-        <button id="deliveryAccountButton" class="delivery-account" type="button">
+        <label id="deliveryAccountButton" class="delivery-account">
           <span>Send from</span>
-          <strong id="deliveryAccount">Connect Gmail in Settings</strong>
-          <i aria-hidden="true">›</i>
-        </button>
+          <select id="deliveryAccount" aria-label="Gmail sender account"><option value="">Connect Gmail in Settings</option></select>
+          <i aria-hidden="true">⌄</i>
+        </label>
         <label class="schedule-control">
           <span class="schedule-copy"><strong>Schedule sends</strong><small id="scheduleHint">Send immediately</small></span>
           <input id="scheduleToggle" type="checkbox" />

@@ -206,6 +206,14 @@ form { display: grid; gap: 16px; }
 #gmailConnectionSetup { margin-top: 18px; }
 .gmail-actions { display: flex; gap: 8px; margin-top: 16px; }
 .gmail-account-detail { margin-top: 10px; }
+.gmail-accounts-list { display:grid; gap:8px; margin-top:12px; }
+.gmail-account-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:center; padding:10px 11px; border:1px solid var(--border); border-radius:8px; background:var(--surface); }
+.gmail-account-row.is-selected { border-color:color-mix(in srgb,var(--green) 42%,var(--border)); background:color-mix(in srgb,var(--green) 6%,var(--surface)); }
+.gmail-account-select { min-width:0; display:grid; gap:2px; border:0; background:transparent; color:var(--text); text-align:left; cursor:pointer; }
+.gmail-account-select strong { overflow:hidden; font-size:10.5px; font-weight:500; text-overflow:ellipsis; white-space:nowrap; }
+.gmail-account-select small { color:var(--text-tertiary); font-size:8.5px; }
+.gmail-account-remove { border:0; background:transparent; color:var(--text-tertiary); font-size:9px; cursor:pointer; }
+.gmail-account-remove:hover { color:var(--text); }
 .google-chooser-setup { display:grid; gap:13px; margin-top:16px; padding:15px; border:1px solid var(--border); border-radius:10px; background:var(--surface-subtle); }
 .google-chooser-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; }
 .google-chooser-heading > div { display:grid; gap:4px; }

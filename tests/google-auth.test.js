@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   GOOGLE_ACCOUNT_AUTH_MODE,
+  GOOGLE_ACCOUNTS_STORAGE_KEY,
   GOOGLE_CHROME_PROFILE_AUTH_MODE,
+  GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY,
   GOOGLE_USERINFO_EMAIL_SCOPE,
   buildGoogleWebAuthUrl,
   chooseGoogleAccount,
@@ -10,8 +12,12 @@ import {
   getGoogleAuthToken,
   getGoogleWebAuthToken,
   getPrimaryGoogleAccount,
+  googleAccountById,
   googleOAuthErrorMessage,
   googleOAuthStrategy,
+  normalizeGoogleAccounts,
+  selectedGoogleAccount,
+  upsertGoogleAccount,
 } from "../lib/google-auth.js";
 import { GMAIL_SEND_SCOPE } from "../lib/gmail-send.js";
 
@@ -83,6 +89,32 @@ test("V20 never sends the manifest Chrome-extension client through Web OAuth", (
     googleOAuthStrategy({ manifest: MANIFEST, webClientId: WEB_CLIENT_ID }),
     GOOGLE_ACCOUNT_AUTH_MODE,
   );
+});
+
+test("V21 migrates and deduplicates connected Gmail accounts without tokens", () => {
+  const legacy = { id: "gaia-tarun", email: "Tarun@VelaEnergy.ai", authMode: GOOGLE_ACCOUNT_AUTH_MODE, token: "never-copy" };
+  const accounts = normalizeGoogleAccounts([
+    { id: "gaia-tony", email: "tony@velaenergy.ai", authMode: GOOGLE_ACCOUNT_AUTH_MODE },
+    { id: "gaia-tarun", email: "tarun@velaenergy.ai", authMode: GOOGLE_ACCOUNT_AUTH_MODE },
+  ], legacy);
+  assert.deepEqual(accounts, [
+    { id: "gaia-tarun", email: "tarun@velaenergy.ai", authMode: GOOGLE_ACCOUNT_AUTH_MODE },
+    { id: "gaia-tony", email: "tony@velaenergy.ai", authMode: GOOGLE_ACCOUNT_AUTH_MODE },
+  ]);
+  assert.equal("token" in accounts[0], false);
+  assert.equal(GOOGLE_ACCOUNTS_STORAGE_KEY, "velaGtmGoogleAccounts");
+  assert.equal(GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY, "velaGtmSelectedGoogleAccountId");
+});
+
+test("V21 keeps compose sender selection explicit while adding accounts", () => {
+  const accounts = upsertGoogleAccount(
+    [{ id: "gaia-tarun", email: "tarun@velaenergy.ai", authMode: GOOGLE_ACCOUNT_AUTH_MODE }],
+    { id: "gaia-tony", email: "Tony@VelaEnergy.ai", authMode: GOOGLE_ACCOUNT_AUTH_MODE },
+  );
+  assert.equal(selectedGoogleAccount(accounts, "gaia-tony").email, "tony@velaenergy.ai");
+  assert.equal(selectedGoogleAccount(accounts, "missing").email, "tarun@velaenergy.ai");
+  assert.equal(googleAccountById(accounts, "gaia-tony").email, "tony@velaenergy.ai");
+  assert.equal(googleAccountById(accounts, "missing"), null, "delivery must not rotate to another connected sender");
 });
 
 test("connects and labels the Google account explicitly chosen by the user", async () => {

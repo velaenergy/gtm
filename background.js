@@ -12,9 +12,11 @@ import { PROVIDER, preferredSearchProvider } from "./lib/provider-priority.js";
 import { appendDiagnostic } from "./lib/diagnostics.js";
 import {
   GOOGLE_ACCOUNT_AUTH_MODE,
+  GOOGLE_ACCOUNTS_STORAGE_KEY,
   GOOGLE_ACCOUNT_STORAGE_KEY,
   getGoogleAuthToken,
   getGoogleWebAuthToken,
+  googleAccountById,
   googleOAuthStrategy,
 } from "./lib/google-auth.js";
 import { GMAIL_SEND_SCOPE, GmailApiError, buildMimeMessage, sendGmailMessage, uniqueRecipients } from "./lib/gmail-send.js";
@@ -57,33 +59,42 @@ async function recordProspectDelivery(prospectId, type, detail, { sent = false, 
   });
 }
 
+async function savedGoogleAccount(expectedAccountId = "") {
+  const saved = await chrome.storage.local.get([GOOGLE_ACCOUNTS_STORAGE_KEY, GOOGLE_ACCOUNT_STORAGE_KEY]);
+  const account = googleAccountById(saved[GOOGLE_ACCOUNTS_STORAGE_KEY], expectedAccountId, saved[GOOGLE_ACCOUNT_STORAGE_KEY]);
+  if (!account) throw new Error("The selected Gmail sender changed. Review Google delivery in Settings before sending.");
+  return account;
+}
+
 async function gmailToken(interactive = false, expectedAccountId = "") {
   const configured = await settings();
   const manifest = chrome.runtime.getManifest();
   const strategy = googleOAuthStrategy({ manifest, webClientId: configured.googleWebClientId });
-  const saved = await chrome.storage.local.get(GOOGLE_ACCOUNT_STORAGE_KEY);
-  const account = saved[GOOGLE_ACCOUNT_STORAGE_KEY] || {};
-  if (!account.id || (expectedAccountId && account.id !== expectedAccountId)) {
-    throw new Error("The selected Gmail sender changed. Review Google delivery in Settings before sending.");
-  }
+  const account = await savedGoogleAccount(expectedAccountId);
   if (strategy === GOOGLE_ACCOUNT_AUTH_MODE) {
     if (account.authMode !== GOOGLE_ACCOUNT_AUTH_MODE) throw new Error("Google delivery configuration changed. Reconnect the Gmail sender in Settings.");
-    return getGoogleWebAuthToken({
+    const token = await getGoogleWebAuthToken({
       identity: chrome.identity,
       clientId: configured.googleWebClientId,
       scopes: [GMAIL_SEND_SCOPE],
       expectedEmail: account.email,
       interactive,
     });
+    return { token, account };
   }
   if (!strategy) throw new Error("Google delivery OAuth is not configured in manifest.json.");
   if (account.authMode === GOOGLE_ACCOUNT_AUTH_MODE) throw new Error("Google delivery configuration changed. Reconnect the Gmail sender in Settings.");
-  return getGoogleAuthToken({
+  const currentProfile = await chrome.identity.getProfileUserInfo({ accountStatus: "ANY" });
+  if (String(currentProfile?.id || "") !== account.id || String(currentProfile?.email || "").trim().toLowerCase() !== account.email) {
+    throw new Error("Chrome is signed in with a different Gmail sender. Reconnect the selected account in Settings.");
+  }
+  const token = await getGoogleAuthToken({
     identity: chrome.identity,
     manifest,
     scopes: [GMAIL_SEND_SCOPE],
     interactive,
   });
+  return { token, account };
 }
 
 async function recordDelivery(input = {}) {
@@ -99,7 +110,9 @@ async function sendDelivery(input = {}) {
   for (const recipient of recipients) buildMimeMessage({ to: recipient, subject: input.subject, body: input.body });
   if (!input.accountId) throw new Error("Connect and choose a Gmail sender in Settings.");
 
-  let token = await gmailToken(false, input.accountId);
+  let authorization = await gmailToken(false, input.accountId);
+  let { token } = authorization;
+  const deliveryInput = { ...input, senderEmail: authorization.account.email };
   let refreshAttempted = false;
   const sent = [];
   const failed = [];
@@ -112,7 +125,8 @@ async function sendDelivery(input = {}) {
         if (!(error instanceof GmailApiError) || error.status !== 401 || refreshAttempted) throw error;
         refreshAttempted = true;
         await chrome.identity.removeCachedAuthToken({ token }).catch(() => {});
-        token = await gmailToken(false, input.accountId);
+        authorization = await gmailToken(false, input.accountId);
+        token = authorization.token;
         result = await sendGmailMessage(token, { to: recipient, subject: input.subject, body: input.body });
       }
       sent.push({ recipient, ...result });
@@ -124,7 +138,7 @@ async function sendDelivery(input = {}) {
   const deliveryId = input.id || crypto.randomUUID();
   const status = !sent.length ? DELIVERY_STATUS.FAILED : failed.length ? DELIVERY_STATUS.PARTIAL : DELIVERY_STATUS.SENT;
   await recordDelivery({
-    ...input,
+    ...deliveryInput,
     id: deliveryId,
     mode: input.scheduledAt ? "scheduled" : "immediate",
     status,
@@ -146,7 +160,8 @@ async function scheduleDelivery(input = {}) {
   const recipients = uniqueRecipients(input.recipients);
   for (const recipient of recipients) buildMimeMessage({ to: recipient, subject: input.subject, body: input.body });
   if (!input.accountId) throw new Error("Connect and choose a Gmail sender in Settings.");
-  const job = createScheduledSend({ ...input, recipients });
+  const account = await savedGoogleAccount(input.accountId);
+  const job = createScheduledSend({ ...input, senderEmail: account.email, recipients });
   const saved = await chrome.storage.local.get(SCHEDULED_SENDS_STORAGE_KEY);
   const jobs = normalizeScheduledSends(saved[SCHEDULED_SENDS_STORAGE_KEY]);
   await chrome.storage.local.set({ [SCHEDULED_SENDS_STORAGE_KEY]: [...jobs, job].slice(-100) });

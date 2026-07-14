@@ -400,8 +400,8 @@ input.is-invalid { border-color: var(--danger); color: var(--danger); }
 .delivery-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .delivery-account { position: relative; min-width: 0; display: grid; gap: 2px; padding: 8px 24px 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); text-align: left; }
 .delivery-account > span { color: var(--tertiary); font-size: 8px; text-transform: uppercase; letter-spacing: .08em; }
-.delivery-account strong { overflow: hidden; color: var(--secondary); font-size: 9px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-.delivery-account.is-connected strong { color: var(--text); }
+.delivery-account select { min-width:0; width:100%; overflow:hidden; padding:0 12px 0 0; border:0; outline:0; background:transparent; color:var(--secondary); font-family:inherit; font-size:9px; font-weight:500; line-height:1.2; text-overflow:ellipsis; white-space:nowrap; appearance:none; cursor:pointer; }
+.delivery-account.is-connected select { color: var(--text); }
 .delivery-account > i { position: absolute; top: 50%; right: 9px; color: var(--tertiary); font-size: 14px; font-style: normal; transform: translateY(-50%); }
 .delivery-account:hover { border-color: var(--border-strong); background: var(--surface-hover); }
 .schedule-control { position: relative; display: grid; grid-template-columns: auto auto; grid-template-rows: auto auto; align-items: center; gap: 3px 8px; min-width: 160px; padding: 7px 8px 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
@@ -652,7 +652,7 @@ body { font-size: 13px; }
 .delivery-controls { gap: 7px; }
 .delivery-account { min-height: 44px; padding: 7px 25px 7px 10px; border-radius: 10px; background: var(--surface); }
 .delivery-account > span { font-size: 8px; }
-.delivery-account strong { font-size: 9.5px; }
+.delivery-account select { font-size: 9.5px; }
 .schedule-control { min-width: 145px; padding: 6px 7px 6px 9px; border-radius: 10px; background: var(--surface); }
 .schedule-copy strong { font-size: 9px; }
 .schedule-copy small { font-size: 7.5px; }

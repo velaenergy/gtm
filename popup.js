@@ -14,7 +14,13 @@ import {
   templateVariables,
 } from "./lib/message.js";
 import { runAutomaticProfileWorkflow } from "./lib/profile-workflow.js";
-import { GOOGLE_ACCOUNT_STORAGE_KEY } from "./lib/google-auth.js";
+import {
+  GOOGLE_ACCOUNTS_STORAGE_KEY,
+  GOOGLE_ACCOUNT_STORAGE_KEY,
+  GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY,
+  normalizeGoogleAccounts,
+  selectedGoogleAccount,
+} from "./lib/google-auth.js";
 import {
   DEFAULT_DELIVERY_SETTINGS,
   DELIVERY_SETTINGS_KEY,
@@ -86,6 +92,7 @@ const state = {
   toastTimer: null,
   activeTabId: null,
   googleAccount: null,
+  googleAccounts: [],
   deliverySettings: { ...DEFAULT_DELIVERY_SETTINGS },
   deliveryLoading: false,
   contactOutCreditsRemaining: null,
@@ -204,7 +211,18 @@ function renderDelivery() {
   const mailto = state.settings.deliveryMethod === "mailto";
   const connected = !mailto && Boolean(state.googleAccount?.id);
   const recipients = deliveryRecipients();
-  elements.deliveryAccount.textContent = mailto ? "Default email app" : connected ? state.googleAccount.email || "Selected Google account" : "Manual Gmail compose";
+  const options = [];
+  if (mailto) options.push({ value: "", label: "Default email app" });
+  else if (state.googleAccounts.length) options.push(...state.googleAccounts.map((account) => ({ value: account.id, label: account.email })));
+  else options.push({ value: "", label: "Connect Gmail in Settings" });
+  elements.deliveryAccount.replaceChildren(...options.map(({ value, label }) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    return option;
+  }));
+  elements.deliveryAccount.value = connected ? state.googleAccount.id : "";
+  elements.deliveryAccount.disabled = mailto;
   elements.deliveryAccountButton.classList.toggle("is-connected", connected);
   elements.scheduleToggle.checked = !mailto && state.deliverySettings.scheduleEnabled;
   elements.scheduleTime.value = state.deliverySettings.scheduleTime;
@@ -431,13 +449,36 @@ function queueDraftSave() {
 }
 
 async function loadSettings() {
-  const result = await storage.get(["velaGtmSettings", GOOGLE_ACCOUNT_STORAGE_KEY, DELIVERY_SETTINGS_KEY]);
+  const result = await storage.get([
+    "velaGtmSettings",
+    GOOGLE_ACCOUNTS_STORAGE_KEY,
+    GOOGLE_ACCOUNT_STORAGE_KEY,
+    GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY,
+    DELIVERY_SETTINGS_KEY,
+  ]);
   state.settings = { ...DEFAULT_SETTINGS, ...(result.velaGtmSettings || {}) };
   state.templates = emailTemplates(state.settings);
   state.templateId = state.templates[0]?.id || "";
-  state.googleAccount = result[GOOGLE_ACCOUNT_STORAGE_KEY] || null;
+  state.googleAccounts = normalizeGoogleAccounts(result[GOOGLE_ACCOUNTS_STORAGE_KEY], result[GOOGLE_ACCOUNT_STORAGE_KEY]);
+  state.googleAccount = selectedGoogleAccount(state.googleAccounts, result[GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY], result[GOOGLE_ACCOUNT_STORAGE_KEY]);
+  const storageNeedsMigration = JSON.stringify(result[GOOGLE_ACCOUNTS_STORAGE_KEY] || []) !== JSON.stringify(state.googleAccounts)
+    || String(result[GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY] || "") !== String(state.googleAccount?.id || "")
+    || (state.googleAccount && result[GOOGLE_ACCOUNT_STORAGE_KEY]?.id !== state.googleAccount.id);
+  if (!state.isPreview && storageNeedsMigration) {
+    await storage.set({
+      [GOOGLE_ACCOUNTS_STORAGE_KEY]: state.googleAccounts,
+      [GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY]: state.googleAccount?.id || "",
+      ...(state.googleAccount ? { [GOOGLE_ACCOUNT_STORAGE_KEY]: state.googleAccount } : {}),
+    });
+  }
   state.deliverySettings = normalizeDeliverySettings(result[DELIVERY_SETTINGS_KEY]);
-  if (state.isPreview && !state.googleAccount) state.googleAccount = { id: "preview", email: "tarun@vela.energy" };
+  if (state.isPreview && !state.googleAccount) {
+    state.googleAccounts = [
+      { id: "preview-tarun", email: "tarun@velaenergy.ai", authMode: "account-chooser" },
+      { id: "preview-tony", email: "tony@velaenergy.ai", authMode: "account-chooser" },
+    ];
+    state.googleAccount = state.googleAccounts[0];
+  }
   if (["light", "dark"].includes(previewTheme)) state.settings.theme = previewTheme;
   applyTheme(state.settings.theme);
   populateTemplates();
@@ -1105,7 +1146,23 @@ function bindEvents() {
   elements.copyDraftButton.addEventListener("click", () =>
     copyText(`To: ${deliveryRecipients().join(", ")}\nSubject: ${state.subject}\n\n${state.body}`, "Draft copied."),
   );
-  elements.deliveryAccountButton.addEventListener("click", openSettings);
+  elements.deliveryAccountButton.addEventListener("pointerdown", (event) => {
+    if (state.settings.deliveryMethod !== "mailto" && !state.googleAccounts.length) {
+      event.preventDefault();
+      openSettings();
+    }
+  });
+  elements.deliveryAccount.addEventListener("change", async () => {
+    const selected = selectedGoogleAccount(state.googleAccounts, elements.deliveryAccount.value);
+    if (!selected) { openSettings(); return; }
+    state.googleAccount = selected;
+    await storage.set({
+      [GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY]: selected.id,
+      [GOOGLE_ACCOUNT_STORAGE_KEY]: selected,
+    });
+    renderDelivery();
+    showToast(`Sending from ${selected.email}.`);
+  });
   elements.scheduleToggle.addEventListener("change", async () => {
     state.deliverySettings = { ...state.deliverySettings, scheduleEnabled: elements.scheduleToggle.checked };
     await saveDeliverySettings();
@@ -1219,7 +1276,7 @@ async function initialize() {
     });
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName !== "local") return;
-      if (changes.velaGtmSettings || changes[GOOGLE_ACCOUNT_STORAGE_KEY] || changes[DELIVERY_SETTINGS_KEY]) {
+      if (changes.velaGtmSettings || changes[GOOGLE_ACCOUNTS_STORAGE_KEY] || changes[GOOGLE_ACCOUNT_STORAGE_KEY] || changes[GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY] || changes[DELIVERY_SETTINGS_KEY]) {
         loadSettings().catch(() => {});
       }
       if (changes[CAMPAIGNS_STORAGE_KEY]) {

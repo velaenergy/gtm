@@ -164,7 +164,7 @@ Campaign delivery uses the local **Export MailMerge** workflow. The workbook pre
 
 Settings keeps provider credentials masked by default and provides an explicit **Show** / **Hide** control for each key. **Email generation** also manages a reusable set of named subject/body templates. The profile side panel exposes every supported merge variable and uses the selected saved template without allowing personalization-only AI mode to rewrite the surrounding copy.
 
-With a connected sender, the side panel sends reviewed messages through Gmail's official `users.messages.send` endpoint with `gmail.send`. It never requests inbox-reading access, creates a separate message for each selected verified address, and never rotates the sender account. Without a connected sender, the same action opens one prefilled Gmail composer per selected address so the user can review and manually click **Send**. Scheduling remains available only for connected senders. Clicking **Send email** or **Open Gmail** is the approval boundary.
+With one or more connected senders, the side panel lets the user choose the exact Gmail account for the current compose and sends reviewed messages through Gmail's official `users.messages.send` endpoint with `gmail.send`. It never requests inbox-reading access, creates a separate message for each selected verified address, and never rotates the sender account. Without a connected sender, the same action opens one prefilled Gmail composer per selected address so the user can review and manually click **Send**. Scheduling remains available only for connected senders. Clicking **Send email** or **Open Gmail** is the approval boundary.
 
 **Schedule sends** stores a preferred local time and remains enabled across future side-panel sessions until manually turned off. Each explicit send click schedules that reviewed message for the next occurrence of the chosen time. Jobs and message copy live in Chrome local storage without OAuth tokens; Manifest V3 alarms wake the background worker and missing alarms are restored after Chrome restarts. The dashboard can cancel a queued job, and every status transition updates the separate delivery ledger.
 
@@ -176,7 +176,7 @@ To connect the Chrome profile account:
 2. Confirm that client is a **Chrome extension** client registered to Vela GTM's extension ID.
 3. Leave **Settings → Google delivery → Google Web OAuth client ID** blank, save, and click **Connect Gmail**.
 
-An account chooser is optional. It requires a second, distinct **Web application** OAuth client because Chrome's extension-token API does not show Google's account picker:
+Connecting multiple Gmail accounts requires the account chooser and a second, distinct **Web application** OAuth client because Chrome's extension-token API does not show Google's account picker:
 
 1. In Google Cloud, enable only the **Gmail API**.
 2. In **Google Auth Platform → Audience**, choose **Internal** when both senders belong to the same Vela Workspace organization. If either sender is outside that organization, choose **External**, keep the app in **Testing**, and add both email addresses under **Test users**. External test grants expire after seven days and must then be reconnected.
@@ -184,9 +184,10 @@ An account chooser is optional. It requires a second, distinct **Web application
 4. Under **Clients**, choose **Create client → Web application** and name it `Vela GTM account chooser`.
 5. Add this exact **Authorized redirect URI**: `https://mecnpdbecgmgjolcdldhkeplheojjpki.chromiumapp.org/google`. Do not add a trailing slash and do not add a JavaScript origin.
 6. Copy only the new Web client's `…apps.googleusercontent.com` client ID into **Settings → Google delivery → Google Web OAuth client ID**, then save. Never paste the manifest's Chrome-extension client ID into this field, and never put the Web client secret in the extension.
-7. Click **Choose Gmail sender**. Google now shows `select_account`; after selection, Vela displays `Sending from: address · explicitly selected`.
+7. Click **Add Gmail account**, choose `tony@velaenergy.ai`, and repeat for `tarun@velaenergy.ai` or any other permitted Gmail/Workspace account.
+8. Select the default sender in Settings or use **Send from** beside the side-panel composer to choose the exact account for each immediate or scheduled message.
 
-The Chrome extension client in `manifest.json` is the default authorization path, but it cannot provide a stable-Chrome account chooser. Optional chooser access tokens are transient and never written to Chrome storage. Vela persists only the selected account ID and email label, renews authorization before delivery, and refuses to send through a changed account. Local `.xlsx` MailMerge import/export does not require Google authorization.
+The Chrome extension client in `manifest.json` remains a single-current-profile fallback; it cannot provide a stable-Chrome account chooser. Chooser access tokens are transient and never written to Chrome storage. Vela persists only each connected account's Google ID, email label, authorization mode, and the selected account ID. Every delivery renews authorization for the job's exact account, verifies the returned email, and refuses to send through a changed account. Local `.xlsx` MailMerge import/export does not require Google authorization.
 
 ## Development
 

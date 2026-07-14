@@ -22,9 +22,8 @@
 - **V17 — Persistent profile workspace.** The toolbar action opens a Chrome side panel rather than a transient action popup. The panel remains available while the user changes tabs and refreshes to the active LinkedIn `/in/` profile identity without treating same-profile overlays as a new prospect.
 - **V18 — Delivery ledger.** Every accepted Gmail delivery attempt and every scheduled, cancelled, partial, failed, or completed job produces one bounded local record containing sender label, recipients, subject, mode, status, and timestamps. OAuth tokens and provider credentials → ledger ⊥.
 - **V19 — Automatic writing and manual Gmail fallback.** Opening each new LinkedIn profile identity triggers exactly one AI writing attempt whether automatic contact research is enabled, skipped, or returns no address. When direct Gmail is disconnected, any syntactically valid visible or entered address may open a prefilled Gmail composer; Gmail API sends remain verified-recipient-only.
-- **V20 — OAuth client separation.** Chrome-extension OAuth client IDs → `chrome.identity.getAuthToken` only. Web OAuth chooser ! use distinct Web application client ID + exact extension redirect URI.
-- **V21 — Connected Gmail account set.** User may connect multiple explicit Gmail identities and choose one in compose. Persisted account set contains normalized Google ID/email/auth mode only; OAuth tokens → storage ⊥. Immediate + scheduled delivery ! retain chosen `accountId` + sender label, re-verify token email before send, and auto-rotation ⊥. Legacy single sender migrates without disconnect.
 - **V20 — OAuth client-type routing.** The OAuth client declared in `manifest.json` may authorize Gmail only through `chrome.identity.getAuthToken`; it must never enter `launchWebAuthFlow`. Account-chooser Web OAuth is available only when Settings contains a distinct Web application client ID.
+- **V21 — Connected Gmail account set.** User may connect multiple explicit Gmail identities and choose one in compose. Persisted account set contains normalized Google ID/email/auth mode only; OAuth tokens → storage ⊥. Immediate + scheduled delivery ! retain chosen `accountId` + sender label, re-verify token email before send, and auto-rotation ⊥. Legacy single sender migrates without disconnect.
 
 ## I — External surfaces
 
@@ -67,7 +66,7 @@
 | T21 | x | clarify ContactOut browser/API health states and make multi-recipient selection opt-in | V5,V6,V17 |
 | T22 | x | fall back to prefilled manual Gmail composers when direct Gmail is disconnected | V3,V5,I10 |
 | T23 | x | replace primary-profile-only Gmail setup with an explicitly selected Google sender | V5,I6,I11 |
-| T24 | ~ | add connected Gmail account set + compose sender picker + account-pinned delivery | V5,V20,V21,I6,I7,I11 |
+| T24 | x | add connected Gmail account set + compose sender picker + account-pinned delivery | V5,V20,V21,I6,I7,I11 |
 
 ## B — Bug history
 
