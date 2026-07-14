@@ -13,7 +13,7 @@ test("V19 always starts AI writing when a profile opens even when contact resear
   assert.deepEqual(calls, ["write"]);
 });
 
-test("V25 writes the complete email after automatic research adds its context", async () => {
+test("V27 writes personalization after automatic research adds its context", async () => {
   const calls = [];
   await runAutomaticProfileWorkflow({
     researchEnabled: true,
@@ -52,14 +52,14 @@ test("V19 skips redundant contact research but still writes when an email is alr
   assert.deepEqual(calls, ["write"]);
 });
 
-test("V25 delivery remains closed until the full AI draft succeeds", () => {
+test("V27 delivery remains closed until AI personalization fills the template", () => {
   assert.equal(aiDraftDeliveryReady({ writerLoading: true, aiDraftReady: true, subject: "Ready", body: "Body" }), false);
   assert.equal(aiDraftDeliveryReady({ writerLoading: false, aiDraftReady: false, subject: "Template", body: "Fallback" }), false);
   assert.equal(aiDraftDeliveryReady({ writerLoading: false, aiDraftReady: true, subject: "", body: "AI body" }), false);
   assert.equal(aiDraftDeliveryReady({ writerLoading: false, aiDraftReady: true, subject: "AI subject", body: "AI body" }), true);
 });
 
-test("V25 loading workflow does not resolve before AI writing completes", async () => {
+test("V27 loading workflow does not resolve before AI personalization completes", async () => {
   let releaseWriting;
   let resolved = false;
   const workflow = runAutomaticProfileWorkflow({

@@ -74,6 +74,20 @@ test("only promotes high-confidence non-guessed session emails", () => {
   assert.deepEqual(result.credits, { before: 12, after: 11, phone: 2 });
 });
 
+test("keeps ContactOut verification-in-progress status on revealed candidates", () => {
+  const result = normalizeContactOutSessionReveal({
+    profile: {
+      emails: [{ value: "checking@grid.example", type: 2, confidence_level: "medium", is_guess: true }],
+    },
+  }, {
+    verificationStatus: "checking",
+    profile: { name: "Alex Morgan", experiences: [] },
+  });
+  assert.equal(result.email, "");
+  assert.deepEqual(result.unverifiedEmails, ["checking@grid.example"]);
+  assert.equal(result.emailStatuses["checking@grid.example"], "checking");
+});
+
 test("V17 mirrors ContactOut's preview-to-reveal descriptor contract", async () => {
   const stored = {};
   const calls = [];

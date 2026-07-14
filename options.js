@@ -322,7 +322,7 @@ function fillForm(settings) {
   renderDeliveryMethod();
   renderContactOutApiStatus({ state: contactOutApiKey.value.trim() ? "ready" : "unconfigured" });
   fillTemplates(settings);
-  const generationInput = generationInputs.find((input) => input.value === "full");
+  const generationInput = generationInputs.find((input) => input.value === "personalization");
   if (generationInput) generationInput.checked = true;
   autoEnrich.checked = Boolean(settings.autoEnrich);
   const savedTheme = ["light", "dark", "system"].includes(settings.theme) ? settings.theme : DEFAULT_SETTINGS.theme;
@@ -391,7 +391,7 @@ form.addEventListener("submit", async (event) => {
         includeContactOutPhone: includeContactOutPhone.checked,
         allowMultipleRecipients: allowMultipleRecipients.checked,
         deliveryMethod: deliveryMethodInputs.find((input) => input.checked)?.value === "mailto" ? "mailto" : "gmail",
-        aiGenerationMode: "full",
+        aiGenerationMode: "personalization",
         emailTemplates: savedTemplates,
         templateSubject: savedTemplates[0].subject,
         templateBody: savedTemplates[0].body,

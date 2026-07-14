@@ -201,13 +201,13 @@
           <div class="template-ai-settings">
             <div>
               <strong>AI writing</strong>
-              <small>Vela writes the complete email from grounded profile context before delivery unlocks.</small>
+              <small>Vela fills only the personalized work-note variable. Your subject and template message stay unchanged.</small>
             </div>
             <div class="generation-options" aria-label="AI generation mode">
               <label class="generation-option">
-                <input type="radio" name="aiGenerationMode" value="full" checked disabled />
+                <input type="radio" name="aiGenerationMode" value="personalization" checked disabled />
                 <span class="generation-radio" aria-hidden="true"></span>
-                <span><strong>Complete email</strong><small>AI rewrites the subject and message as one cohesive draft while preserving grounded facts and your selected template’s intent.</small></span>
+                <span><strong>Personalization only</strong><small>AI uses About and role descriptions to fill {{workNoteInline}}; every other word comes from your selected template.</small></span>
                 <em>Recommended</em>
               </label>
             </div>

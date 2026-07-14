@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 await import("../lib/linkedin-parser.js");
 await import("../lib/linkedin-launcher.js");
 
-const { emailFromFlightResponse, emailFromMailto, memberIdFromMarkup, parseExperienceLines, parseTopCardLines } = globalThis.VelaLinkedInParser;
+const { emailFromFlightResponse, emailFromMailto, memberIdFromMarkup, parseAboutLines, parseExperienceLines, parseTopCardLines } = globalThis.VelaLinkedInParser;
 const { launcherVisibleForPath } = globalThis.VelaLinkedInLauncher;
 
 test("V24 shows the Vela launcher only on supported LinkedIn people surfaces", () => {
@@ -49,10 +49,13 @@ test("parses dated experience rows from hydrated SDUI text", () => {
     "Relay · Self-employed",
     "Oct 2023 - Present · 2 yrs 9 mos",
     "Austin, Texas, United States · Hybrid",
+    "Built software that helps utilities plan grid capacity.",
+    "Led partnerships with large energy users.",
     "Operations Lead",
     "Northstar Energy · Full-time",
     "Jan 2021 - Sep 2023 · 2 yrs 9 mos",
     "Remote",
+    "Owned interconnection strategy across new markets.",
     "Show all experiences",
   ]);
 
@@ -62,16 +65,25 @@ test("parses dated experience rows from hydrated SDUI text", () => {
       company: "Relay",
       dates: "Oct 2023 - Present · 2 yrs 9 mos",
       location: "Austin, Texas, United States · Hybrid",
-      details: "",
+      details: "Built software that helps utilities plan grid capacity. Led partnerships with large energy users.",
     },
     {
       title: "Operations Lead",
       company: "Northstar Energy",
       dates: "Jan 2021 - Sep 2023 · 2 yrs 9 mos",
       location: "Remote",
-      details: "",
+      details: "Owned interconnection strategy across new markets.",
     },
   ]);
+});
+
+test("combines the visible About copy instead of dropping shorter text nodes", () => {
+  assert.equal(parseAboutLines([
+    "About",
+    "I build infrastructure products for fast-growing energy users.",
+    "Previously worked across utilities and data centers.",
+    "See more",
+  ]), "I build infrastructure products for fast-growing energy users. Previously worked across utilities and data centers.");
 });
 
 test("recovers the numeric LinkedIn member id nearest the active vanity name", () => {

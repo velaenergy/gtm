@@ -9,6 +9,7 @@ test("builds a bounded writer payload from visible profile data", () => {
     {
       name: "Alex Morgan",
       headline: "Grid operator",
+      about: "I work on utility planning and grid reliability.",
       experiences: [{ title: "Founder", company: "Relay", details: " Builds grid software. " }],
     },
     { senderName: "Tarun", calendarUrl: "https://cal.com/team/velaenergy" },
@@ -17,6 +18,7 @@ test("builds a bounded writer payload from visible profile data", () => {
   );
 
   assert.equal(request.profile.experiences[0].details, "Builds grid software.");
+  assert.equal(request.profile.about, "I work on utility planning and grid reliability.");
   assert.equal(request.sender.name, "Tarun");
   assert.equal(request.personalizationNote, "their grid operations work");
   assert.equal(request.currentOpener, "their grid operations work");
@@ -42,8 +44,25 @@ test("grounds the writer in richer ContactOut profile context", () => {
   assert.deepEqual(request.profile.skills, ["Power", "Critical Facilities"]);
 });
 
-test("V22 an explicit rewrite sends the selected recipient, template, and complete draft in full mode", () => {
-  assert.equal(writerGenerationMode("personalization", { explicitRewrite: true }), "full");
+test("keeps richer LinkedIn role descriptions when provider experience is thinner", () => {
+  const merged = mergeEnrichedProfile(
+    {
+      name: "Alex Morgan",
+      about: "I build reliable infrastructure.",
+      experiences: [{ title: "VP", company: "Grid Works", details: "Owns grid strategy and utility partnerships." }],
+    },
+    { profile: {
+      headline: "VP, Critical Operations",
+      experiences: [{ title: "VP", company: "Grid Works", dates: "2022 - Present", details: "" }],
+    } },
+  );
+  assert.equal(merged.about, "I build reliable infrastructure.");
+  assert.equal(merged.experiences[0].details, "Owns grid strategy and utility partnerships.");
+});
+
+test("V27 an explicit rewrite keeps the template draft and requests personalization only", () => {
+  assert.equal(writerGenerationMode("personalization", { explicitRewrite: true }), "personalization");
+  assert.equal(writerGenerationMode("full", { explicitRewrite: true }), "personalization");
   assert.equal(writerGenerationMode("personalization"), "personalization");
   const request = buildWriterRequest(
     { name: "Ben Kurian", headline: "Global Head of Cybersecurity" },
@@ -51,20 +70,31 @@ test("V22 an explicit rewrite sends the selected recipient, template, and comple
     "You lead cybersecurity across DWS.",
     { subject: "Current subject", body: "Hi Ben,\n\nCurrent full draft." },
     {
-      generationMode: "full",
+      generationMode: "personalization",
       recipient: { email: "ben.kurian@dws.com", type: "work", source: "ContactOut", verified: true },
-      template: { id: "quick-intro", name: "Quick intro", subject: "Template subject", body: "Template body" },
+      template: {
+        id: "quick-intro",
+        name: "Quick intro",
+        eyebrow: "Founder introduction",
+        subject: "Template subject {{firstName}}",
+        body: "Template body {{workNote}}",
+        renderedSubject: "Template subject Ben",
+        renderedBody: "Template body You lead cybersecurity across DWS.",
+      },
     },
   );
-  assert.equal(request.generationMode, "full");
+  assert.equal(request.generationMode, "personalization");
   assert.equal(request.recipient.email, "ben.kurian@dws.com");
   assert.equal(request.recipient.type, "work");
   assert.equal(request.currentDraft.body, "Hi Ben,\n\nCurrent full draft.");
   assert.deepEqual(request.template, {
     id: "quick-intro",
     name: "Quick intro",
-    subject: "Template subject",
-    body: "Template body",
+    purpose: "Founder introduction",
+    subjectPattern: "Template subject {{firstName}}",
+    bodyBlueprint: "Template body {{workNote}}",
+    renderedSubject: "Template subject Ben",
+    renderedBody: "Template body You lead cybersecurity across DWS.",
   });
 });
 
@@ -74,9 +104,11 @@ test("uses gpt-5.4-mini and strict structured output without storing the respons
   assert.equal(request.store, false);
   assert.equal(request.text.format.type, "json_schema");
   assert.equal(request.text.format.strict, true);
-  assert.match(request.instructions, /standalone, ready-to-send opener/);
+  assert.match(request.instructions, /only the workNote personalization slot/i);
+  assert.match(request.instructions, /subject and body verbatim/i);
   assert.match(request.instructions, /Do not default to praise/);
   assert.match(request.instructions, /When context is thin, be honest and specific/);
+  assert.match(request.instructions, /About section and each role description/i);
 });
 
 test("normalizes the complete opener as a ready-to-send sentence", () => {
@@ -92,11 +124,15 @@ test("rejects short and generic AI outreach patterns", () => {
   assert.match(openerQualityIssues("Your work leading site selection across energy markets and critical infrastructure teams.").join(" "), /legacy personalization fragment/);
   assert.deepEqual(openerQualityIssues("You lead site selection at VectorGrid, and I wanted to ask how power availability is changing which markets your team can pursue."), []);
   assert.match(openerQualityIssues("Hi Ben, I’m reaching out because you lead cybersecurity across DWS and I wanted to ask how your team approaches critical infrastructure risk.").join(" "), /greeting/i);
+  assert.match(openerQualityIssues("Your current role at Wells Fargo and teaching experience, suggests you can explain complex systems.").join(" "), /inline template slot/i);
 });
 
-test("reads Responses API output and normalizes the server envelope", async () => {
+test("V27 ignores model-written email copy and preserves the rendered template", async () => {
   const result = await writeOutreach(
-    { profile: { name: "Alex" } },
+    {
+      profile: { name: "Alex" },
+      currentDraft: { subject: "Template subject", body: "Hi Alex,\n\nTemplate body.\n\nBest,\nTarun" },
+    },
     {
       apiKey: "test-key",
       fetchImpl: async (_url, options) => {
@@ -104,13 +140,17 @@ test("reads Responses API output and normalizes the server envelope", async () =
         return {
           ok: true,
           async json() {
-            return { output: [{ content: [{ type: "output_text", text: '{"subject":"Hi","body":"Hello","workNote":"I saw you lead grid operations at Relay and wanted to ask where interconnection delays create the most friction."}' }] }] };
+            return { output: [{ content: [{ type: "output_text", text: '{"subject":"AI changed this","body":"AI rewrote everything","workNote":"Your grid operations work at Relay and experience navigating interconnection delays for large energy users."}' }] }] };
           },
         };
       },
     },
   );
-  assert.deepEqual(result, { subject: "Hi", body: "Hello", workNote: "I saw you lead grid operations at Relay and wanted to ask where interconnection delays create the most friction." });
+  assert.deepEqual(result, {
+    subject: "Template subject",
+    body: "Hi Alex,\n\nTemplate body.\n\nBest,\nTarun",
+    workNote: "Your grid operations work at Relay and experience navigating interconnection delays for large energy users.",
+  });
   assert.equal(responseOutputText({ output_text: "direct" }), "direct");
   assert.deepEqual(normalizeWriterResponse({ data: result, model: "gpt-5.4-mini" }), {
     ...result,

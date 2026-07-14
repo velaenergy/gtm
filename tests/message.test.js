@@ -6,8 +6,10 @@ import {
   TEMPLATES,
   applyTemplate,
   buildWorkNote,
+  contactEmailCandidates,
   contactOutConnectionState,
   deliveryRecipientEmails,
+  emailVerificationState,
   emailTemplates,
   gmailComposeUrl,
   inlinePhrase,
@@ -81,6 +83,42 @@ test("V19 manual Gmail compose accepts a valid visible email while direct send s
   };
   assert.deepEqual(deliveryRecipientEmails({ ...input, gmailConnected: false }), ["visible@example.com"]);
   assert.deepEqual(deliveryRecipientEmails({ ...input, gmailConnected: true }), []);
+});
+
+test("unverified ContactOut candidates remain visible without crossing the direct-send boundary", () => {
+  const contactDetails = {
+    emails: ["verified@example.com"],
+    workEmails: ["verified@example.com"],
+    unverifiedEmails: ["checking@example.com", "invalid@example.com"],
+    unverifiedWorkEmails: ["checking@example.com", "invalid@example.com"],
+    emailStatuses: {
+      "verified@example.com": "verified",
+      "checking@example.com": "checking",
+      "invalid@example.com": "invalid",
+    },
+  };
+  assert.deepEqual(contactEmailCandidates({ contactDetails }), [
+    { email: "verified@example.com", status: "verified", verification: "verified", selectable: true, type: "work" },
+    { email: "checking@example.com", status: "checking", verification: "pending", selectable: true, type: "work" },
+    { email: "invalid@example.com", status: "invalid", verification: "blocked", selectable: false, type: "work" },
+  ]);
+  assert.deepEqual(
+    contactEmailCandidates({ currentEmail: "checking@example.com", contactDetails }).map((candidate) => candidate.email),
+    ["verified@example.com", "checking@example.com", "invalid@example.com"],
+  );
+  assert.equal(emailVerificationState("accept_all"), "unverified");
+  assert.deepEqual(deliveryRecipientEmails({
+    gmailConnected: false,
+    visibleEmails: ["verified@example.com", "checking@example.com"],
+    verifiedEmails: ["verified@example.com"],
+    selectedRecipients: ["checking@example.com"],
+  }), ["checking@example.com"]);
+  assert.deepEqual(deliveryRecipientEmails({
+    gmailConnected: true,
+    visibleEmails: ["verified@example.com", "checking@example.com"],
+    verifiedEmails: ["verified@example.com"],
+    selectedRecipients: ["checking@example.com"],
+  }), []);
 });
 
 const profile = {
@@ -255,6 +293,9 @@ test("normalizes common enrichment response shapes and confidence scales", () =>
     emails: ["josh@example.com"],
     workEmails: [],
     personalEmails: [],
+    unverifiedEmails: [],
+    unverifiedWorkEmails: [],
+    unverifiedPersonalEmails: [],
     phones: [],
     emailStatus: "",
     emailStatuses: {},
@@ -271,6 +312,17 @@ test("preserves per-address ContactOut verification statuses", () => {
   });
   assert.equal(result.emailStatus, "verified");
   assert.deepEqual(result.emailStatuses, { "alex@grid.example": "verified" });
+});
+
+test("preserves ContactOut candidates that have not finished verification", () => {
+  const result = normalizeEnrichmentResponse({
+    unverifiedEmails: ["CHECKING@GRID.EXAMPLE"],
+    unverifiedWorkEmails: ["CHECKING@GRID.EXAMPLE"],
+    emailStatuses: { "CHECKING@GRID.EXAMPLE": "checking" },
+  });
+  assert.deepEqual(result.unverifiedEmails, ["checking@grid.example"]);
+  assert.deepEqual(result.unverifiedWorkEmails, ["checking@grid.example"]);
+  assert.equal(result.emailStatuses["checking@grid.example"], "checking");
 });
 
 test("email and initials helpers handle normal and empty values", () => {

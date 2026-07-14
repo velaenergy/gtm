@@ -28,13 +28,13 @@
     <main>
       <section id="loadingView" class="state-view">
         <span class="loader" aria-hidden="true"></span>
-        <h1>Researching and writing</h1>
-        <p>Reading this profile and preparing the complete email before you review it.</p>
+        <h1>Researching and personalizing</h1>
+        <p>Reading this profile and filling the personalization in your selected template.</p>
       </section>
 
       <section id="pageGate" class="state-view" hidden>
         <span class="sidepanel-orbit" aria-hidden="true"><i></i><i></i><i></i></span>
-        <p class="state-kicker">Persistent browser workspace</p>
+        <!--<p class="state-kicker">Persistent browser workspace</p>-->
         <h1>Vela is ready when you are</h1>
         <p>Keep this panel open while you browse. Open any LinkedIn profile and Vela will switch to that person automatically.</p>
         <button id="gateWorkspaceButton" class="gate-workspace-button" type="button">Open GTM workspace <span aria-hidden="true">↗</span></button>
@@ -64,7 +64,7 @@
               </div>
             </div>
             <div class="email-row">
-              <input id="emailInput" type="email" inputmode="email" autocomplete="off" aria-label="Prospect email" placeholder="No verified email yet" />
+              <input id="emailInput" type="email" inputmode="email" autocomplete="off" aria-label="Prospect email" placeholder="No email found yet" />
               <button id="copyEmailButton" class="quiet-button" type="button">Copy</button>
               <button id="findEmailButton" class="primary-small" type="button"><span>Find verified</span></button>
             </div>
@@ -77,13 +77,13 @@
                 <h2>Email draft</h2>
                 <p id="personalizationSource">Writing from this LinkedIn profile</p>
               </div>
-              <button id="generateEmailButton" class="writer-button" type="button"><span>Rewrite with AI</span></button>
+              <button id="generateEmailButton" class="writer-button" type="button"><span>Rewrite personalization</span></button>
             </div>
             <textarea id="workNote" hidden aria-hidden="true" tabindex="-1"></textarea>
             <div class="composer-block">
               <div class="composer-tools">
                 <label class="template-control"><span>Template</span><select id="templateSelect" aria-label="Outreach template"></select></label>
-                <span id="templateEyebrow" class="template-eyebrow">Pick their brain</span>
+                <span id="templateEyebrow" class="template-eyebrow">Template copy stays unchanged</span>
               </div>
               <label class="composer-field"><span>Subject</span><input id="subjectInput" type="text" autocomplete="off" /></label>
               <label class="composer-field"><span>Message</span><textarea id="bodyInput" rows="12"></textarea></label>
@@ -141,7 +141,10 @@
       </div>
     </dialog>
 
-    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true">
+      <span class="toast-icon" aria-hidden="true"></span>
+      <span class="toast-copy"><strong></strong><small></small></span>
+    </div>
     <script type="module" src="popup.js"></script>
   </body>
 </html>

@@ -11,23 +11,19 @@ const WRITER_SCHEMA = {
   additionalProperties: false,
 };
 
-const WRITER_INSTRUCTIONS = `You write concise, thoughtful founder-led outreach for Vela Energy.
+const WRITER_INSTRUCTIONS = `You write only the workNote personalization slot for a fixed Vela Energy email template.
 
-Use only the prospect facts in the input. Never invent employers, tenure, achievements, relationships, projects, or email addresses. Make the opening specific to the prospect's actual work and prefer the strongest one or two concrete facts from their current role, experience details, company, industry, or skills. Do not merely restate their headline or produce a keyword list. Keep the message warm, direct, and plain text, with no markdown. Aim for 105–155 words and make the founder introduction, specific reason for reaching out, and call request flow as one message rather than separate boilerplate blocks.
+Use only the prospect facts in the input. Never invent employers, tenure, achievements, relationships, projects, or email addresses. Read the prospect's About section and each role description, not just titles and company names. Prefer the strongest one or two concrete facts from their About copy, current role description, prior role descriptions, company, industry, or skills. Do not merely restate their headline or produce a keyword list.
 
-Treat personalizationNote and currentDraft as editable hints, not facts. Replace them when they are generic, awkward, or unsupported. The profile fields and Apollo- or ContactOut-enriched work context are the grounding source.
+The email template is immutable. Return the currentDraft subject and body verbatim. Never rewrite, polish, shorten, extend, or reorder the subject or body. Do not write a greeting, founder introduction, Vela description, meeting ask, calendar link, or sign-off. The application, not the model, inserts workNote into the selected template.
 
-Vela facts you may use: Tarun is CEO of Vela Energy. His cofounder Tony Li left Tesla to build Vela full-time. Vela raised a $1.3M pre-seed round from a16z Speedrun and Z Fellows. Vela builds AI agent products that help large energy loads get powered on faster.
+Write workNote as one specific noun phrase, usually 12-35 words, that fits grammatically after "Came across your profile and was really impressed by". A good shape is: "your engineering work at Wells Fargo and experience teaching and mentoring software engineers". Do not add "I", a greeting, a question, a second sentence, or a clause such as ", which suggests..." or ", demonstrating...". Return the phrase with an initial capital and terminal punctuation; the application converts it to workNoteInline for insertion.
 
-The body should ask for a 20-30 minute conversation using a regular hyphen, include the supplied calendar URL, and sign off with the supplied sender name. Return a short subject, the complete email body, and a workNote containing the complete opener exactly as it should appear in the email. Provider-enriched context, including Apollo or ContactOut data, is grounding context only.
+Treat personalizationNote as an editable hint, not a fact. Replace it when it is generic, awkward, or unsupported. The profile fields and Apollo- or ContactOut-enriched work context are the grounding source.
 
-The workNote must be a standalone, ready-to-send opener of one or two short sentences, usually 18-45 words. Write like a thoughtful founder who has a real reason to contact this person. Use the available context to say what prompted the note and, when the evidence supports it, what relevant question or connection makes their perspective useful to Vela. Vary the structure to fit the person.
+Do not default to praise. Do not put "I was impressed by", "your background is impressive", "caught my eye", "stood out to me", or "I came across your profile" inside workNote because the fixed template already supplies that language. Avoid AI-sounding language such as "at the intersection of", "your journey", "deep expertise", "track record", "fascinating", and "incredible". Do not claim to have followed their work. When context is thin, be honest and specific: name their current responsibility instead of inventing admiration. The phrase must start with a capital letter and end with punctuation.`;
 
-Do not default to praise. Do not use phrases such as "I was impressed by", "your background is impressive", "caught my eye", "stood out to me", or "I came across your profile". Avoid AI-sounding language such as "at the intersection of", "your journey", "deep expertise", "track record", "fascinating", "incredible", and "I'd love to pick your brain". Do not claim to have followed their work. When context is thin, be honest and specific: name their current responsibility and ask a grounded question instead of inventing admiration. The opener must be grammatical, directly address the recipient, start with a capital letter, and end with punctuation.`;
-
-const GENERATION_MODE_INSTRUCTIONS = `If generationMode is "personalization", write only the complete, standalone opener in workNote. Return currentDraft.subject and currentDraft.body verbatim in the required subject and body fields; do not rewrite, polish, or otherwise change them.
-
-If generationMode is "full", rewrite the complete subject and body using all supplied profile, recipient, sender, template, current opener, and current draft context. Treat the current draft as material to improve, not text to append to. Produce exactly one greeting, one concise founder introduction, one prospect-specific reason for reaching out, one ask, and one sign-off. Never repeat the greeting, founder story, Vela description, ask, calendar URL, or sign-off. The workNote must contain only the prospect-specific opener used inside the returned body; it must not include a greeting, founder introduction, scheduling link, or sign-off.`;
+const GENERATION_MODE_INSTRUCTIONS = `Regardless of generationMode, write only workNote. Return currentDraft.subject and currentDraft.body verbatim in the required subject and body fields.`;
 
 export function buildOpenAIRequest(input, model = "gpt-5.4-mini") {
   return {
@@ -77,7 +73,11 @@ export async function writeOutreach(input, { apiKey, model = "gpt-5.4-mini", fet
 
     const draft = JSON.parse(output);
     if (!draft.subject || !draft.body || !draft.workNote) throw new Error("OpenAI returned an incomplete draft.");
-    const normalized = { ...draft, workNote: normalizeWorkNote(draft.workNote) };
+    const normalized = {
+      subject: String(input.currentDraft?.subject || ""),
+      body: String(input.currentDraft?.body || ""),
+      workNote: normalizeWorkNote(draft.workNote),
+    };
     qualityFeedback = openerQualityIssues(normalized.workNote);
     if (!qualityFeedback.length) return normalized;
   }

@@ -9,7 +9,7 @@
     throw new Error("Vela GTM profile parser did not load.");
   }
 
-  const { cleanText, emailFromFlightResponse, emailFromMailto, memberIdFromMarkup, parseExperienceLines, parseTopCardLines, uniqueLines } = parser;
+  const { cleanText, emailFromFlightResponse, emailFromMailto, memberIdFromMarkup, parseAboutLines, parseExperienceLines, parseTopCardLines, uniqueLines } = parser;
 
   async function mountVelaLauncher() {
     if (!launcher || document.getElementById("vela-gtm-linkedin-launcher")) return;
@@ -160,10 +160,7 @@
   function extractAbout() {
     const section = findSection("About") || document.querySelector("#about")?.closest("section");
     if (!section) return "";
-    return textLines(section)
-      .filter((text) => !/^(?:about|see more)$/i.test(text))
-      .sort((a, b) => b.length - a.length)[0]
-      ?.slice(0, 1200) || "";
+    return parseAboutLines(textLines(section)).slice(0, 2400);
   }
 
   function extractVisibleEmail() {

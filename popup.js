@@ -1,6 +1,7 @@
 import {
   DEFAULT_SETTINGS,
   applyTemplate,
+  contactEmailCandidates,
   deliveryRecipientEmails,
   emailTemplates,
   gmailComposeUrl,
@@ -90,6 +91,7 @@ const state = {
   subject: "",
   body: "",
   personalizationModel: "",
+  generatedTemplateId: "",
   campaigns: [],
   lastCampaignId: "",
   composerDirty: false,
@@ -101,6 +103,7 @@ const state = {
   deliverySettings: { ...DEFAULT_DELIVERY_SETTINGS },
   deliveryLoading: false,
   writerLoading: false,
+  writerRunSequence: 0,
   aiDraftReady: false,
   aiDraftError: "",
   contactOutCreditsRemaining: null,
@@ -130,11 +133,44 @@ function applyTheme(preference = "system") {
   document.documentElement.dataset.theme = resolveTheme(preference, prefersDark);
 }
 
-function showToast(message) {
+function showToast(message, { title = "", tone = "neutral", duration = 2300 } = {}) {
   clearTimeout(state.toastTimer);
-  elements.toast.textContent = message;
+  const heading = elements.toast.querySelector("strong");
+  const detail = elements.toast.querySelector("small");
+  heading.textContent = title || message;
+  detail.textContent = title ? message : "";
+  detail.hidden = !title;
+  elements.toast.dataset.tone = tone;
   elements.toast.classList.add("is-visible");
-  state.toastTimer = setTimeout(() => elements.toast.classList.remove("is-visible"), 2300);
+  state.toastTimer = setTimeout(() => elements.toast.classList.remove("is-visible"), duration);
+}
+
+function showDeliveryConfirmation({ scheduledAt = null, sent = 0, failed = 0, senderEmail = "" } = {}) {
+  if (scheduledAt) {
+    const sender = senderEmail ? ` from ${senderEmail}` : "";
+    showToast(`${formatScheduledTime(new Date(scheduledAt))}${sender}. Scheduling stays on.`, {
+      title: "Send scheduled",
+      tone: "success",
+      duration: 5200,
+    });
+    return;
+  }
+
+  const count = Number(sent) || 0;
+  const sender = senderEmail ? ` from ${senderEmail}` : "";
+  if (failed) {
+    showToast(`${count} sent${sender}; ${failed} failed.`, {
+      title: "Partially sent",
+      tone: "warning",
+      duration: 6000,
+    });
+    return;
+  }
+  showToast(`${count} email${count === 1 ? "" : "s"} sent${sender}.`, {
+    title: "Sent",
+    tone: "success",
+    duration: 4600,
+  });
 }
 
 function showView(view) {
@@ -194,18 +230,31 @@ function updateWordCount() {
 }
 
 function verifiedRecipientEmails() {
-  const statuses = state.contactDetails.emailStatuses || {};
-  return [...new Set([
-    ...(state.emailVerified && isEmail(state.email) ? [state.email] : []),
-    ...(state.contactDetails.emails || []).filter((email) => ["verified", "valid"].includes(String(statuses[email] || statuses[email.toLowerCase()] || "").toLowerCase())),
-  ].map((email) => String(email).trim().toLowerCase()).filter(isEmail))];
+  return contactEmailCandidates({
+    currentEmail: state.email,
+    currentEmailVerified: state.emailVerified,
+    contactDetails: state.contactDetails,
+  }).filter((candidate) => candidate.verification === "verified").map((candidate) => candidate.email);
 }
 
-function selectedRecipientEmails() {
-  return normalizeRecipientSelection(verifiedRecipientEmails(), state.selectedRecipients, {
-    allowMultiple: Boolean(state.settings.allowMultipleRecipients),
-    preferred: state.email,
+function visibleRecipientCandidates() {
+  return contactEmailCandidates({
+    currentEmail: state.email,
+    currentEmailVerified: state.emailVerified,
+    contactDetails: state.contactDetails,
   });
+}
+
+function selectedCandidateEmails() {
+  if (!state.selectedRecipients.size && !isEmail(state.email)) return [];
+  return normalizeRecipientSelection(
+    visibleRecipientCandidates().filter((candidate) => candidate.selectable).map((candidate) => candidate.email),
+    state.selectedRecipients,
+    {
+      allowMultiple: Boolean(state.settings.allowMultipleRecipients),
+      preferred: state.email,
+    },
+  );
 }
 
 function deliveryRecipients() {
@@ -214,9 +263,48 @@ function deliveryRecipients() {
     gmailConnected: Boolean(state.googleAccount?.id),
     currentEmail: state.email,
     verifiedEmails: verifiedRecipientEmails(),
+    visibleEmails: visibleRecipientCandidates().filter((candidate) => candidate.selectable).map((candidate) => candidate.email),
     selectedRecipients: state.selectedRecipients,
     allowMultiple: Boolean(state.settings.allowMultipleRecipients),
   });
+}
+
+function mergeEnrichmentCandidates(results = []) {
+  const usable = results.filter(Boolean);
+  if (!usable.length) return null;
+  const latest = usable.at(-1);
+  const verified = [...usable].reverse().find((result) => {
+    const status = String(result.emailStatuses?.[result.email] || result.emailStatus || "").toLowerCase();
+    return result.email && ["verified", "valid"].includes(status);
+  });
+  const mergeEmails = (key) => [...new Set(usable.flatMap((result) => result[key] || []).filter(isEmail))];
+  return {
+    ...latest,
+    email: verified?.email || latest.email || "",
+    emailStatus: verified?.emailStatus || latest.emailStatus || "",
+    emails: mergeEmails("emails"),
+    workEmails: mergeEmails("workEmails"),
+    personalEmails: mergeEmails("personalEmails"),
+    unverifiedEmails: mergeEmails("unverifiedEmails"),
+    unverifiedWorkEmails: mergeEmails("unverifiedWorkEmails"),
+    unverifiedPersonalEmails: mergeEmails("unverifiedPersonalEmails"),
+    emailStatuses: Object.assign({}, ...usable.map((result) => result.emailStatuses || {})),
+  };
+}
+
+function contactDetailsFromEnrichment(result = {}, error = "") {
+  return {
+    emails: result.emails || [],
+    workEmails: result.workEmails || [],
+    personalEmails: result.personalEmails || [],
+    unverifiedEmails: result.unverifiedEmails || [],
+    unverifiedWorkEmails: result.unverifiedWorkEmails || [],
+    unverifiedPersonalEmails: result.unverifiedPersonalEmails || [],
+    phones: result.phones || [],
+    emailStatus: result.emailStatus || "",
+    emailStatuses: result.emailStatuses || {},
+    error,
+  };
 }
 
 function formatScheduledTime(date) {
@@ -247,8 +335,8 @@ function renderDelivery() {
   elements.scheduleToggle.disabled = !connected || !aiReady;
   elements.scheduleTime.disabled = !connected || !aiReady || !state.deliverySettings.scheduleEnabled;
   if (state.writerLoading) {
-    elements.scheduleHint.textContent = "AI is writing the complete email";
-    elements.sendEmailButton.textContent = "Writing email…";
+    elements.scheduleHint.textContent = "AI is writing the personalization";
+    elements.sendEmailButton.textContent = "Personalizing…";
   } else if (!aiReady) {
     elements.scheduleHint.textContent = state.aiDraftError || "AI draft required before sending";
     elements.sendEmailButton.textContent = "AI draft required";
@@ -268,7 +356,7 @@ function renderDelivery() {
   }
   elements.sendEmailButton.disabled = state.deliveryLoading || !aiReady || !recipients.length;
   elements.sendEmailButton.title = state.writerLoading
-    ? "Wait for Vela to finish writing the complete email"
+    ? "Wait for Vela to finish the personalization"
     : !state.aiDraftReady
       ? state.aiDraftError || "A successful AI-written draft is required before delivery"
       : !recipients.length
@@ -279,33 +367,43 @@ function renderDelivery() {
 }
 
 function renderEmail() {
+  const candidates = visibleRecipientCandidates();
+  const currentCandidate = candidates.find((candidate) => candidate.email === state.email);
   elements.emailInput.value = state.email;
   if (!elements.findEmailButton.disabled) elements.findEmailButton.querySelector("span").textContent = state.email ? "Refresh" : "Find verified";
   elements.emailInput.classList.toggle("is-invalid", Boolean(state.email) && !isEmail(state.email));
   elements.emailSource.textContent = state.emailSource || "No contact provider has checked this profile yet";
-  elements.emailConfidence.hidden = !state.emailVerified && state.emailType !== "linkedin";
-  elements.emailConfidence.textContent = state.emailVerified ? "Provider verified" : state.emailType === "linkedin" ? "LinkedIn provided" : "";
+  elements.emailConfidence.hidden = !isEmail(state.email);
+  elements.emailConfidence.dataset.state = currentCandidate?.verification || "unverified";
+  elements.emailConfidence.textContent = state.emailVerified
+    ? "Provider verified"
+    : currentCandidate?.verification === "pending"
+      ? "Verification in progress"
+      : state.emailType === "linkedin"
+        ? "LinkedIn provided"
+        : "Not fully verified";
   const remaining = Number(state.contactOutCreditsRemaining);
   elements.contactOutBalance.hidden = !Number.isFinite(remaining);
   elements.contactOutBalance.textContent = Number.isFinite(remaining) ? `${remaining.toLocaleString()} remaining` : "";
-  const recipients = verifiedRecipientEmails();
-  const selected = selectedRecipientEmails();
+  const selected = selectedCandidateEmails();
   const allowMultiple = Boolean(state.settings.allowMultipleRecipients);
   state.selectedRecipients = new Set(selected);
-  elements.contactDetails.hidden = recipients.length === 0;
+  elements.contactDetails.hidden = candidates.length === 0;
   const fragment = document.createDocumentFragment();
-  if (recipients.length) {
+  if (candidates.length) {
     const head = document.createElement("div");
     head.className = "recipient-picker-head";
     const label = document.createElement("span");
-    label.textContent = allowMultiple ? "Send to" : "Send to one";
-    if (allowMultiple && recipients.length > 1) {
+    label.textContent = allowMultiple ? "Available emails" : "Choose one";
+    const verified = candidates.filter((candidate) => candidate.verification === "verified");
+    if (allowMultiple && verified.length > 1) {
       const selectAll = document.createElement("button");
       selectAll.type = "button";
-      selectAll.textContent = selected.length === recipients.length ? "All selected" : "Select all";
-      selectAll.disabled = selected.length === recipients.length;
+      selectAll.textContent = verified.every((candidate) => selected.includes(candidate.email)) ? "Verified selected" : "Select verified";
+      selectAll.disabled = verified.every((candidate) => selected.includes(candidate.email));
       selectAll.addEventListener("click", () => {
-        state.selectedRecipients = new Set(recipients);
+        state.selectedRecipients = new Set(verified.map((candidate) => candidate.email));
+        Object.assign(state, recipientSelectionContext(verified[0].email, state.contactDetails, state.emailSource));
         renderEmail();
         queueDraftSave();
       });
@@ -313,25 +411,37 @@ function renderEmail() {
     } else {
       const mode = document.createElement("span");
       mode.className = "recipient-picker-mode";
-      mode.textContent = "One recipient";
+      mode.textContent = allowMultiple ? "Select individually" : "One recipient";
       head.append(label, mode);
     }
     fragment.append(head);
   }
-  for (const email of recipients) {
+  for (const candidate of candidates) {
+    const { email } = candidate;
     const option = document.createElement("label");
-    option.className = `recipient-option${allowMultiple ? "" : " is-single"}`;
+    option.className = `recipient-option is-${candidate.verification}${allowMultiple ? "" : " is-single"}`;
     const checkbox = document.createElement("input");
     checkbox.type = allowMultiple ? "checkbox" : "radio";
-    if (!allowMultiple) checkbox.name = "verifiedRecipient";
+    if (!allowMultiple) checkbox.name = "emailRecipient";
     checkbox.checked = state.selectedRecipients.has(email);
+    checkbox.disabled = !candidate.selectable;
     const mark = document.createElement("i");
     mark.setAttribute("aria-hidden", "true");
     const copy = document.createElement("span");
     const address = document.createElement("strong");
     address.textContent = email;
     const status = document.createElement("small");
-    status.textContent = email === state.email ? "Selected · provider verified" : "Alternative · provider verified";
+    const type = candidate.type === "work" ? "Work" : candidate.type === "personal" ? "Personal" : "Contact";
+    const verification = candidate.verification === "verified"
+      ? "Provider verified"
+      : candidate.verification === "pending"
+        ? "Verification in progress"
+        : candidate.verification === "blocked"
+          ? candidate.status.toLowerCase() === "disposable" ? "Disposable · unavailable" : "Invalid · unavailable"
+          : candidate.status.toLowerCase() === "accept_all"
+            ? "Accept-all domain · not fully verified"
+            : "Not fully verified";
+    status.textContent = `${type} · ${verification}`;
     copy.append(address, status);
     option.append(checkbox, mark, copy);
     checkbox.addEventListener("change", () => {
@@ -342,7 +452,13 @@ function renderEmail() {
         state.selectedRecipients.add(email);
         Object.assign(state, recipientSelectionContext(email, state.contactDetails, state.emailSource));
       }
-      else if (selectedRecipientEmails().length > 1) state.selectedRecipients.delete(email);
+      else if (selectedCandidateEmails().length > 1) {
+        state.selectedRecipients.delete(email);
+        const remaining = selectedCandidateEmails();
+        if (!remaining.includes(state.email) && remaining[0]) {
+          Object.assign(state, recipientSelectionContext(remaining[0], state.contactDetails, state.emailSource));
+        }
+      }
       else checkbox.checked = true;
       renderEmail();
       queueDraftSave();
@@ -351,7 +467,7 @@ function renderEmail() {
     fragment.append(option);
   }
   elements.contactDetails.replaceChildren(fragment);
-  elements.contactStep.classList.toggle("is-complete", selectedRecipientEmails().length > 0);
+  elements.contactStep.classList.toggle("is-complete", selectedCandidateEmails().length > 0);
   renderDelivery();
 }
 
@@ -442,12 +558,23 @@ async function loadDraft() {
   state.subject = migratedDraft.subject;
   state.body = migratedDraft.body;
   state.personalizationModel = saved.personalizationModel || "";
-  state.aiDraftReady = Boolean(state.personalizationModel && state.subject.trim() && state.body.trim());
+  const restoreFromTemplate = Boolean(state.personalizationModel && saved.draftMode !== "template");
+  state.generatedTemplateId = saved.generatedTemplateId || (saved.personalizationModel ? state.templateId : "");
+  state.aiDraftReady = Boolean(
+    state.personalizationModel
+    && state.note
+    && state.subject.trim()
+    && state.body.trim(),
+  );
   state.aiDraftError = "";
   state.composerDirty = Boolean(saved.subject || saved.body);
 
   renderProfile();
-  if (state.subject && state.body) {
+  if (restoreFromTemplate) {
+    rebuildComposer({ markClean: true });
+    state.aiDraftReady = Boolean(state.personalizationModel && state.note && state.subject.trim() && state.body.trim());
+    renderDelivery();
+  } else if (state.subject && state.body) {
     elements.subjectInput.value = state.subject;
     elements.bodyInput.value = state.body;
     elements.templateEyebrow.textContent = activeTemplate().eyebrow;
@@ -469,13 +596,15 @@ function queueDraftSave() {
         emailVerified: state.emailVerified,
         emailType: state.emailType,
         contactDetails: state.contactDetails,
-        selectedRecipients: selectedRecipientEmails(),
+        selectedRecipients: selectedCandidateEmails(),
         confidence: state.confidence,
         note: state.note,
         templateId: state.templateId,
         subject: state.subject,
         body: state.body,
         personalizationModel: state.personalizationModel,
+        generatedTemplateId: state.generatedTemplateId,
+        draftMode: "template",
         updatedAt: new Date().toISOString(),
       },
     });
@@ -625,6 +754,7 @@ async function enrichProfile({ requestPermission = true, manageButton = true, op
     }
     if (manageButton) setFindEmailLoading(true, "Searching");
     let result;
+    const candidateResults = [];
     if (direct) {
       let lastError;
       const providerErrors = [];
@@ -664,13 +794,14 @@ async function enrichProfile({ requestPermission = true, manageButton = true, op
             if (Number.isFinite(credits)) state.contactOutCreditsRemaining = credits;
           }
           const candidateResult = normalizeEnrichmentResponse({ ...providerData, emailSource: providerData.source });
+          candidateResults.push(candidateResult);
           const enrichedProfile = mergeEnrichedProfile(profileAtStart, candidateResult);
           Object.assign(profileAtStart, enrichedProfile);
           state.profile = profileAtStart;
           renderExperiences();
           const candidateStatus = String(candidateResult.emailStatuses?.[candidateResult.email] || candidateResult.emailStatus || "").toLowerCase();
           if (candidateResult.email && ["verified", "valid"].includes(candidateStatus)) {
-            result = candidateResult;
+            result = mergeEnrichmentCandidates(candidateResults);
             resolvedProvider = candidate;
             break;
           }
@@ -681,7 +812,12 @@ async function enrichProfile({ requestPermission = true, manageButton = true, op
           await appendDiagnostic({ area: "popup", stage: "provider_dispatch", outcome: "error", provider: providerId, message: lastError.message });
         }
       }
-      if (!result) throw new Error(providerErrors.join(" · ") || lastError?.message || "No configured provider returned a verified email.");
+      if (!result) {
+        const partial = mergeEnrichmentCandidates(candidateResults);
+        const message = providerErrors.join(" · ") || lastError?.message || "No configured provider returned a verified email.";
+        if (partial) state.contactDetails = contactDetailsFromEnrichment(partial, message);
+        throw new Error(message);
+      }
     } else {
       let permitted = await hasEndpointPermission(state.settings.endpointUrl);
       if (!permitted && requestPermission) permitted = await requestEndpointPermission(state.settings.endpointUrl);
@@ -702,7 +838,7 @@ async function enrichProfile({ requestPermission = true, manageButton = true, op
       state.emailVerified = false;
       state.emailType = "";
       state.emailSource = `No verified email found by ${resolvedProvider}`;
-      state.contactDetails = { emails: [], phones: [], emailStatus: "", emailStatuses: {}, error: `${providers.join(" or ")} did not return an explicitly verified address.` };
+      state.contactDetails = contactDetailsFromEnrichment(result, `${providers.join(" or ")} did not return an explicitly verified address.`);
       renderEmail();
       queueDraftSave();
       throw new Error(`${resolvedProvider} did not return a verified email for this profile.`);
@@ -714,7 +850,7 @@ async function enrichProfile({ requestPermission = true, manageButton = true, op
     state.emailType = result.workEmails?.includes(result.email) ? "work" : result.personalEmails?.includes(result.email) ? "personal" : "other";
     state.emailSource = `${state.emailType === "work" ? "Work" : state.emailType === "personal" ? "Personal" : "Contact"} email confirmed by ${resolvedProvider}`;
     state.confidence = result.confidence;
-    state.contactDetails = { emails: result.emails, phones: [], emailStatus: selectedStatus, emailStatuses: result.emailStatuses, error: "" };
+    state.contactDetails = { ...contactDetailsFromEnrichment(result), emailStatus: selectedStatus };
     renderEmail();
     queueDraftSave();
     if (!silent) showToast(`Verified ${resolvedProvider} email found. Writing personalization…`);
@@ -836,39 +972,52 @@ function setWriterLoading(loading) {
   button.disabled = loading;
   button.classList.toggle("is-loading", loading);
   const label = button.querySelector("span");
-  if (label) label.textContent = loading ? "Writing" : "Rewrite with AI";
+  if (label) label.textContent = loading ? "Personalizing" : "Rewrite personalization";
   renderDelivery();
 }
 
-async function generateEmail({ silent = false, announce = true, explicitRewrite = true } = {}) {
+async function generateEmail({ silent = false, announce = true } = {}) {
   if (!state.profile) return;
+  const writerRunSequence = ++state.writerRunSequence;
   const profileAtStart = state.profile;
-  const isCurrentProfile = () => state.profile === profileAtStart;
+  const isCurrentProfile = () => state.profile === profileAtStart && state.writerRunSequence === writerRunSequence;
 
   try {
     state.aiDraftReady = false;
     state.aiDraftError = "";
+    state.personalizationModel = "";
+    state.generatedTemplateId = "";
     setWriterLoading(true);
     if (!state.settings.openAIApiKey && !state.settings.writerEndpointUrl) {
       throw new Error("Add an OpenAI key in Settings before sending.");
     }
 
-    const generationMode = writerGenerationMode(state.settings.aiGenerationMode, { explicitRewrite });
+    const generationMode = writerGenerationMode();
     const template = activeTemplate();
+    const renderedTemplate = applyTemplate(
+      template,
+      templateVariables(profileAtStart, activeTemplateSettings(), state.note, template),
+    );
+    elements.personalizationSource.textContent = "Writing profile personalization…";
+    elements.templateEyebrow.textContent = `${template.name} stays unchanged`;
     const input = buildWriterRequest(
       profileAtStart,
       activeTemplateSettings(),
       state.note,
-      { subject: state.subject, body: state.body },
+      { subject: renderedTemplate.subject, body: renderedTemplate.body },
       {
         generationMode,
         recipient: {
-          email: selectedRecipientEmails()[0] || state.email,
+          email: selectedCandidateEmails()[0] || state.email,
           type: state.emailType,
           source: state.emailSource,
           verified: state.emailVerified,
         },
-        template,
+        template: {
+          ...template,
+          renderedSubject: renderedTemplate.subject,
+          renderedBody: renderedTemplate.body,
+        },
       },
     );
     let payload;
@@ -890,7 +1039,7 @@ async function generateEmail({ silent = false, announce = true, explicitRewrite 
       if (!response.ok) throw new Error(payload.error || `AI writer returned ${response.status}.`);
     }
     const result = normalizeWriterResponse(payload, profileAtStart);
-    if (!result.subject || !result.body) throw new Error("The AI writer returned an incomplete draft.");
+    if (!result.workNote) throw new Error("The AI writer returned no personalization.");
     const openerIssues = openerQualityIssues(result.workNote);
     if (openerIssues.length) throw new Error(`The AI writer returned a generic opener. ${openerIssues.join(" ")}`);
     if (result.workNote) {
@@ -898,14 +1047,9 @@ async function generateEmail({ silent = false, announce = true, explicitRewrite 
       elements.workNote.value = result.workNote;
       elements.personalizationStep.classList.add("is-complete");
     }
-    if (generationMode === "full") {
-      state.subject = result.subject;
-      state.body = result.body;
-      state.composerDirty = true;
-    } else {
-      rebuildComposer({ markClean: true });
-    }
+    rebuildComposer({ markClean: true });
     state.personalizationModel = result.model || state.settings.openAIModel || "gpt-5.4-mini";
+    state.generatedTemplateId = template.id;
     state.aiDraftReady = true;
     state.aiDraftError = "";
     const providerLabel = state.emailSource.match(/(?:ContactOut|Apollo)/i)?.[0] || "provider";
@@ -916,13 +1060,14 @@ async function generateEmail({ silent = false, announce = true, explicitRewrite 
     elements.templateEyebrow.textContent = `Written with ${result.model || "gpt-5.4-mini"}`;
     updateWordCount();
     queueDraftSave();
-    if (announce) showToast(generationMode === "full" ? "AI rewrote the full draft from this prospect's context." : "AI opener updated from this prospect's context.");
+    if (announce) showToast("Personalization updated. Your template stayed unchanged.");
     return true;
   } catch (error) {
     if (!isCurrentProfile()) return false;
     state.aiDraftReady = false;
-    state.aiDraftError = error instanceof Error ? error.message : "AI writing failed. Retry before sending.";
-    elements.personalizationSource.textContent = "AI draft failed — retry before sending";
+    state.aiDraftError = error instanceof Error ? error.message : "AI personalization failed. Retry before sending.";
+    elements.personalizationSource.textContent = "AI personalization failed — retry before sending";
+    queueDraftSave();
     if (!silent) showToast(error instanceof Error ? error.message : "Could not generate the email.");
     return false;
   } finally {
@@ -1057,7 +1202,7 @@ async function saveDeliverySettings() {
 
 async function deliverEmail() {
   if (!aiDraftDeliveryReady(state)) {
-    showToast(state.writerLoading ? "Wait for AI to finish writing this email." : state.aiDraftError || "Generate the complete email with AI before sending.");
+    showToast(state.writerLoading ? "Wait for AI to finish the personalization." : state.aiDraftError || "Generate the personalization before sending.");
     return;
   }
   const mailto = state.settings.deliveryMethod === "mailto";
@@ -1108,8 +1253,11 @@ async function deliverEmail() {
   if (state.deliverySettings.scheduleEnabled) delivery.scheduledAt = nextScheduledAt(state.deliverySettings.scheduleTime).toISOString();
 
   if (state.isPreview) {
-    const action = state.deliverySettings.scheduleEnabled ? `Scheduled for ${formatScheduledTime(new Date(delivery.scheduledAt))}` : "Sent";
-    showToast(`${action} to ${recipients.length} verified address${recipients.length === 1 ? "" : "es"}.`);
+    showDeliveryConfirmation({
+      scheduledAt: delivery.scheduledAt || null,
+      sent: recipients.length,
+      senderEmail: delivery.senderEmail,
+    });
     return;
   }
 
@@ -1122,11 +1270,14 @@ async function deliverEmail() {
     });
     if (!response?.ok) throw new Error(response?.error || "Gmail delivery failed.");
     if (state.deliverySettings.scheduleEnabled) {
-      showToast(`Scheduled for ${formatScheduledTime(new Date(response.data.scheduledAt))}. Scheduling stays on.`);
+      showDeliveryConfirmation({
+        scheduledAt: response.data.scheduledAt,
+        senderEmail: delivery.senderEmail,
+      });
     } else {
       const sent = response.data.sent?.length || 0;
       const failed = response.data.failed?.length || 0;
-      showToast(failed ? `Sent to ${sent}; ${failed} failed.` : `Sent to ${sent} verified address${sent === 1 ? "" : "es"}.`);
+      showDeliveryConfirmation({ sent, failed, senderEmail: delivery.senderEmail });
     }
   } catch (error) {
     showToast(error instanceof Error ? error.message : "Gmail delivery failed.");
@@ -1157,11 +1308,13 @@ function bindEvents() {
   });
   elements.templateSelect.addEventListener("change", async () => {
     state.templateId = elements.templateSelect.value;
-    state.composerDirty = false;
-    state.aiDraftReady = false;
     state.aiDraftError = "";
-    rebuildComposer();
-    await generateEmail({ announce: true, explicitRewrite: true });
+    rebuildComposer({ markClean: true });
+    state.generatedTemplateId = state.personalizationModel ? state.templateId : "";
+    state.aiDraftReady = Boolean(state.personalizationModel && state.note && state.subject.trim() && state.body.trim());
+    renderDelivery();
+    queueDraftSave();
+    await generateEmail({ announce: true });
   });
 
   elements.workNote.addEventListener("input", () => {
@@ -1204,7 +1357,7 @@ function bindEvents() {
   });
 
   elements.findEmailButton.addEventListener("click", () => findProspectEmail({ personalize: false }));
-  elements.generateEmailButton.addEventListener("click", () => generateEmail({ explicitRewrite: true }));
+  elements.generateEmailButton.addEventListener("click", () => generateEmail());
   elements.copyEmailButton.addEventListener("click", () => copyText(elements.emailInput.value.trim(), "Email copied."));
   elements.copyDraftButton.addEventListener("click", () =>
     copyText(`To: ${deliveryRecipients().join(", ")}\nSubject: ${state.subject}\n\n${state.body}`, "Draft copied."),
@@ -1241,6 +1394,7 @@ function bindEvents() {
 
 function resetProfileWorkspace() {
   clearTimeout(state.draftTimer);
+  state.writerRunSequence += 1;
   setFindEmailLoading(false, "Find verified");
   state.draftTimer = null;
   state.profile = null;
@@ -1256,6 +1410,7 @@ function resetProfileWorkspace() {
   state.subject = "";
   state.body = "";
   state.personalizationModel = "";
+  state.generatedTemplateId = "";
   state.writerLoading = false;
   state.aiDraftReady = false;
   state.aiDraftError = "";
@@ -1289,7 +1444,16 @@ async function refreshActiveProfile() {
       state.emailSource = "Work email confirmed by ContactOut";
       state.contactDetails = {
         emails: [state.email, "joshua.rivera@streamdatacenters.com"],
-        emailStatuses: { [state.email]: "verified", "joshua.rivera@streamdatacenters.com": "valid" },
+        workEmails: [state.email, "joshua.rivera@streamdatacenters.com"],
+        unverifiedEmails: ["joshua@northstarinfra.com", "josh.rivera@gmail.com"],
+        unverifiedWorkEmails: ["joshua@northstarinfra.com"],
+        unverifiedPersonalEmails: ["josh.rivera@gmail.com"],
+        emailStatuses: {
+          [state.email]: "verified",
+          "joshua.rivera@streamdatacenters.com": "valid",
+          "joshua@northstarinfra.com": "checking",
+          "josh.rivera@gmail.com": "accept_all",
+        },
         error: "",
       };
       state.selectedRecipients = new Set([state.email]);
@@ -1299,6 +1463,7 @@ async function refreshActiveProfile() {
     if (refreshSequence !== state.refreshSequence) return;
     if (state.isPreview) {
       state.personalizationModel = state.personalizationModel || "gpt-5.4-mini";
+      state.generatedTemplateId = state.templateId;
       state.aiDraftReady = Boolean(state.subject.trim() && state.body.trim());
       renderDelivery();
     } else {
@@ -1309,7 +1474,7 @@ async function refreshActiveProfile() {
           researchEnabled: Boolean(state.settings.autoEnrich),
           hasVerifiedEmail: state.emailVerified,
           research: () => findProspectEmail({ automatic: true, personalize: false }),
-          write: () => generateEmail({ silent: true, announce: false, explicitRewrite: true }),
+          write: () => generateEmail({ silent: true, announce: false }),
         }).catch(() => false);
       }
     }

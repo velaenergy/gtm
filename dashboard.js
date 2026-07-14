@@ -1,4 +1,4 @@
-import { buildWriterRequest, normalizeWriterResponse, openerQualityIssues } from "./lib/ai-writer.js";
+import { buildWriterRequest, mergeEnrichedProfile, normalizeWriterResponse, openerQualityIssues } from "./lib/ai-writer.js";
 import {
   IMPORT_FIELDS,
   exportMailMergeWorkbook,
@@ -1176,7 +1176,7 @@ async function callWriter(profile, workNote, draft) {
     calendarUrl: template.calendarUrl || state.settings.calendarUrl,
   };
   if (state.settings.openAIApiKey) {
-    const input = buildWriterRequest(profile, templateSettings, workNote, draft, { generationMode: "full", template });
+    const input = buildWriterRequest(profile, templateSettings, workNote, draft, { generationMode: "personalization", template });
     const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_PROVIDER_WRITE", input });
     if (!response?.ok) throw new Error(response?.error || "OpenAI writing failed.");
     const result = normalizeWriterResponse({ data: response.data, model: state.settings.openAIModel || "gpt-5.4-mini" }, profile);
@@ -1188,12 +1188,12 @@ async function callWriter(profile, workNote, draft) {
   const headers = { "Content-Type": "application/json", Accept: "application/json" };
   if (state.settings.writerToken) headers.Authorization = `Bearer ${state.settings.writerToken}`;
   const response = await fetch(state.settings.writerEndpointUrl, {
-    method: "POST", headers, body: JSON.stringify(buildWriterRequest(profile, templateSettings, workNote, draft, { generationMode: "full", template })),
+    method: "POST", headers, body: JSON.stringify(buildWriterRequest(profile, templateSettings, workNote, draft, { generationMode: "personalization", template })),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || `AI writer returned ${response.status}.`);
   const result = normalizeWriterResponse(payload, profile);
-  if (!result.subject || !result.body) throw new Error("The AI writer returned an incomplete draft.");
+  if (!result.workNote) throw new Error("The AI writer returned no personalization.");
   const openerIssues = openerQualityIssues(result.workNote);
   if (openerIssues.length) throw new Error(`The AI writer returned a generic opener. ${openerIssues.join(" ")}`);
   return result;
@@ -1239,15 +1239,7 @@ async function researchProspect(prospect, { approveSessionReveal = false } = {})
         };
         if (enriched.note) workNote = enriched.note;
         if (enriched.profile) {
-          profile = {
-            ...enriched.profile, ...profile,
-            name: profile.name || enriched.profile.name,
-            headline: profile.headline || enriched.profile.headline,
-            location: profile.location || enriched.profile.location,
-            about: profile.about || enriched.profile.about,
-            experiences: profile.experiences?.length ? profile.experiences : enriched.profile.experiences,
-            contactOut: { company: enriched.profile.company || null, industry: enriched.profile.industry || "", skills: enriched.profile.skills || [] },
-          };
+          profile = mergeEnrichedProfile(profile, enriched);
         }
       } catch (error) {
         const provider = providerLabel(preferredProvider(state.settings));
@@ -1266,6 +1258,7 @@ async function researchProspect(prospect, { approveSessionReveal = false } = {})
 
     const fallback = templateDraft(profile, workNote);
     const written = await callWriter(profile, workNote, fallback);
+    const personalizedDraft = templateDraft(profile, written.workNote || workNote);
 
     const researchedAt = new Date().toISOString();
     return {
@@ -1278,14 +1271,14 @@ async function researchProspect(prospect, { approveSessionReveal = false } = {})
       emailSource,
       contactDetails,
       workNote: written.workNote || workNote,
-      subject: written.subject,
-      body: written.body,
+      subject: personalizedDraft.subject,
+      body: personalizedDraft.body,
       status: isEmail(email) ? QUEUE_STATUS.READY : QUEUE_STATUS.NEEDS_EMAIL,
       error: isEmail(email) ? "" : contactOutError || (providerSourced
         ? "No verified email was returned by the configured contact-data providers."
         : "No email was available in LinkedIn Contact Info or the configured enrichment service."),
       researchedAt,
-      activity: [...(prospect.activity || []), { type: "researched", detail: "Profile researched and full AI draft generated", at: researchedAt }].slice(-80),
+      activity: [...(prospect.activity || []), { type: "researched", detail: "Profile researched and template personalization generated", at: researchedAt }].slice(-80),
       updatedAt: researchedAt,
     };
   } finally {
