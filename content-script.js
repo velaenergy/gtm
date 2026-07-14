@@ -3,12 +3,89 @@
   globalThis.__VELA_GTM_CONTENT_SCRIPT__ = true;
 
   const parser = globalThis.VelaLinkedInParser;
+  const launcher = globalThis.VelaLinkedInLauncher;
   if (!parser) {
     globalThis.__VELA_GTM_CONTENT_SCRIPT__ = false;
     throw new Error("Vela GTM profile parser did not load.");
   }
 
   const { cleanText, emailFromFlightResponse, emailFromMailto, memberIdFromMarkup, parseExperienceLines, parseTopCardLines, uniqueLines } = parser;
+
+  function mountVelaLauncher() {
+    if (!launcher || document.getElementById("vela-gtm-linkedin-launcher")) return;
+    const host = document.createElement("div");
+    host.id = "vela-gtm-linkedin-launcher";
+    host.style.cssText = "position:fixed;right:0;top:44vh;z-index:2147483646;display:none";
+    const shadow = host.attachShadow({ mode: "closed" });
+    const style = document.createElement("style");
+    style.textContent = `
+      :host { all: initial; }
+      button {
+        width: 40px;
+        min-height: 116px;
+        display: grid;
+        grid-template-rows: auto 1fr;
+        place-items: center;
+        gap: 8px;
+        padding: 11px 7px 12px;
+        border: 1px solid rgba(56, 189, 248, .52);
+        border-right: 0;
+        border-radius: 10px 0 0 10px;
+        background: linear-gradient(180deg, #0c1a24 0%, #071017 100%);
+        color: #f7fbff;
+        box-shadow: 0 12px 30px rgba(2, 8, 14, .28), inset 0 1px rgba(255,255,255,.07);
+        cursor: pointer;
+        font: 600 11px/1.1 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        letter-spacing: .055em;
+        transition: width .16s ease, background .16s ease, box-shadow .16s ease;
+      }
+      button:hover, button:focus-visible {
+        width: 44px;
+        outline: none;
+        background: linear-gradient(180deg, #102838 0%, #08151e 100%);
+        box-shadow: 0 14px 34px rgba(2, 8, 14, .34), inset 3px 0 #1688ff;
+      }
+      button:active { transform: translateX(1px); }
+      button[aria-busy="true"] { cursor: progress; opacity: .78; }
+      svg { width: 19px; height: 19px; overflow: visible; }
+      span { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; }
+      @media (prefers-reduced-motion: reduce) { button { transition: none; } }
+    `;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.title = "Open Vela GTM";
+    button.setAttribute("aria-label", "Open Vela GTM side panel");
+    button.innerHTML = `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 17.5c4.7-.4 8.4-4.3 9.1-10.9 2.6 3.4 4.8 6.4 8.9 7.8-5.4 2.9-11.1 4-18 3.1Z" fill="#f7fbff"/>
+        <path d="M4 20c5.8.3 11-.7 16-3.5" fill="none" stroke="#1688ff" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+      <span>VELA GTM</span>
+    `;
+    button.addEventListener("click", async () => {
+      if (button.getAttribute("aria-busy") === "true") return;
+      button.setAttribute("aria-busy", "true");
+      try {
+        const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_OPEN_SIDE_PANEL" });
+        if (!response?.ok) throw new Error(response?.error || "Could not open Vela GTM.");
+      } catch (error) {
+        button.title = error instanceof Error ? error.message : "Could not open Vela GTM.";
+      } finally {
+        button.removeAttribute("aria-busy");
+      }
+    });
+    shadow.append(style, button);
+    document.documentElement.append(host);
+
+    const updateVisibility = () => {
+      host.style.display = launcher.launcherVisibleForPath(window.location.pathname) ? "block" : "none";
+    };
+    updateVisibility();
+    window.addEventListener("popstate", updateVisibility);
+    setInterval(updateVisibility, 750);
+  }
+
+  mountVelaLauncher();
 
   function isVisible(node) {
     const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;

@@ -14,7 +14,7 @@ import {
   resolveTheme,
   templateVariables,
 } from "./lib/message.js";
-import { runAutomaticProfileWorkflow } from "./lib/profile-workflow.js";
+import { aiDraftDeliveryReady, runAutomaticProfileWorkflow } from "./lib/profile-workflow.js";
 import {
   GOOGLE_ACCOUNTS_STORAGE_KEY,
   GOOGLE_ACCOUNT_STORAGE_KEY,
@@ -40,6 +40,10 @@ import {
   createCampaign,
   normalizeCampaigns,
 } from "./lib/campaigns.js";
+import {
+  WORKSPACE_BACKUP_STORAGE_KEY,
+  workspaceRecoveryPatch,
+} from "./lib/workspace-persistence.js";
 
 const DEMO_PROFILE = {
   name: "Joshua Rivera",
@@ -96,6 +100,9 @@ const state = {
   googleAccounts: [],
   deliverySettings: { ...DEFAULT_DELIVERY_SETTINGS },
   deliveryLoading: false,
+  writerLoading: false,
+  aiDraftReady: false,
+  aiDraftError: "",
   contactOutCreditsRemaining: null,
   autoLookupAttempts: new Set(),
   refreshTimer: null,
@@ -221,6 +228,7 @@ function renderDelivery() {
   const mailto = state.settings.deliveryMethod === "mailto";
   const connected = !mailto && Boolean(state.googleAccount?.id);
   const recipients = deliveryRecipients();
+  const aiReady = aiDraftDeliveryReady(state);
   const options = [];
   if (mailto) options.push({ value: "", label: "Default email app" });
   else if (state.googleAccounts.length) options.push(...state.googleAccounts.map((account) => ({ value: account.id, label: account.email })));
@@ -236,9 +244,15 @@ function renderDelivery() {
   elements.deliveryAccountButton.classList.toggle("is-connected", connected);
   elements.scheduleToggle.checked = !mailto && state.deliverySettings.scheduleEnabled;
   elements.scheduleTime.value = state.deliverySettings.scheduleTime;
-  elements.scheduleToggle.disabled = !connected;
-  elements.scheduleTime.disabled = !connected || !state.deliverySettings.scheduleEnabled;
-  if (mailto) {
+  elements.scheduleToggle.disabled = !connected || !aiReady;
+  elements.scheduleTime.disabled = !connected || !aiReady || !state.deliverySettings.scheduleEnabled;
+  if (state.writerLoading) {
+    elements.scheduleHint.textContent = "AI is writing the complete email";
+    elements.sendEmailButton.textContent = "Writing email…";
+  } else if (!aiReady) {
+    elements.scheduleHint.textContent = state.aiDraftError || "AI draft required before sending";
+    elements.sendEmailButton.textContent = "AI draft required";
+  } else if (mailto) {
     elements.scheduleHint.textContent = "Manual send · scheduling unavailable";
     elements.sendEmailButton.textContent = recipients.length > 1 ? `Open ${recipients.length} emails` : "Open email app";
   } else if (!connected) {
@@ -252,8 +266,12 @@ function renderDelivery() {
     elements.scheduleHint.textContent = "Off · sends immediately";
     elements.sendEmailButton.textContent = recipients.length > 1 ? `Send to ${recipients.length}` : "Send email";
   }
-  elements.sendEmailButton.disabled = state.deliveryLoading || !recipients.length || !state.subject.trim() || !state.body.trim();
-  elements.sendEmailButton.title = !recipients.length
+  elements.sendEmailButton.disabled = state.deliveryLoading || !aiReady || !recipients.length;
+  elements.sendEmailButton.title = state.writerLoading
+    ? "Wait for Vela to finish writing the complete email"
+    : !state.aiDraftReady
+      ? state.aiDraftError || "A successful AI-written draft is required before delivery"
+      : !recipients.length
     ? !connected ? "Add a valid recipient email" : "Choose a verified recipient"
     : !connected
       ? mailto ? "Open a prefilled draft in the default email app" : "Open a prefilled Gmail draft and send it manually"
@@ -424,6 +442,8 @@ async function loadDraft() {
   state.subject = migratedDraft.subject;
   state.body = migratedDraft.body;
   state.personalizationModel = saved.personalizationModel || "";
+  state.aiDraftReady = Boolean(state.personalizationModel && state.subject.trim() && state.body.trim());
+  state.aiDraftError = "";
   state.composerDirty = Boolean(saved.subject || saved.body);
 
   renderProfile();
@@ -811,24 +831,27 @@ async function findProspectEmail({ automatic = false, personalize = true } = {})
 }
 
 function setWriterLoading(loading) {
+  state.writerLoading = loading;
   const button = elements.generateEmailButton;
   button.disabled = loading;
   button.classList.toggle("is-loading", loading);
   const label = button.querySelector("span");
   if (label) label.textContent = loading ? "Writing" : "Rewrite with AI";
+  renderDelivery();
 }
 
-async function generateEmail({ silent = false, announce = true, explicitRewrite = false } = {}) {
+async function generateEmail({ silent = false, announce = true, explicitRewrite = true } = {}) {
   if (!state.profile) return;
   const profileAtStart = state.profile;
   const isCurrentProfile = () => state.profile === profileAtStart;
-  if (!state.settings.openAIApiKey && !state.settings.writerEndpointUrl) {
-    if (!silent) { showToast("Add an OpenAI key in Settings first."); openSettings(); }
-    return false;
-  }
 
   try {
+    state.aiDraftReady = false;
+    state.aiDraftError = "";
     setWriterLoading(true);
+    if (!state.settings.openAIApiKey && !state.settings.writerEndpointUrl) {
+      throw new Error("Add an OpenAI key in Settings before sending.");
+    }
 
     const generationMode = writerGenerationMode(state.settings.aiGenerationMode, { explicitRewrite });
     const template = activeTemplate();
@@ -883,6 +906,8 @@ async function generateEmail({ silent = false, announce = true, explicitRewrite 
       rebuildComposer({ markClean: true });
     }
     state.personalizationModel = result.model || state.settings.openAIModel || "gpt-5.4-mini";
+    state.aiDraftReady = true;
+    state.aiDraftError = "";
     const providerLabel = state.emailSource.match(/(?:ContactOut|Apollo)/i)?.[0] || "provider";
     const contextLabel = state.emailVerified ? `verified ${providerLabel} research` : state.emailType === "linkedin" ? "LinkedIn profile context" : "profile context";
     elements.personalizationSource.textContent = `Written with ${state.personalizationModel} from ${contextLabel}`;
@@ -895,6 +920,9 @@ async function generateEmail({ silent = false, announce = true, explicitRewrite 
     return true;
   } catch (error) {
     if (!isCurrentProfile()) return false;
+    state.aiDraftReady = false;
+    state.aiDraftError = error instanceof Error ? error.message : "AI writing failed. Retry before sending.";
+    elements.personalizationSource.textContent = "AI draft failed — retry before sending";
     if (!silent) showToast(error instanceof Error ? error.message : "Could not generate the email.");
     return false;
   } finally {
@@ -983,7 +1011,10 @@ function renderCampaignList() {
 }
 
 async function loadCampaigns() {
-  const saved = await storage.get([CAMPAIGNS_STORAGE_KEY]);
+  const stored = await storage.get([CAMPAIGNS_STORAGE_KEY, QUEUE_STORAGE_KEY, WORKSPACE_BACKUP_STORAGE_KEY]);
+  const recovery = workspaceRecoveryPatch(stored);
+  if (Object.keys(recovery).length) await storage.set(recovery);
+  const saved = { ...stored, ...recovery };
   state.campaigns = normalizeCampaigns(saved[CAMPAIGNS_STORAGE_KEY] || []);
   if (state.isPreview && !state.campaigns.length) {
     state.campaigns = [
@@ -1025,6 +1056,10 @@ async function saveDeliverySettings() {
 }
 
 async function deliverEmail() {
+  if (!aiDraftDeliveryReady(state)) {
+    showToast(state.writerLoading ? "Wait for AI to finish writing this email." : state.aiDraftError || "Generate the complete email with AI before sending.");
+    return;
+  }
   const mailto = state.settings.deliveryMethod === "mailto";
   const connected = !mailto && Boolean(state.googleAccount?.id);
   const recipients = deliveryRecipients();
@@ -1120,10 +1155,13 @@ function bindEvents() {
     elements.newCampaignName.value = "";
     await saveToCampaign(campaign.id);
   });
-  elements.templateSelect.addEventListener("change", () => {
+  elements.templateSelect.addEventListener("change", async () => {
     state.templateId = elements.templateSelect.value;
     state.composerDirty = false;
+    state.aiDraftReady = false;
+    state.aiDraftError = "";
     rebuildComposer();
+    await generateEmail({ announce: true, explicitRewrite: true });
   });
 
   elements.workNote.addEventListener("input", () => {
@@ -1204,7 +1242,6 @@ function bindEvents() {
 function resetProfileWorkspace() {
   clearTimeout(state.draftTimer);
   setFindEmailLoading(false, "Find verified");
-  setWriterLoading(false);
   state.draftTimer = null;
   state.profile = null;
   state.activeTabId = null;
@@ -1219,8 +1256,12 @@ function resetProfileWorkspace() {
   state.subject = "";
   state.body = "";
   state.personalizationModel = "";
+  state.writerLoading = false;
+  state.aiDraftReady = false;
+  state.aiDraftError = "";
   state.composerDirty = false;
   state.contactOutCreditsRemaining = null;
+  setWriterLoading(false);
 }
 
 async function refreshActiveProfile() {
@@ -1256,21 +1297,25 @@ async function refreshActiveProfile() {
     }
     await loadCampaigns();
     if (refreshSequence !== state.refreshSequence) return;
-    showView("workspace");
-    if (previewTab === "draft") elements.bodyInput.focus({ preventScroll: true });
-
-    if (!state.isPreview) {
+    if (state.isPreview) {
+      state.personalizationModel = state.personalizationModel || "gpt-5.4-mini";
+      state.aiDraftReady = Boolean(state.subject.trim() && state.body.trim());
+      renderDelivery();
+    } else {
       const lookupKey = linkedInProfileIdentity(state.profile.url);
       if (lookupKey && !state.autoLookupAttempts.has(lookupKey)) {
         state.autoLookupAttempts.add(lookupKey);
-        runAutomaticProfileWorkflow({
+        await runAutomaticProfileWorkflow({
           researchEnabled: Boolean(state.settings.autoEnrich),
           hasVerifiedEmail: state.emailVerified,
           research: () => findProspectEmail({ automatic: true, personalize: false }),
-          write: () => generateEmail({ silent: true, announce: false }),
-        }).catch(() => {});
+          write: () => generateEmail({ silent: true, announce: false, explicitRewrite: true }),
+        }).catch(() => false);
       }
     }
+    if (refreshSequence !== state.refreshSequence) return;
+    showView("workspace");
+    if (previewTab === "draft") elements.bodyInput.focus({ preventScroll: true });
   } catch (error) {
     if (refreshSequence !== state.refreshSequence) return;
     showView("gate");

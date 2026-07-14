@@ -58,6 +58,16 @@
             </div>
             <span id="agentServerState" class="permission-state">Keys needed</span>
           </div>
+          <div class="credential-import-card">
+            <div class="credential-import-copy">
+              <span aria-hidden="true">↓</span>
+              <div>
+                <strong>Import provider credentials</strong>
+                <p>Load ContactOut, Apollo, OpenAI, and Google account-chooser IDs from one <code>.env</code> or JSON file.</p>
+              </div>
+            </div>
+            <button id="openCredentialImportButton" class="provider-test" type="button">Import credentials</button>
+          </div>
           <div id="contactOutSessionCard" class="contactout-session-card" data-state="checking">
             <div class="contactout-session-summary">
               <span class="contactout-session-dot" aria-hidden="true"></span>
@@ -183,7 +193,7 @@
                   </label>
                 </div>
               </div>
-              <div class="template-variable-row"><span>Insert a variable</span><code>{{firstName}}</code> <code>{{workNote}}</code> <code>{{workNoteSentence}}</code> <code>{{shortRole}}</code> <code>{{senderName}}</code> <code>{{calendarUrl}}</code></div>
+              <div class="template-variable-row"><span>Insert a variable</span><code>{{firstName}}</code> <code>{{workNote}}</code> <code>{{workNoteInline}}</code> <code>{{workNoteSentence}}</code> <code>{{shortRole}}</code> <code>{{senderName}}</code> <code>{{calendarUrl}}</code></div>
               <label class="field"><span>Message</span><textarea id="templateBody" rows="11" spellcheck="true"></textarea></label>
               <p class="template-required-note">Vela keeps at least one complete template so new drafts always have a fallback.</p>
             </div>
@@ -191,19 +201,14 @@
           <div class="template-ai-settings">
             <div>
               <strong>AI writing</strong>
-              <small>Choose how much Vela may change when personalizing any template.</small>
+              <small>Vela writes the complete email from grounded profile context before delivery unlocks.</small>
             </div>
-            <div class="generation-options" role="radiogroup" aria-label="AI generation mode">
+            <div class="generation-options" aria-label="AI generation mode">
               <label class="generation-option">
-                <input type="radio" name="aiGenerationMode" value="personalization" />
+                <input type="radio" name="aiGenerationMode" value="full" checked disabled />
                 <span class="generation-radio" aria-hidden="true"></span>
-                <span><strong>Personalization only</strong><small>AI writes <code>{{workNote}}</code>; the rest of your template stays exact.</small></span>
+                <span><strong>Complete email</strong><small>AI rewrites the subject and message as one cohesive draft while preserving grounded facts and your selected template’s intent.</small></span>
                 <em>Recommended</em>
-              </label>
-              <label class="generation-option">
-                <input type="radio" name="aiGenerationMode" value="full" />
-                <span class="generation-radio" aria-hidden="true"></span>
-                <span><strong>Entire email</strong><small>AI may rewrite the subject and message from grounded profile context.</small></span>
               </label>
             </div>
           </div>
@@ -240,20 +245,27 @@
                 <button id="connectGmailButton" class="gmail-connect" type="button">Add Gmail account</button>
               </div>
               <p id="gmailAccountDetail" class="gmail-account-detail">No Gmail sender connected.</p>
+              <div id="gmailChooserHint" class="gmail-chooser-hint" hidden>
+                <div>
+                  <strong>Reconnect with Google</strong>
+                  <span>Vela now uses Google’s account chooser for every Gmail sender.</span>
+                </div>
+                <button id="configureGoogleChooserButton" type="button">View setup</button>
+              </div>
               <div id="gmailAccountsList" class="gmail-accounts-list" aria-label="Connected Gmail senders"></div>
             </div>
             <p class="gmail-privacy-note">Google asks only for permission to send mail and identify the selected address. Vela cannot read the inbox.</p>
-            <details class="connection-details">
+            <details id="googleConnectionDetails" class="connection-details">
               <summary>Google connection setup</summary>
               <div class="google-chooser-setup">
                 <div class="google-chooser-heading">
                   <div><span>Google authorization</span><strong id="googleChooserState">Checking OAuth setup</strong></div>
-                  <span class="permission-state">Chrome OAuth ready</span>
+                  <span class="permission-state">Web OAuth ready</span>
                 </div>
                 <label class="field google-client-field">
-                  <span>Google Web OAuth client ID <em>Optional account chooser</em></span>
-                  <input id="googleWebClientId" type="text" inputmode="text" autocomplete="off" placeholder="…apps.googleusercontent.com" />
-                  <small>Add a Web application client only when you need to choose accounts outside the current Chrome profile.</small>
+                  <span>Google Web OAuth client ID <em>Built in</em></span>
+                  <input id="googleWebClientId" type="text" inputmode="text" autocomplete="off" readonly />
+                  <small>Every Gmail connection opens Google’s account chooser; Vela never depends on the Chrome profile account.</small>
                 </label>
                 <div class="google-redirect-row">
                   <div><span>Authorized redirect URI</span><code id="googleRedirectUri">Available after loading the extension</code></div>
@@ -289,10 +301,46 @@
 
         <div class="form-actions">
           <button id="resetButton" class="reset-button" type="button">Reset</button>
-          <button class="save-button" type="submit">Save changes</button>
+          <button id="saveButton" class="save-button" type="submit">Save changes</button>
         </div>
       </form>
     </main>
+    <div id="unsavedBar" class="unsaved-bar" role="status" aria-live="polite" hidden>
+      <div class="unsaved-bar-copy">
+        <span class="unsaved-dot" aria-hidden="true"></span>
+        <div><strong>Unsaved changes</strong><small>Save now to keep your updated settings.</small></div>
+      </div>
+      <div class="unsaved-bar-actions">
+        <button id="discardChangesButton" type="button">Discard</button>
+        <button id="stickySaveButton" type="button">Save changes</button>
+      </div>
+    </div>
+    <dialog id="credentialImportDialog" class="settings-dialog" aria-labelledby="credentialImportHeading">
+      <form id="credentialImportForm" class="credential-import-dialog" method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <span>Provider setup</span>
+            <h2 id="credentialImportHeading">Import credentials</h2>
+            <p>Choose a <code>.env</code> or JSON file, or paste its contents. Values stay in this Chrome profile and are not saved until you click <strong>Save changes</strong>.</p>
+          </div>
+          <button id="closeCredentialImportButton" class="dialog-close" type="button" aria-label="Close credential import">×</button>
+        </div>
+        <input id="credentialImportFile" type="file" accept=".env,.json,.txt,application/json,text/plain" hidden />
+        <div class="credential-import-actions">
+          <button id="chooseCredentialFileButton" class="provider-test" type="button">Choose .env or JSON</button>
+          <button id="pasteCredentialButton" class="provider-test" type="button">Paste from clipboard</button>
+        </div>
+        <label class="field import-text-field">
+          <span>Configuration</span>
+          <textarea id="credentialImportText" rows="10" spellcheck="false" placeholder="OPENAI_API_KEY=…&#10;APOLLO_API_KEY=…&#10;CONTACTOUT_API_KEY=…&#10;GOOGLE_WEB_CLIENT_ID=…apps.googleusercontent.com"></textarea>
+        </label>
+        <p id="credentialImportStatus" class="credential-import-status">Supported: ContactOut, Apollo, and OpenAI.</p>
+        <div class="dialog-actions">
+          <button id="cancelCredentialImportButton" type="button">Cancel</button>
+          <button id="applyCredentialImportButton" type="button">Import values</button>
+        </div>
+      </form>
+    </dialog>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script type="module" src="options.js"></script>
   </body>

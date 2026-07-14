@@ -14,11 +14,11 @@ import {
   GOOGLE_ACCOUNT_AUTH_MODE,
   GOOGLE_ACCOUNTS_STORAGE_KEY,
   GOOGLE_ACCOUNT_STORAGE_KEY,
-  getGoogleAuthToken,
   getGoogleWebAuthToken,
   googleAccountById,
-  googleOAuthStrategy,
+  googleAuthStrategyForAccount,
 } from "./lib/google-auth.js";
+import { DEFAULT_SETTINGS } from "./lib/message.js";
 import { GMAIL_SEND_SCOPE, GmailApiError, buildMimeMessage, sendGmailMessage, uniqueRecipients } from "./lib/gmail-send.js";
 import {
   SCHEDULED_SENDS_STORAGE_KEY,
@@ -28,6 +28,12 @@ import {
   normalizeScheduledSends,
 } from "./lib/schedule.js";
 import { QUEUE_STATUS, QUEUE_STORAGE_KEY, withActivity } from "./lib/queue.js";
+import { CAMPAIGNS_STORAGE_KEY } from "./lib/campaigns.js";
+import {
+  WORKSPACE_BACKUP_STORAGE_KEY,
+  createWorkspaceBackup,
+  workspaceRecoveryPatch,
+} from "./lib/workspace-persistence.js";
 import {
   DELIVERY_LOG_STORAGE_KEY,
   DELIVERY_STATUS,
@@ -37,6 +43,25 @@ import {
 async function enablePersistentSidePanel() {
   if (!chrome.sidePanel?.setPanelBehavior) return;
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+}
+
+async function openSidePanelForTab(sender = {}) {
+  const tabId = sender.tab?.id;
+  if (!Number.isInteger(tabId)) throw new Error("Vela GTM could not identify this LinkedIn tab.");
+  if (!chrome.sidePanel?.open) throw new Error("Update Chrome to open Vela GTM from LinkedIn.");
+  await chrome.sidePanel.open({ tabId });
+  return { opened: true };
+}
+
+async function maintainWorkspaceBackup() {
+  const saved = await chrome.storage.local.get([QUEUE_STORAGE_KEY, CAMPAIGNS_STORAGE_KEY, WORKSPACE_BACKUP_STORAGE_KEY]);
+  const recovery = workspaceRecoveryPatch(saved);
+  const queue = recovery[QUEUE_STORAGE_KEY] || (Array.isArray(saved[QUEUE_STORAGE_KEY]) ? saved[QUEUE_STORAGE_KEY] : []);
+  const campaigns = recovery[CAMPAIGNS_STORAGE_KEY] || (Array.isArray(saved[CAMPAIGNS_STORAGE_KEY]) ? saved[CAMPAIGNS_STORAGE_KEY] : []);
+  await chrome.storage.local.set({
+    ...recovery,
+    [WORKSPACE_BACKUP_STORAGE_KEY]: createWorkspaceBackup({ queue, campaigns }),
+  });
 }
 
 function alarmsApi() {
@@ -52,10 +77,13 @@ function requireAlarmsApi() {
 }
 
 enablePersistentSidePanel().catch((error) => console.error("Could not enable the Vela side panel.", error));
+maintainWorkspaceBackup().catch((error) => console.error("Could not maintain the Vela workspace backup.", error));
 
 async function settings() {
   const stored = await chrome.storage.local.get("velaGtmSettings");
-  return stored.velaGtmSettings || {};
+  const configured = { ...DEFAULT_SETTINGS, ...(stored.velaGtmSettings || {}) };
+  configured.googleWebClientId = DEFAULT_SETTINGS.googleWebClientId;
+  return configured;
 }
 
 async function recordProspectDelivery(prospectId, type, detail, { sent = false, at = new Date().toISOString() } = {}) {
@@ -80,11 +108,9 @@ async function savedGoogleAccount(expectedAccountId = "") {
 
 async function gmailToken(interactive = false, expectedAccountId = "") {
   const configured = await settings();
-  const manifest = chrome.runtime.getManifest();
-  const strategy = googleOAuthStrategy({ manifest, webClientId: configured.googleWebClientId });
   const account = await savedGoogleAccount(expectedAccountId);
+  const strategy = googleAuthStrategyForAccount({ account, webClientId: configured.googleWebClientId });
   if (strategy === GOOGLE_ACCOUNT_AUTH_MODE) {
-    if (account.authMode !== GOOGLE_ACCOUNT_AUTH_MODE) throw new Error("Google delivery configuration changed. Reconnect the Gmail sender in Settings.");
     const token = await getGoogleWebAuthToken({
       identity: chrome.identity,
       clientId: configured.googleWebClientId,
@@ -94,19 +120,10 @@ async function gmailToken(interactive = false, expectedAccountId = "") {
     });
     return { token, account };
   }
-  if (!strategy) throw new Error("Google delivery OAuth is not configured in manifest.json.");
-  if (account.authMode === GOOGLE_ACCOUNT_AUTH_MODE) throw new Error("Google delivery configuration changed. Reconnect the Gmail sender in Settings.");
-  const currentProfile = await chrome.identity.getProfileUserInfo({ accountStatus: "ANY" });
-  if (String(currentProfile?.id || "") !== account.id || String(currentProfile?.email || "").trim().toLowerCase() !== account.email) {
-    throw new Error("Chrome is signed in with a different Gmail sender. Reconnect the selected account in Settings.");
+  if (!strategy) {
+    throw new Error("Google delivery needs a valid Web OAuth client ID.");
   }
-  const token = await getGoogleAuthToken({
-    identity: chrome.identity,
-    manifest,
-    scopes: [GMAIL_SEND_SCOPE],
-    interactive,
-  });
-  return { token, account };
+  throw new Error("Google account-chooser authorization is unavailable.");
 }
 
 async function recordDelivery(input = {}) {
@@ -233,12 +250,13 @@ async function restoreScheduledAlarms() {
   }
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const supported = message?.type?.startsWith("VELA_GTM_PROVIDER_")
     || message?.type?.startsWith("VELA_GTM_CONTACTOUT_SESSION_")
-    || ["VELA_GTM_EMAIL_SEND", "VELA_GTM_EMAIL_SCHEDULE", "VELA_GTM_EMAIL_SCHEDULE_CANCEL"].includes(message?.type);
+    || ["VELA_GTM_EMAIL_SEND", "VELA_GTM_EMAIL_SCHEDULE", "VELA_GTM_EMAIL_SCHEDULE_CANCEL", "VELA_GTM_OPEN_SIDE_PANEL"].includes(message?.type);
   if (!supported) return false;
   (async () => {
+    if (message.type === "VELA_GTM_OPEN_SIDE_PANEL") return openSidePanelForTab(sender);
     if (message.type === "VELA_GTM_EMAIL_SEND") return sendDelivery(message.delivery);
     if (message.type === "VELA_GTM_EMAIL_SCHEDULE") return scheduleDelivery(message.delivery);
     if (message.type === "VELA_GTM_EMAIL_SCHEDULE_CANCEL") return cancelScheduledJob(message.id);
@@ -313,11 +331,18 @@ if (alarmsApi()?.onAlarm?.addListener) {
   });
 }
 
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local" || (!changes[QUEUE_STORAGE_KEY] && !changes[CAMPAIGNS_STORAGE_KEY])) return;
+  maintainWorkspaceBackup().catch((error) => console.error("Could not refresh the Vela workspace backup.", error));
+});
+
 chrome.runtime.onInstalled.addListener(() => {
   enablePersistentSidePanel().catch(() => {});
+  maintainWorkspaceBackup().catch(() => {});
   restoreScheduledAlarms().catch(() => {});
 });
 chrome.runtime.onStartup.addListener(() => {
   enablePersistentSidePanel().catch(() => {});
+  maintainWorkspaceBackup().catch(() => {});
   restoreScheduledAlarms().catch(() => {});
 });

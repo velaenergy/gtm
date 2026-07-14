@@ -3,14 +3,11 @@ import {
   GOOGLE_ACCOUNT_AUTH_MODE,
   GOOGLE_ACCOUNTS_STORAGE_KEY,
   GOOGLE_ACCOUNT_STORAGE_KEY,
-  GOOGLE_CHROME_PROFILE_AUTH_MODE,
   GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY,
   chooseGoogleAccount,
   disconnectGoogle,
-  getGoogleAuthToken,
   getGoogleWebAuthToken,
-  getPrimaryGoogleAccount,
-  googleOAuthConfigured,
+  googleAuthStrategyForAccount,
   googleOAuthStrategy,
   googleWebRedirectUri,
   normalizeGoogleAccounts,
@@ -19,10 +16,12 @@ import {
 } from "./lib/google-auth.js";
 import { GMAIL_SEND_SCOPE } from "./lib/gmail-send.js";
 import { clearDiagnostics, formatDiagnostic, readDiagnostics } from "./lib/diagnostics.js";
+import { parseCredentialImport } from "./lib/settings-import.js";
 
 const form = document.getElementById("settingsForm");
 const autoEnrich = document.getElementById("autoEnrich");
 const resetButton = document.getElementById("resetButton");
+const saveButton = document.getElementById("saveButton");
 const connectGmailButton = document.getElementById("connectGmailButton");
 const gmailState = document.getElementById("gmailState");
 const gmailAccountDetail = document.getElementById("gmailAccountDetail");
@@ -32,6 +31,9 @@ const googleWebClientId = document.getElementById("googleWebClientId");
 const googleChooserState = document.getElementById("googleChooserState");
 const googleRedirectUri = document.getElementById("googleRedirectUri");
 const copyGoogleRedirectButton = document.getElementById("copyGoogleRedirectButton");
+const googleConnectionDetails = document.getElementById("googleConnectionDetails");
+const gmailChooserHint = document.getElementById("gmailChooserHint");
+const configureGoogleChooserButton = document.getElementById("configureGoogleChooserButton");
 const contactOutSessionEnabled = document.getElementById("contactOutSessionEnabled");
 const contactOutSessionCard = document.getElementById("contactOutSessionCard");
 const contactOutSessionState = document.getElementById("contactOutSessionState");
@@ -74,6 +76,20 @@ const diagnosticLog = document.getElementById("diagnosticLog");
 const refreshDiagnosticsButton = document.getElementById("refreshDiagnosticsButton");
 const copyDiagnosticsButton = document.getElementById("copyDiagnosticsButton");
 const clearDiagnosticsButton = document.getElementById("clearDiagnosticsButton");
+const openCredentialImportButton = document.getElementById("openCredentialImportButton");
+const credentialImportDialog = document.getElementById("credentialImportDialog");
+const credentialImportForm = document.getElementById("credentialImportForm");
+const credentialImportFile = document.getElementById("credentialImportFile");
+const chooseCredentialFileButton = document.getElementById("chooseCredentialFileButton");
+const pasteCredentialButton = document.getElementById("pasteCredentialButton");
+const credentialImportText = document.getElementById("credentialImportText");
+const credentialImportStatus = document.getElementById("credentialImportStatus");
+const applyCredentialImportButton = document.getElementById("applyCredentialImportButton");
+const closeCredentialImportButton = document.getElementById("closeCredentialImportButton");
+const cancelCredentialImportButton = document.getElementById("cancelCredentialImportButton");
+const unsavedBar = document.getElementById("unsavedBar");
+const stickySaveButton = document.getElementById("stickySaveButton");
+const discardChangesButton = document.getElementById("discardChangesButton");
 
 const isExtension = Boolean(globalThis.chrome?.storage?.local);
 const previewTheme = !isExtension ? new URLSearchParams(location.search).get("theme") : null;
@@ -84,6 +100,8 @@ let editableTemplates = [];
 let activeTemplateId = "";
 let connectedGoogleAccounts = [];
 let selectedGoogleAccountId = "";
+let lastSavedSettings = { ...DEFAULT_SETTINGS };
+let hasUnsavedChanges = false;
 
 extensionId.textContent = isExtension ? chrome.runtime.id : "available after loading the extension";
 googleRedirectUri.textContent = isExtension ? googleWebRedirectUri(chrome.identity) : "Available after loading the extension";
@@ -96,6 +114,20 @@ function selectedTheme() {
 function applyTheme(preference = DEFAULT_SETTINGS.theme) {
   const prefersDark = globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches || false;
   document.documentElement.dataset.theme = resolveTheme(preference, prefersDark);
+}
+
+function cloneSettings(settings = {}) {
+  return JSON.parse(JSON.stringify(settings));
+}
+
+function setUnsavedChanges(dirty) {
+  hasUnsavedChanges = Boolean(dirty);
+  unsavedBar.hidden = !hasUnsavedChanges;
+  saveButton.classList.toggle("has-unsaved", hasUnsavedChanges);
+}
+
+function markUnsaved() {
+  setUnsavedChanges(true);
 }
 
 function activeEditableTemplate() {
@@ -177,6 +209,76 @@ function showToast(message) {
   toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 2600);
 }
 
+function resetCredentialImportDialog() {
+  credentialImportForm.reset();
+  credentialImportStatus.textContent = "Supported: ContactOut, Apollo, and OpenAI.";
+  credentialImportStatus.dataset.state = "idle";
+}
+
+function applyCredentialImport(text, sourceLabel = "configuration") {
+  const imported = parseCredentialImport(text);
+  if (imported.values.contactOutApiKey) contactOutApiKey.value = imported.values.contactOutApiKey;
+  if (imported.values.apolloApiKey) apolloApiKey.value = imported.values.apolloApiKey;
+  if (imported.values.openAIApiKey) openAIApiKey.value = imported.values.openAIApiKey;
+  renderContactOutApiStatus({ state: contactOutApiKey.value.trim() ? "needs-save" : "unconfigured" });
+  renderGoogleChooserSetup({ saved: false });
+  connectGmailButton.disabled = true;
+  updateAgentKeyState();
+  markUnsaved();
+  credentialImportStatus.textContent = `Found ${imported.labels.join(", ")} in ${sourceLabel}.`;
+  credentialImportStatus.dataset.state = "success";
+  showToast(`Imported ${imported.labels.length} credential${imported.labels.length === 1 ? "" : "s"}. Review and save changes.`);
+  credentialImportDialog.close();
+  credentialImportText.value = "";
+  credentialImportFile.value = "";
+}
+
+function showCredentialImportError(error) {
+  const message = error instanceof Error ? error.message : "Could not import those credentials.";
+  credentialImportStatus.textContent = message;
+  credentialImportStatus.dataset.state = "error";
+}
+
+openCredentialImportButton.addEventListener("click", () => {
+  resetCredentialImportDialog();
+  credentialImportDialog.showModal();
+  credentialImportText.focus();
+});
+closeCredentialImportButton.addEventListener("click", () => credentialImportDialog.close());
+cancelCredentialImportButton.addEventListener("click", () => credentialImportDialog.close());
+credentialImportDialog.addEventListener("close", () => {
+  credentialImportText.value = "";
+  credentialImportFile.value = "";
+});
+chooseCredentialFileButton.addEventListener("click", () => credentialImportFile.click());
+credentialImportFile.addEventListener("change", async () => {
+  const file = credentialImportFile.files?.[0];
+  if (!file) return;
+  try {
+    applyCredentialImport(await file.text(), file.name);
+  } catch (error) {
+    showCredentialImportError(error);
+  }
+});
+pasteCredentialButton.addEventListener("click", async () => {
+  try {
+    const text = await navigator.clipboard.readText();
+    credentialImportText.value = text;
+    applyCredentialImport(text, "the clipboard");
+  } catch (error) {
+    showCredentialImportError(error instanceof Error && error.message
+      ? error
+      : new Error("Chrome could not read the clipboard. Paste the configuration into the box instead."));
+  }
+});
+applyCredentialImportButton.addEventListener("click", () => {
+  try {
+    applyCredentialImport(credentialImportText.value, "the pasted configuration");
+  } catch (error) {
+    showCredentialImportError(error);
+  }
+});
+
 async function refreshDiagnostics() {
   if (!isExtension) return;
   const records = await readDiagnostics();
@@ -203,11 +305,10 @@ clearDiagnosticsButton.addEventListener("click", async () => {
 });
 
 function fillForm(settings) {
-  googleWebClientId.value = settings.googleWebClientId || "";
+  googleWebClientId.value = DEFAULT_SETTINGS.googleWebClientId;
   renderGoogleChooserSetup({ saved: true });
   renderGmailConnection({ oauthConfigured: Boolean(googleOAuthStrategy({
-    manifest: isExtension ? chrome.runtime.getManifest() : {},
-    webClientId: settings.googleWebClientId,
+    webClientId: DEFAULT_SETTINGS.googleWebClientId,
   })) });
   contactOutSessionEnabled.checked = settings.contactOutSessionEnabled !== false;
   contactOutApiKey.value = settings.contactOutApiKey || "";
@@ -221,8 +322,7 @@ function fillForm(settings) {
   renderDeliveryMethod();
   renderContactOutApiStatus({ state: contactOutApiKey.value.trim() ? "ready" : "unconfigured" });
   fillTemplates(settings);
-  const generationMode = settings.aiGenerationMode === "full" ? "full" : "personalization";
-  const generationInput = generationInputs.find((input) => input.value === generationMode);
+  const generationInput = generationInputs.find((input) => input.value === "full");
   if (generationInput) generationInput.checked = true;
   autoEnrich.checked = Boolean(settings.autoEnrich);
   const savedTheme = ["light", "dark", "system"].includes(settings.theme) ? settings.theme : DEFAULT_SETTINGS.theme;
@@ -235,7 +335,10 @@ function fillForm(settings) {
 
 async function loadSettings() {
   const result = await storage.get("velaGtmSettings");
-  fillForm({ ...DEFAULT_SETTINGS, ...(result.velaGtmSettings || {}) });
+  lastSavedSettings = { ...DEFAULT_SETTINGS, ...(result.velaGtmSettings || {}) };
+  lastSavedSettings.googleWebClientId = DEFAULT_SETTINGS.googleWebClientId;
+  fillForm(lastSavedSettings);
+  setUnsavedChanges(false);
 }
 
 function updateAgentKeyState() {
@@ -274,13 +377,12 @@ form.addEventListener("submit", async (event) => {
     const savedTemplates = normalizeEmailTemplates(editableTemplates);
     if (!savedTemplates.length) throw new Error("Keep at least one complete email template.");
 
-    await storage.set({
-      velaGtmSettings: {
+    const nextSettings = {
         endpointUrl: "",
         apiToken: "",
         writerEndpointUrl: "",
         writerToken: "",
-        googleWebClientId: googleWebClientId.value.trim(),
+        googleWebClientId: DEFAULT_SETTINGS.googleWebClientId,
         contactOutSessionEnabled: contactOutSessionEnabled.checked,
         contactOutApiKey: contactOutApiKey.value.trim(),
         apolloApiKey: apolloApiKey.value.trim(),
@@ -289,7 +391,7 @@ form.addEventListener("submit", async (event) => {
         includeContactOutPhone: includeContactOutPhone.checked,
         allowMultipleRecipients: allowMultipleRecipients.checked,
         deliveryMethod: deliveryMethodInputs.find((input) => input.checked)?.value === "mailto" ? "mailto" : "gmail",
-        aiGenerationMode: generationInputs.find((input) => input.checked)?.value || "personalization",
+        aiGenerationMode: "full",
         emailTemplates: savedTemplates,
         templateSubject: savedTemplates[0].subject,
         templateBody: savedTemplates[0].body,
@@ -297,8 +399,10 @@ form.addEventListener("submit", async (event) => {
         theme: selectedTheme(),
         senderName: savedTemplates[0].senderName || DEFAULT_SETTINGS.senderName,
         calendarUrl: savedTemplates[0].calendarUrl || DEFAULT_SETTINGS.calendarUrl,
-      },
-    });
+    };
+    await storage.set({ velaGtmSettings: nextSettings });
+    lastSavedSettings = cloneSettings(nextSettings);
+    setUnsavedChanges(false);
     renderContactOutApiStatus({ state: contactOutApiKey.value.trim() ? "ready" : "unconfigured" });
     renderGoogleChooserSetup({ saved: true });
     if (isExtension) await probeGmailConnection();
@@ -310,6 +414,8 @@ form.addEventListener("submit", async (event) => {
 });
 
 themeInputs.forEach((input) => input.addEventListener("change", () => applyTheme(selectedTheme())));
+form.addEventListener("input", markUnsaved);
+form.addEventListener("change", markUnsaved);
 templateName.addEventListener("input", () => {
   commitTemplateFields();
   templateEditorHeading.textContent = templateName.value.trim() || "Untitled template";
@@ -335,6 +441,7 @@ addTemplateButton.addEventListener("click", () => {
   activeTemplateId = id;
   renderTemplateEditor();
   templateName.select();
+  markUnsaved();
 });
 deleteTemplateButton.addEventListener("click", () => {
   if (editableTemplates.length <= 1) return;
@@ -342,6 +449,7 @@ deleteTemplateButton.addEventListener("click", () => {
   editableTemplates = editableTemplates.filter((template) => template.id !== activeTemplateId);
   activeTemplateId = editableTemplates[Math.max(0, index - 1)]?.id || editableTemplates[0].id;
   renderTemplateEditor();
+  markUnsaved();
 });
 
 for (const button of document.querySelectorAll("[data-secret-toggle]")) {
@@ -357,7 +465,21 @@ for (const button of document.querySelectorAll("[data-secret-toggle]")) {
 
 resetButton.addEventListener("click", () => {
   fillForm(DEFAULT_SETTINGS);
+  markUnsaved();
   showToast("Defaults restored. Save to apply them.");
+});
+
+stickySaveButton.addEventListener("click", () => form.requestSubmit(saveButton));
+discardChangesButton.addEventListener("click", () => {
+  fillForm(cloneSettings(lastSavedSettings));
+  setUnsavedChanges(false);
+  showToast("Unsaved changes discarded.");
+});
+
+globalThis.addEventListener("beforeunload", (event) => {
+  if (!hasUnsavedChanges) return;
+  event.preventDefault();
+  event.returnValue = "";
 });
 
 contactOutApiKey.addEventListener("input", () => {
@@ -371,11 +493,6 @@ contactOutSessionEnabled.addEventListener("change", () => {
 });
 apolloApiKey.addEventListener("input", updateAgentKeyState);
 openAIApiKey.addEventListener("input", updateAgentKeyState);
-googleWebClientId.addEventListener("input", () => {
-  renderGoogleChooserSetup({ saved: false });
-  connectGmailButton.disabled = true;
-});
-
 function renderDeliveryMethod() {
   const mailto = deliveryMethodInputs.find((input) => input.checked)?.value === "mailto";
   gmailConnectionSetup.hidden = mailto;
@@ -549,17 +666,28 @@ testApolloButton.addEventListener("click", async () => {
 });
 
 function renderGoogleChooserSetup({ saved = false } = {}) {
-  const manifest = isExtension ? chrome.runtime.getManifest() : {};
-  const strategy = googleOAuthStrategy({ manifest, webClientId: googleWebClientId.value });
+  const strategy = googleOAuthStrategy({ webClientId: googleWebClientId.value });
   googleChooserState.textContent = !strategy
     ? "OAuth setup needed"
     : !saved
       ? "Save changes to enable"
-      : strategy === GOOGLE_ACCOUNT_AUTH_MODE
-        ? "Web account chooser ready"
-        : "Chrome profile OAuth ready";
+      : "Web account chooser ready";
   googleChooserState.dataset.state = strategy ? saved ? "ready" : "needs-save" : "missing";
 }
+
+function googleChooserReady({ webClientId = "" } = {}) {
+  return googleOAuthStrategy({ webClientId }) === GOOGLE_ACCOUNT_AUTH_MODE;
+}
+
+function revealGoogleChooserSetup() {
+  gmailChooserHint.hidden = false;
+  googleConnectionDetails.open = true;
+  googleWebClientId.focus({ preventScroll: true });
+  googleConnectionDetails.scrollIntoView({ behavior: "smooth", block: "center" });
+  showToast("The Google Web OAuth account chooser is built into this Vela release.");
+}
+
+configureGoogleChooserButton.addEventListener("click", revealGoogleChooserSetup);
 
 function renderConnectedGoogleAccounts(accounts = connectedGoogleAccounts, selectedId = selectedGoogleAccountId) {
   const fragment = document.createDocumentFragment();
@@ -623,28 +751,24 @@ function renderGmailConnection({ connected = false, oauthConfigured = true, chec
   gmailState.title = detail;
   connectGmailButton.textContent = connectedGoogleAccounts.length ? "Add another Gmail" : "Add Gmail account";
   connectGmailButton.disabled = checking || !oauthConfigured;
+  gmailChooserHint.hidden = !connectedGoogleAccounts.length || googleChooserReady({ webClientId: lastSavedSettings.googleWebClientId });
   renderConnectedGoogleAccounts();
   gmailAccountDetail.textContent = email
-    ? `${connectedGoogleAccounts.length} connected · sending from ${email}${authMode === GOOGLE_ACCOUNT_AUTH_MODE ? " · explicitly selected" : " · Chrome profile account"}`
-    : detail || (oauthConfigured ? "No Gmail sender connected." : "Configure the Chrome extension OAuth client in manifest.json.");
+    ? `${connectedGoogleAccounts.length} connected · sending from ${email} · explicitly selected`
+    : detail || (oauthConfigured ? "No Gmail sender connected." : "The built-in Google Web OAuth client is unavailable.");
 }
 
 async function probeGmailConnection() {
   if (!isExtension) return;
-  const manifest = chrome.runtime.getManifest();
-  const configuredSettings = (await storage.get("velaGtmSettings")).velaGtmSettings || {};
-  const strategy = googleOAuthStrategy({ manifest, webClientId: configuredSettings.googleWebClientId });
-  const oauthConfigured = Boolean(strategy);
+  const configuredSettings = { ...DEFAULT_SETTINGS };
+  const oauthConfigured = Boolean(googleOAuthStrategy({ webClientId: configuredSettings.googleWebClientId }));
   renderGmailConnection({ checking: true, oauthConfigured });
   try {
     const state = await readGoogleAccounts();
     if (!state.selected?.id) { renderGmailConnection({ oauthConfigured }); return; }
-    let account = state.selected;
+    const account = state.selected;
+    const strategy = googleAuthStrategyForAccount({ account, webClientId: configuredSettings.googleWebClientId });
     if (strategy === GOOGLE_ACCOUNT_AUTH_MODE) {
-      if (account.authMode !== GOOGLE_ACCOUNT_AUTH_MODE) {
-        renderGmailConnection({ oauthConfigured, detail: "Google delivery configuration changed. Add this Gmail sender with the Web account chooser." });
-        return;
-      }
       await getGoogleWebAuthToken({
         identity: chrome.identity,
         clientId: configuredSettings.googleWebClientId,
@@ -652,18 +776,11 @@ async function probeGmailConnection() {
         expectedEmail: account.email,
       });
     } else {
-      if (account.authMode === GOOGLE_ACCOUNT_AUTH_MODE) {
-        renderGmailConnection({ oauthConfigured, detail: "Google delivery configuration changed. Reconnect the Chrome profile sender." });
-        return;
-      }
-      if (!googleOAuthConfigured(manifest)) {
-        renderGmailConnection({ oauthConfigured, detail: "The Chrome-extension OAuth client is not configured." });
-        return;
-      }
-      await getGoogleAuthToken({ identity: chrome.identity, manifest, scopes: [GMAIL_SEND_SCOPE], interactive: false });
-      account = { ...(await getPrimaryGoogleAccount(chrome.identity)), authMode: GOOGLE_CHROME_PROFILE_AUTH_MODE };
-      const accounts = connectedGoogleAccounts.filter((item) => item.authMode !== GOOGLE_CHROME_PROFILE_AUTH_MODE || item.id === account.id);
-      await persistGoogleAccounts(upsertGoogleAccount(accounts, account), account.id);
+      renderGmailConnection({
+        oauthConfigured,
+        detail: "This sender needs to be reconnected through the Google account chooser.",
+      });
+      return;
     }
     renderGmailConnection({ connected: true, oauthConfigured, email: account.email || "Google account", authMode: account.authMode });
   } catch (error) {
@@ -676,29 +793,20 @@ connectGmailButton.addEventListener("click", async () => {
     showToast("Load the extension in Chrome to connect a Gmail sender.");
     return;
   }
-  const manifest = chrome.runtime.getManifest();
-  const configuredSettings = (await storage.get("velaGtmSettings")).velaGtmSettings || {};
-  const strategy = googleOAuthStrategy({ manifest, webClientId: configuredSettings.googleWebClientId });
+  const configuredSettings = { ...DEFAULT_SETTINGS };
+  const strategy = googleOAuthStrategy({ webClientId: configuredSettings.googleWebClientId });
   if (!strategy) {
     renderGmailConnection({ oauthConfigured: false });
-    showToast("Configure the Chrome extension OAuth client in manifest.json first.");
+    showToast("The built-in Google Web OAuth client is unavailable.");
     return;
   }
   try {
     connectGmailButton.disabled = true;
-    const selected = strategy === GOOGLE_ACCOUNT_AUTH_MODE
-      ? await chooseGoogleAccount({
-          identity: chrome.identity,
-          clientId: configuredSettings.googleWebClientId,
-          scopes: [GMAIL_SEND_SCOPE],
-        })
-      : {
-          ...(await getPrimaryGoogleAccount(chrome.identity)),
-          authMode: GOOGLE_CHROME_PROFILE_AUTH_MODE,
-        };
-    if (strategy === GOOGLE_CHROME_PROFILE_AUTH_MODE) {
-      await getGoogleAuthToken({ identity: chrome.identity, manifest, scopes: [GMAIL_SEND_SCOPE], interactive: true });
-    }
+    const selected = await chooseGoogleAccount({
+      identity: chrome.identity,
+      clientId: configuredSettings.googleWebClientId,
+      scopes: [GMAIL_SEND_SCOPE],
+    });
     await persistGoogleAccounts(upsertGoogleAccount(connectedGoogleAccounts, selected), selected.id);
     renderGmailConnection({ connected: true, oauthConfigured: true, email: selected.email, authMode: selected.authMode });
     showToast(`${selected.email} connected for direct Gmail sending.`);
@@ -717,8 +825,8 @@ gmailAccountsList.addEventListener("click", async (event) => {
     if (!account) return;
     await disconnectGoogle(chrome.identity, { authMode: account.authMode });
     const next = await persistGoogleAccounts(connectedGoogleAccounts.filter((item) => item.id !== account.id), selectedGoogleAccountId);
-    const configuredSettings = (await storage.get("velaGtmSettings")).velaGtmSettings || {};
-    renderGmailConnection({ connected: Boolean(next), oauthConfigured: Boolean(googleOAuthStrategy({ manifest: chrome.runtime.getManifest(), webClientId: configuredSettings.googleWebClientId })), email: next?.email, authMode: next?.authMode });
+    const webClientId = DEFAULT_SETTINGS.googleWebClientId;
+    renderGmailConnection({ connected: Boolean(next), oauthConfigured: Boolean(googleOAuthStrategy({ webClientId })), email: next?.email, authMode: next?.authMode });
     showToast(`${account.email} removed.`);
     return;
   }

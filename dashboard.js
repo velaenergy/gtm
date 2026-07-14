@@ -58,6 +58,10 @@ import {
   deliveryOutcomeCounts,
   summarizeDailySends,
 } from "./lib/analytics.js";
+import {
+  WORKSPACE_BACKUP_STORAGE_KEY,
+  workspaceRecoveryPatch,
+} from "./lib/workspace-persistence.js";
 
 const isExtension = Boolean(globalThis.chrome?.runtime?.id);
 const pageParams = new URLSearchParams(location.search);
@@ -1172,19 +1176,19 @@ async function callWriter(profile, workNote, draft) {
     calendarUrl: template.calendarUrl || state.settings.calendarUrl,
   };
   if (state.settings.openAIApiKey) {
-    const input = buildWriterRequest(profile, templateSettings, workNote, draft);
+    const input = buildWriterRequest(profile, templateSettings, workNote, draft, { generationMode: "full", template });
     const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_PROVIDER_WRITE", input });
     if (!response?.ok) throw new Error(response?.error || "OpenAI writing failed.");
     const result = normalizeWriterResponse({ data: response.data, model: state.settings.openAIModel || "gpt-5.4-mini" }, profile);
     const openerIssues = openerQualityIssues(result.workNote);
     if (openerIssues.length) throw new Error(`The AI writer returned a generic opener. ${openerIssues.join(" ")}`);
-    return state.settings.aiGenerationMode === "full" ? result : { ...templateDraft(profile, result.workNote || workNote), workNote: result.workNote || workNote, model: result.model };
+    return result;
   }
   if (!state.settings.writerEndpointUrl) throw new Error("Add an OpenAI key in Settings before researching prospects.");
   const headers = { "Content-Type": "application/json", Accept: "application/json" };
   if (state.settings.writerToken) headers.Authorization = `Bearer ${state.settings.writerToken}`;
   const response = await fetch(state.settings.writerEndpointUrl, {
-    method: "POST", headers, body: JSON.stringify(buildWriterRequest(profile, templateSettings, workNote, draft)),
+    method: "POST", headers, body: JSON.stringify(buildWriterRequest(profile, templateSettings, workNote, draft, { generationMode: "full", template })),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || `AI writer returned ${response.status}.`);
@@ -1192,7 +1196,7 @@ async function callWriter(profile, workNote, draft) {
   if (!result.subject || !result.body) throw new Error("The AI writer returned an incomplete draft.");
   const openerIssues = openerQualityIssues(result.workNote);
   if (openerIssues.length) throw new Error(`The AI writer returned a generic opener. ${openerIssues.join(" ")}`);
-  return state.settings.aiGenerationMode === "full" ? result : { ...templateDraft(profile, result.workNote || workNote), workNote: result.workNote || workNote, model: result.model };
+  return result;
 }
 
 async function researchProspect(prospect, { approveSessionReveal = false } = {}) {
@@ -1281,7 +1285,7 @@ async function researchProspect(prospect, { approveSessionReveal = false } = {})
         ? "No verified email was returned by the configured contact-data providers."
         : "No email was available in LinkedIn Contact Info or the configured enrichment service."),
       researchedAt,
-      activity: [...(prospect.activity || []), { type: "researched", detail: state.settings.aiGenerationMode === "full" ? "Profile researched and full draft generated" : "Profile researched and personalization prepared", at: researchedAt }].slice(-80),
+      activity: [...(prospect.activity || []), { type: "researched", detail: "Profile researched and full AI draft generated", at: researchedAt }].slice(-80),
       updatedAt: researchedAt,
     };
   } finally {
@@ -1823,7 +1827,10 @@ function bindEvents() {
 }
 
 async function initialize() {
-  const saved = await storage.get([QUEUE_STORAGE_KEY, CAMPAIGNS_STORAGE_KEY, SCHEDULED_SENDS_STORAGE_KEY, DELIVERY_LOG_STORAGE_KEY, WORKSPACE_STATE_STORAGE_KEY, "velaGtmSettings"]);
+  const stored = await storage.get([QUEUE_STORAGE_KEY, CAMPAIGNS_STORAGE_KEY, WORKSPACE_BACKUP_STORAGE_KEY, SCHEDULED_SENDS_STORAGE_KEY, DELIVERY_LOG_STORAGE_KEY, WORKSPACE_STATE_STORAGE_KEY, "velaGtmSettings"]);
+  const recovery = workspaceRecoveryPatch(stored);
+  if (Object.keys(recovery).length) await storage.set(recovery);
+  const saved = { ...stored, ...recovery };
   const savedWorkspace = saved[WORKSPACE_STATE_STORAGE_KEY] || {};
   state.settings = { ...DEFAULT_SETTINGS, ...(saved.velaGtmSettings || {}) };
   if (["light", "dark"].includes(previewTheme)) state.settings.theme = previewTheme;

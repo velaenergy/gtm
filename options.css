@@ -184,6 +184,15 @@ form { display: grid; gap: 16px; }
 .permission-state.has-warning { color: var(--amber); }
 .permission-state.has-error { color: var(--danger); }
 
+.credential-import-card { display:flex; align-items:center; justify-content:space-between; gap:18px; margin-bottom:16px; padding:14px 15px; border:1px solid color-mix(in srgb,var(--blue) 22%,var(--border)); border-radius:10px; background:color-mix(in srgb,var(--blue) 4%,var(--surface)); }
+.credential-import-copy { display:flex; align-items:flex-start; gap:11px; min-width:0; }
+.credential-import-copy > span { display:grid; place-items:center; flex:0 0 auto; width:26px; height:26px; border-radius:7px; background:color-mix(in srgb,var(--blue) 11%,var(--surface)); color:var(--blue); font-size:15px; }
+.credential-import-copy > div { display:grid; gap:3px; }
+.credential-import-copy strong { font-size:13px; font-weight:500; }
+.credential-import-copy p { margin:0; color:var(--text-secondary); font-size:11px; line-height:1.45; }
+.credential-import-copy code { font-family:ui-monospace,"SFMono-Regular",Menlo,monospace; }
+.credential-import-card .provider-test { flex:0 0 auto; }
+
 .writer-statuses { display: flex; align-items: center; gap: 6px; }
 .model-chip {
   padding: 5px 7px;
@@ -210,6 +219,11 @@ form { display: grid; gap: 16px; }
 .gmail-account-panel-head h3 { margin:0 0 4px; font-size:15px; font-weight:500; }
 .gmail-account-panel-head p { margin:0; color:var(--text-secondary); font-size:12px; line-height:1.45; }
 .gmail-account-detail { margin:14px 0 0; color:var(--text-secondary); font-size:12px; }
+.gmail-chooser-hint { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-top:12px; padding:11px 12px; border:1px solid color-mix(in srgb,var(--amber) 34%,var(--border)); border-radius:8px; background:color-mix(in srgb,var(--amber) 7%,var(--surface)); }
+.gmail-chooser-hint > div { display:grid; gap:3px; }
+.gmail-chooser-hint strong { color:var(--amber); font-size:11px; font-weight:500; }
+.gmail-chooser-hint span { color:var(--text-secondary); font-size:10px; line-height:1.45; }
+.gmail-chooser-hint button { flex:0 0 auto; height:32px; padding:0 10px; border:1px solid color-mix(in srgb,var(--amber) 40%,var(--border)); border-radius:7px; background:var(--surface); color:var(--text); font-size:10px; cursor:pointer; }
 .gmail-accounts-list { display:grid; gap:8px; margin-top:12px; }
 .gmail-account-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:center; padding:12px 13px; border:1px solid var(--border); border-radius:9px; background:var(--surface); }
 .gmail-account-row.is-selected { border-color:color-mix(in srgb,var(--green) 42%,var(--border)); background:color-mix(in srgb,var(--green) 6%,var(--surface)); }
@@ -568,6 +582,8 @@ form { display: grid; gap: 16px; }
   padding-top: 4px;
 }
 
+.save-button.has-unsaved { box-shadow:0 0 0 3px color-mix(in srgb,var(--amber) 22%,transparent); }
+
 .reset-button,
 .save-button {
   height: 40px;
@@ -611,6 +627,36 @@ form { display: grid; gap: 16px; }
 
 .toast.is-visible { opacity: 1; transform: none; }
 
+.unsaved-bar { position:fixed; z-index:50; right:24px; bottom:22px; left:24px; display:flex; align-items:center; justify-content:space-between; gap:24px; width:min(700px,calc(100% - 48px)); margin-inline:auto; padding:12px 13px 12px 15px; border:1px solid color-mix(in srgb,var(--amber) 45%,var(--border)); border-radius:12px; background:color-mix(in srgb,var(--surface) 94%,transparent); box-shadow:0 16px 48px rgba(0,0,0,.22),0 0 0 1px color-mix(in srgb,var(--amber) 7%,transparent); backdrop-filter:blur(16px); }
+.unsaved-bar-copy { display:flex; align-items:center; gap:11px; min-width:0; }
+.unsaved-dot { flex:0 0 auto; width:9px; height:9px; border-radius:50%; background:var(--amber); box-shadow:0 0 0 5px color-mix(in srgb,var(--amber) 13%,transparent); }
+.unsaved-bar-copy > div { display:grid; gap:2px; }
+.unsaved-bar-copy strong { font-size:12px; font-weight:500; }
+.unsaved-bar-copy small { color:var(--text-secondary); font-size:10.5px; }
+.unsaved-bar-actions { display:flex; gap:8px; }
+.unsaved-bar-actions button { height:35px; padding:0 12px; border:1px solid var(--border-strong); border-radius:7px; background:var(--surface); color:var(--text-secondary); font-size:11px; cursor:pointer; }
+.unsaved-bar-actions #stickySaveButton { border-color:var(--text); background:var(--text); color:var(--bg); }
+.unsaved-bar:not([hidden]) ~ .toast { bottom:92px; }
+
+.settings-dialog { width:min(620px,calc(100% - 32px)); max-height:min(760px,calc(100vh - 48px)); padding:0; overflow:auto; border:1px solid var(--border-strong); border-radius:14px; background:var(--surface); color:var(--text); box-shadow:0 28px 90px rgba(0,0,0,.38); font-family:"Aeonik Pro",sans-serif; }
+.settings-dialog::backdrop { background:rgba(0,0,0,.56); backdrop-filter:blur(3px); }
+.credential-import-dialog { padding:22px; }
+.dialog-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }
+.dialog-heading > div { display:grid; gap:5px; }
+.dialog-heading > div > span { color:var(--blue); font-size:10px; letter-spacing:.09em; text-transform:uppercase; }
+.dialog-heading h2 { margin:0; font-size:20px; font-weight:500; }
+.dialog-heading p { margin:0; color:var(--text-secondary); font-size:12px; line-height:1.5; }
+.dialog-heading code { font-family:ui-monospace,"SFMono-Regular",Menlo,monospace; }
+.dialog-close { flex:0 0 auto; width:32px; height:32px; border:1px solid var(--border); border-radius:8px; background:var(--surface-subtle); color:var(--text-secondary); font-size:20px; line-height:1; cursor:pointer; }
+.credential-import-actions { display:flex; gap:8px; margin-top:18px; }
+.import-text-field textarea { min-height:180px; font:12px/1.55 ui-monospace,"SFMono-Regular",Menlo,monospace; }
+.credential-import-status { min-height:18px; margin:10px 0 0; color:var(--text-tertiary); font-size:11px; line-height:1.45; }
+.credential-import-status[data-state="success"] { color:var(--green); }
+.credential-import-status[data-state="error"] { color:var(--danger); }
+.dialog-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:18px; padding-top:16px; border-top:1px solid var(--border); }
+.dialog-actions button { height:38px; padding:0 13px; border:1px solid var(--border-strong); border-radius:8px; background:var(--surface); color:var(--text-secondary); font-size:11px; cursor:pointer; }
+.dialog-actions #applyCredentialImportButton { border-color:var(--text); background:var(--text); color:var(--bg); }
+
 @media (max-width: 620px) {
   .topbar { padding: 0 18px; }
   .settings-page { width: calc(100% - 28px); padding-top: 40px; }
@@ -622,6 +668,14 @@ form { display: grid; gap: 16px; }
   .contactout-api-check { align-items:flex-start; flex-direction:column; }
   .google-chooser-heading,
   .google-redirect-row { align-items:flex-start; flex-direction:column; }
+  .credential-import-card,
+  .gmail-chooser-hint { align-items:stretch; flex-direction:column; }
+  .credential-import-card .provider-test,
+  .gmail-chooser-hint button { width:100%; }
+  .unsaved-bar { right:12px; bottom:12px; left:12px; align-items:stretch; width:auto; flex-direction:column; gap:10px; }
+  .unsaved-bar-actions { display:grid; grid-template-columns:1fr 1fr; }
+  .unsaved-bar-actions button { width:100%; }
+  .unsaved-bar:not([hidden]) ~ .toast { bottom:142px; }
 }
 
 @media (max-width: 760px) {

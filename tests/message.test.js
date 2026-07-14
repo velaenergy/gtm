@@ -10,6 +10,7 @@ import {
   deliveryRecipientEmails,
   emailTemplates,
   gmailComposeUrl,
+  inlinePhrase,
   mailtoComposeUrl,
   initialsFor,
   isEmail,
@@ -101,18 +102,33 @@ test("buildWorkNote turns experience into a specific, grammatical phrase", () =>
 
 test("the default outreach play resolves all variables", () => {
   const opener = "You have led operations across Stream Data Centers, AWS, and the Navy; I wanted to ask where large loads lose the most time getting powered.";
+  const inlineOpener = "you have led operations across Stream Data Centers, AWS, and the Navy; I wanted to ask where large loads lose the most time getting powered";
   const variables = templateVariables(profile, { senderName: "Tarun", calendarUrl: "https://cal.com/team/velaenergy" }, opener);
   const message = applyTemplate(TEMPLATES[0], variables);
   assert.match(message.subject, /Quick intro/);
   assert.match(message.body, /^Hi Joshua,/);
   assert.match(message.body, /a16z Speedrun and Z Fellows/);
-  assert.ok(message.body.indexOf("I'm Tarun, CEO") < message.body.indexOf(opener));
-  assert.ok(message.body.indexOf(opener) < message.body.indexOf("We're building AI agents"));
-  assert.doesNotMatch(message.body, /impressed by/i);
+  assert.ok(message.body.indexOf(inlineOpener) < message.body.indexOf("I'm Tarun, CEO"));
+  assert.match(message.body, /really impressed by/i);
+  assert.match(message.body, /Tony \(my co-founder\)/);
+  assert.match(message.body, /AI agent products that help large energy loads get powered on faster/);
+  assert.match(message.body, /would love to pick your brain/i);
   assert.match(message.body, /20-30 minutes/);
   assert.doesNotMatch(message.body, /\[[^\]]+\]\(https?:\/\//);
   assert.doesNotMatch(message.body, /20[–—]30/);
   assert.doesNotMatch(message.body, /{{\w+}}/);
+});
+
+test("inline personalization is grammatical inside the pick-your-brain template", () => {
+  const workNote = "Your current role in information security at Atlantic Union Bank seems directly relevant to how large systems stay reliable under pressure..";
+  assert.equal(
+    inlinePhrase(workNote),
+    "your current role in information security at Atlantic Union Bank seems directly relevant to how large systems stay reliable under pressure",
+  );
+  const variables = templateVariables({ name: "Micah" }, DEFAULT_SETTINGS, workNote);
+  const message = applyTemplate(TEMPLATES[0], variables);
+  assert.match(message.body, /impressed by your current role/);
+  assert.doesNotMatch(message.body, /\.\./);
 });
 
 test("migrates only the untouched legacy quick-intro template", () => {
@@ -153,6 +169,36 @@ Best,
   );
   assert.equal(migratedDraft.subject, TEMPLATES[0].subject);
   assert.match(migratedDraft.body, /I'm Tarun, CEO of Vela Energy/);
+});
+
+test("updates the prior untouched built-in quick intro without overwriting custom templates", () => {
+  const previousBody = `Hi {{firstName}},
+
+I'm {{senderName}}, CEO of Vela Energy. My cofounder Tony Li and I recently raised a $1.3M pre-seed round from a16z Speedrun and Z Fellows. We both come from energy-intensive backgrounds: I'm a nationally recognized inventor in energy, and Tony left Tesla to build Vela with me full-time.
+
+{{workNote}}
+
+We're building AI agents that help large energy loads get powered on faster, and I'd really value your perspective as we build. Would you have 20-30 minutes for a call sometime next week? {{calendarUrl}}
+
+Best,
+{{senderName}}`;
+  const [updated] = emailTemplates({ emailTemplates: [{
+    id: "quick-intro",
+    name: "Quick intro",
+    subject: "Quick intro — would value your perspective",
+    body: previousBody,
+  }] });
+  assert.equal(updated.subject, "Quick intro + would love to pick your brain");
+  assert.match(updated.body, /Tony \(my co-founder\)/);
+
+  const [custom] = emailTemplates({ emailTemplates: [{
+    id: "quick-intro",
+    name: "My custom intro",
+    subject: "A custom subject",
+    body: `${previousBody}\n\nCustom closing`,
+  }] });
+  assert.equal(custom.subject, "A custom subject");
+  assert.match(custom.body, /Custom closing$/);
 });
 
 test("gmailComposeUrl safely encodes message fields", () => {

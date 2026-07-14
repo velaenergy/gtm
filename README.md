@@ -55,7 +55,7 @@ The update manifest points to the signed CRX published in each GitHub Release. K
 
 ## Install locally
 
-Chrome 114 or newer is required for the native Side Panel API.
+Chrome 116 or newer is required for the native Side Panel API and the LinkedIn launcher.
 
 1. Open `chrome://extensions` in Chrome.
 2. Turn on **Developer mode**.
@@ -82,7 +82,7 @@ Settings keeps the browser session and optional ContactOut API fallback as separ
 
 Only high-confidence, non-guessed internal ContactOut addresses are promoted. Guessed addresses remain unverified unless the verification poll explicitly returns `valid` or `verified`. LinkedIn-visible, manually entered, `accept_all`, `invalid`, `disposable`, `unknown`, and placeholder addresses remain unverified.
 
-After a verified lookup, Vela passes the bounded LinkedIn and Apollo/ContactOut work context to the configured OpenAI Responses API writer. The default **Personalization only** mode asks AI for the short work note while keeping the reviewed workspace subject and message template intact. **Entire email** mode is available when the team deliberately wants AI to rewrite the note, subject, and body together. The side panel labels generated copy with the model used.
+After profile research, Vela passes bounded LinkedIn and Apollo/ContactOut work context to the configured OpenAI Responses API writer. Automatic generation writes the complete subject and email while the loading view remains visible; delivery stays locked until that AI draft succeeds. The explicit **Rewrite with AI** button reruns the same complete-draft flow from the selected recipient, profile, template, opener, subject, and body context. The side panel labels generated copy with the model used.
 
 No ContactOut API token is required for profile reveals when the browser session is connected. An official ContactOut API token may still be saved as an optional fallback and is currently required for ContactOut People Search. AI research searches ContactOut first and falls back to Apollo when both are configured; provider-sourced profiles continue through API enrichment without opening LinkedIn. LinkedIn remains an explicit manual fallback beside each planned search. **Test ContactOut API** validates the optional token and its credits.
 
@@ -162,32 +162,26 @@ The writer sends `store: false` and asks the Responses API for a strict JSON sch
 
 Campaign delivery uses the local **Export MailMerge** workflow. The workbook preserves the supplied format's first five columns exactly—`First Name`, `Last Name`, `Note about work`, `Recipient`, and `Email Sent`—then appends `Subject` and `Message` so the agent's researched personalization and reviewed copy stay together. Exporting marks those prospects as exported in the local workflow ledger; it does not send anything. A MailMerge `.xlsx`, `.xls`, or `.csv` file can be imported again through the visual column-mapping step to retain sent dates and revised copy.
 
-Settings keeps provider credentials masked by default and provides an explicit **Show** / **Hide** control for each key. **Email generation** also manages a reusable set of named subject/body templates. The profile side panel exposes every supported merge variable and uses the selected saved template without allowing personalization-only AI mode to rewrite the surrounding copy.
+Settings keeps provider credentials masked by default and provides an explicit **Show** / **Hide** control for each key. **Email generation** also manages a reusable set of named subject/body templates. The selected template supplies intent and reusable facts to the full-email writer rather than acting as a send-ready fallback.
 
 With one or more connected senders, the side panel lets the user choose the exact Gmail account for the current compose and sends reviewed messages through Gmail's official `users.messages.send` endpoint with `gmail.send`. It never requests inbox-reading access, creates a separate message for each selected verified address, and never rotates the sender account. Without a connected sender, the same action opens one prefilled Gmail composer per selected address so the user can review and manually click **Send**. Scheduling remains available only for connected senders. Clicking **Send email** or **Open Gmail** is the approval boundary.
 
 **Schedule sends** stores a preferred local time and remains enabled across future side-panel sessions until manually turned off. Each explicit send click schedules that reviewed message for the next occurrence of the chosen time. Jobs and message copy live in Chrome local storage without OAuth tokens; Manifest V3 alarms wake the background worker and missing alarms are restored after Chrome restarts. The dashboard can cancel a queued job, and every status transition updates the separate delivery ledger.
 
-Gmail authorization is intentionally separate from local MailMerge import/export. By default, Vela uses the **Chrome extension** OAuth client declared in `manifest.json` with `chrome.identity.getAuthToken()`. This authorizes the Google account attached to the current Chrome profile and does not use a redirect URI.
+Gmail authorization is intentionally separate from local MailMerge import/export. Vela always uses Google's Web OAuth account chooser through `chrome.identity.launchWebAuthFlow()` and never binds delivery to the account signed into the Chrome profile. The public Web client ID is built into the internal extension; the client secret is neither required nor shipped.
 
-To connect the Chrome profile account:
-
-1. In Google Cloud, enable the **Gmail API** for the project containing the manifest OAuth client.
-2. Confirm that client is a **Chrome extension** client registered to Vela GTM's extension ID.
-3. Leave **Settings → Google delivery → Google Web OAuth client ID** blank, save, and click **Connect Gmail**.
-
-Connecting multiple Gmail accounts requires the account chooser and a second, distinct **Web application** OAuth client because Chrome's extension-token API does not show Google's account picker:
+To configure the built-in account chooser in Google Cloud:
 
 1. In Google Cloud, enable only the **Gmail API**.
 2. In **Google Auth Platform → Audience**, choose **Internal** when both senders belong to the same Vela Workspace organization. If either sender is outside that organization, choose **External**, keep the app in **Testing**, and add both email addresses under **Test users**. External test grants expire after seven days and must then be reconnected.
 3. Under **Data Access**, add `https://www.googleapis.com/auth/gmail.send` and `https://www.googleapis.com/auth/userinfo.email`.
 4. Under **Clients**, choose **Create client → Web application** and name it `Vela GTM account chooser`.
 5. Add this exact **Authorized redirect URI**: `https://mecnpdbecgmgjolcdldhkeplheojjpki.chromiumapp.org/google`. Do not add a trailing slash and do not add a JavaScript origin.
-6. Copy only the new Web client's `…apps.googleusercontent.com` client ID into **Settings → Google delivery → Google Web OAuth client ID**, then save. Never paste the manifest's Chrome-extension client ID into this field, and never put the Web client secret in the extension.
+6. The internal build already contains the Web client's public `…apps.googleusercontent.com` client ID. Never put the Web client secret in the extension.
 7. Click **Add Gmail account**, choose `tony@velaenergy.ai`, and repeat for `tarun@velaenergy.ai` or any other permitted Gmail/Workspace account.
 8. Select the default sender in Settings or use **Send from** beside the side-panel composer to choose the exact account for each immediate or scheduled message.
 
-The Chrome extension client in `manifest.json` remains a single-current-profile fallback; it cannot provide a stable-Chrome account chooser. Chooser access tokens are transient and never written to Chrome storage. Vela persists only each connected account's Google ID, email label, authorization mode, and the selected account ID. Every delivery renews authorization for the job's exact account, verifies the returned email, and refuses to send through a changed account. Local `.xlsx` MailMerge import/export does not require Google authorization.
+There is no Chrome-profile OAuth fallback. Account-chooser access tokens are transient and never written to Chrome storage. Vela persists only each connected account's Google ID, email label, authorization mode, and the selected account ID. Every delivery renews authorization for the job's exact account, verifies the returned email, and refuses to send through a changed account. Local `.xlsx` MailMerge import/export does not require Google authorization.
 
 ## Development
 
@@ -215,7 +209,7 @@ Append `?theme=light` or `?theme=dark` to either preview URL to inspect a specif
 ## File map
 
 - `manifest.json` — Manifest V3 permissions, persistent side-panel entry, and LinkedIn content script.
-- `content-script.js` — reads visible profile data and responds to the side panel.
+- `content-script.js` — reads visible profile data, responds to the side panel, and mounts the compact LinkedIn launcher.
 - `dashboard.html`, `dashboard.css`, `dashboard.js` — control room, AI research, review, scheduling, delivery history, campaigns, MailMerge, and imports.
 - `lib/queue.js`, `lib/campaigns.js`, and `lib/mail-merge.js` — prospect state, campaign lifecycle, and workbook round trips.
 - `lib/linkedin-parser.js` — parses current LinkedIn SDUI top-card and experience text without generated CSS classes.
@@ -233,7 +227,7 @@ Append `?theme=light` or `?theme=dark` to either preview URL to inspect a specif
 - Profile parsing happens locally in the LinkedIn tab.
 - ContactOut browser login remains page-owned; captured HAR session values are never stored or replayed.
 - Only masked lookup metadata and ≤10-minute reveal approvals enter extension storage; ContactOut cookies and CSRF values do not.
-- Drafts, scheduled-message copy, campaign membership, activity tracking, and settings stay in the current Chrome profile. OAuth access tokens remain only in Chrome Identity's cache.
+- Drafts, scheduled-message copy, campaign membership, activity tracking, and settings stay in the current Chrome profile. Queue and campaign collections are mirrored into a versioned local backup so a missing primary key after an update can be repaired without resurrecting an intentionally deleted campaign list. Google Web OAuth access tokens are transient and are not persisted.
 - Profile data leaves the browser only when ContactOut enrichment or OpenAI writing/search planning runs.
 - Provider keys stay in extension storage/background execution for the internal build and are never sent to LinkedIn tabs or placed in queue records.
 - A production deployment should use the optional Vela server with environment variables or a managed secret store.

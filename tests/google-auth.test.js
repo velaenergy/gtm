@@ -3,16 +3,14 @@ import test from "node:test";
 import {
   GOOGLE_ACCOUNT_AUTH_MODE,
   GOOGLE_ACCOUNTS_STORAGE_KEY,
-  GOOGLE_CHROME_PROFILE_AUTH_MODE,
   GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY,
   GOOGLE_USERINFO_EMAIL_SCOPE,
   buildGoogleWebAuthUrl,
   chooseGoogleAccount,
   disconnectGoogle,
-  getGoogleAuthToken,
   getGoogleWebAuthToken,
-  getPrimaryGoogleAccount,
   googleAccountById,
+  googleAuthStrategyForAccount,
   googleOAuthErrorMessage,
   googleOAuthStrategy,
   normalizeGoogleAccounts,
@@ -20,8 +18,8 @@ import {
   upsertGoogleAccount,
 } from "../lib/google-auth.js";
 import { GMAIL_SEND_SCOPE } from "../lib/gmail-send.js";
+import { DEFAULT_SETTINGS } from "../lib/message.js";
 
-const MANIFEST = { oauth2: { client_id: "123-example.apps.googleusercontent.com" } };
 const WEB_CLIENT_ID = "123-chooser.apps.googleusercontent.com";
 const REDIRECT_URI = "https://mecnpdbecgmgjolcdldhkeplheojjpki.chromiumapp.org/google";
 const FIXED_CRYPTO = {
@@ -80,15 +78,29 @@ test("V19 explains the exact redirect URI required for Google OAuth mismatch err
   );
 });
 
-test("V20 never sends the manifest Chrome-extension client through Web OAuth", () => {
-  assert.equal(
-    googleOAuthStrategy({ manifest: MANIFEST, webClientId: MANIFEST.oauth2.client_id }),
-    GOOGLE_CHROME_PROFILE_AUTH_MODE,
-  );
-  assert.equal(
-    googleOAuthStrategy({ manifest: MANIFEST, webClientId: WEB_CLIENT_ID }),
-    GOOGLE_ACCOUNT_AUTH_MODE,
-  );
+test("uses the built-in Web OAuth client as the only Google authorization strategy", () => {
+  assert.equal(googleOAuthStrategy({ webClientId: WEB_CLIENT_ID }), GOOGLE_ACCOUNT_AUTH_MODE);
+  assert.equal(googleOAuthStrategy({ webClientId: "" }), "");
+  assert.equal(DEFAULT_SETTINGS.googleWebClientId, "185496922277-dnn33q788othssrcu92719cbo34e21o0.apps.googleusercontent.com");
+});
+
+test("keeps OAuth strategy bound to an explicitly connected Gmail account", () => {
+  assert.equal(googleAuthStrategyForAccount({
+    account: { id: "chooser", email: "chooser@example.com", authMode: GOOGLE_ACCOUNT_AUTH_MODE },
+    webClientId: WEB_CLIENT_ID,
+  }), GOOGLE_ACCOUNT_AUTH_MODE);
+  assert.equal(googleAuthStrategyForAccount({
+    account: { id: "chooser", email: "chooser@example.com", authMode: GOOGLE_ACCOUNT_AUTH_MODE },
+  }), "");
+});
+
+test("drops legacy Chrome-profile senders so they reconnect through the chooser", () => {
+  assert.deepEqual(normalizeGoogleAccounts([
+    { id: "legacy", email: "legacy@example.com", authMode: "chrome-profile" },
+    { id: "chooser", email: "chooser@example.com", authMode: GOOGLE_ACCOUNT_AUTH_MODE },
+  ]), [
+    { id: "chooser", email: "chooser@example.com", authMode: GOOGLE_ACCOUNT_AUTH_MODE },
+  ]);
 });
 
 test("V21 migrates and deduplicates connected Gmail accounts without tokens", () => {
@@ -148,61 +160,8 @@ test("silent authorization remains bound to the selected sender", async () => {
   assert.equal(request.searchParams.get("login_hint"), "sender@vela.energy");
 });
 
-test("disconnecting an account-chooser sender does not clear unrelated Chrome profile grants", async () => {
+test("disconnecting an account-chooser sender never touches a Chrome profile token cache", async () => {
   let cleared = false;
   await disconnectGoogle({ async clearAllCachedAuthTokens() { cleared = true; } }, { authMode: GOOGLE_ACCOUNT_AUTH_MODE });
   assert.equal(cleared, false);
-});
-
-test("requests only Gmail send for the primary Chrome profile account", async () => {
-  const calls = [];
-  const token = await getGoogleAuthToken({
-    manifest: MANIFEST,
-    scopes: [GMAIL_SEND_SCOPE],
-    interactive: true,
-    identity: {
-      async getAuthToken(details) {
-        calls.push(details);
-        return { token: "gmail-token", grantedScopes: [GMAIL_SEND_SCOPE] };
-      },
-    },
-  });
-  assert.equal(token, "gmail-token");
-  assert.deepEqual(calls, [{
-    interactive: true,
-    enableGranularPermissions: true,
-    scopes: [GMAIL_SEND_SCOPE],
-  }]);
-});
-
-test("rejects and evicts a token that did not receive Gmail send access", async () => {
-  const removed = [];
-  await assert.rejects(getGoogleAuthToken({
-    manifest: MANIFEST,
-    scope: GMAIL_SEND_SCOPE,
-    identity: {
-      async getAuthToken() { return { token: "wrong-token", grantedScopes: ["openid"] }; },
-      async removeCachedAuthToken(details) { removed.push(details); },
-    },
-  }), /requested Google permission was not granted/);
-  assert.deepEqual(removed, [{ token: "wrong-token" }]);
-});
-
-test("labels delivery with the primary Chrome profile email", async () => {
-  const calls = [];
-  const account = await getPrimaryGoogleAccount({
-    async getProfileUserInfo(details) {
-      calls.push(details);
-      return { id: "gaia-123", email: "Tarun@Vela.Energy" };
-    },
-  });
-  assert.deepEqual(calls, [{ accountStatus: "ANY" }]);
-  assert.deepEqual(account, { id: "gaia-123", email: "tarun@vela.energy" });
-});
-
-test("requires Chrome itself to be signed in before connecting Gmail", async () => {
-  await assert.rejects(
-    getPrimaryGoogleAccount({ async getProfileUserInfo() { return { id: "", email: "" }; } }),
-    /Sign in to Chrome itself/,
-  );
 });

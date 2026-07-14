@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { runAutomaticProfileWorkflow } from "../lib/profile-workflow.js";
+import { aiDraftDeliveryReady, runAutomaticProfileWorkflow } from "../lib/profile-workflow.js";
 
 test("V19 always starts AI writing when a profile opens even when contact research is off", async () => {
   const calls = [];
@@ -13,7 +13,7 @@ test("V19 always starts AI writing when a profile opens even when contact resear
   assert.deepEqual(calls, ["write"]);
 });
 
-test("V19 starts writing immediately without waiting for automatic contact research", async () => {
+test("V25 writes the complete email after automatic research adds its context", async () => {
   const calls = [];
   await runAutomaticProfileWorkflow({
     researchEnabled: true,
@@ -25,8 +25,7 @@ test("V19 starts writing immediately without waiting for automatic contact resea
     },
     write: async () => calls.push("write"),
   });
-  assert.equal(calls[0], "write");
-  assert.deepEqual(new Set(calls), new Set(["write", "research-start", "research-end"]));
+  assert.deepEqual(calls, ["research-start", "research-end", "write"]);
 });
 
 test("V19 still writes when automatic contact research throws", async () => {
@@ -51,4 +50,24 @@ test("V19 skips redundant contact research but still writes when an email is alr
     write: async () => calls.push("write"),
   });
   assert.deepEqual(calls, ["write"]);
+});
+
+test("V25 delivery remains closed until the full AI draft succeeds", () => {
+  assert.equal(aiDraftDeliveryReady({ writerLoading: true, aiDraftReady: true, subject: "Ready", body: "Body" }), false);
+  assert.equal(aiDraftDeliveryReady({ writerLoading: false, aiDraftReady: false, subject: "Template", body: "Fallback" }), false);
+  assert.equal(aiDraftDeliveryReady({ writerLoading: false, aiDraftReady: true, subject: "", body: "AI body" }), false);
+  assert.equal(aiDraftDeliveryReady({ writerLoading: false, aiDraftReady: true, subject: "AI subject", body: "AI body" }), true);
+});
+
+test("V25 loading workflow does not resolve before AI writing completes", async () => {
+  let releaseWriting;
+  let resolved = false;
+  const workflow = runAutomaticProfileWorkflow({
+    write: () => new Promise((resolve) => { releaseWriting = resolve; }),
+  }).then(() => { resolved = true; });
+  await Promise.resolve();
+  assert.equal(resolved, false);
+  releaseWriting(true);
+  await workflow;
+  assert.equal(resolved, true);
 });
