@@ -7,6 +7,7 @@ import {
   applyTemplate,
   buildWorkNote,
   contactOutConnectionState,
+  deliveryRecipientEmails,
   emailTemplates,
   gmailComposeUrl,
   mailtoComposeUrl,
@@ -51,6 +52,16 @@ test("recipient selection keeps multiple addresses only after opt-in", () => {
     ),
     ["alternate@example.com", "primary@example.com"],
   );
+});
+
+test("V19 manual Gmail compose accepts a valid visible email while direct send stays verified-only", () => {
+  const input = {
+    currentEmail: "visible@example.com",
+    verifiedEmails: [],
+    selectedRecipients: [],
+  };
+  assert.deepEqual(deliveryRecipientEmails({ ...input, gmailConnected: false }), ["visible@example.com"]);
+  assert.deepEqual(deliveryRecipientEmails({ ...input, gmailConnected: true }), []);
 });
 
 const profile = {

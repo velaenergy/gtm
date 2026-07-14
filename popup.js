@@ -1,6 +1,7 @@
 import {
   DEFAULT_SETTINGS,
   applyTemplate,
+  deliveryRecipientEmails,
   emailTemplates,
   gmailComposeUrl,
   mailtoComposeUrl,
@@ -12,6 +13,7 @@ import {
   resolveTheme,
   templateVariables,
 } from "./lib/message.js";
+import { runAutomaticProfileWorkflow } from "./lib/profile-workflow.js";
 import { GOOGLE_ACCOUNT_STORAGE_KEY } from "./lib/google-auth.js";
 import {
   DEFAULT_DELIVERY_SETTINGS,
@@ -182,11 +184,14 @@ function selectedRecipientEmails() {
   });
 }
 
-function manualRecipientEmails() {
-  const current = isEmail(state.email) ? String(state.email).trim().toLowerCase() : "";
-  return normalizeRecipientSelection([...new Set([current, ...verifiedRecipientEmails()].filter(Boolean))], state.selectedRecipients, {
+function deliveryRecipients() {
+  return deliveryRecipientEmails({
+    deliveryMethod: state.settings.deliveryMethod,
+    gmailConnected: Boolean(state.googleAccount?.id),
+    currentEmail: state.email,
+    verifiedEmails: verifiedRecipientEmails(),
+    selectedRecipients: state.selectedRecipients,
     allowMultiple: Boolean(state.settings.allowMultipleRecipients),
-    preferred: current,
   });
 }
 
@@ -197,8 +202,8 @@ function formatScheduledTime(date) {
 function renderDelivery() {
   if (!elements.sendEmailButton) return;
   const mailto = state.settings.deliveryMethod === "mailto";
-  const recipients = mailto ? manualRecipientEmails() : selectedRecipientEmails();
   const connected = !mailto && Boolean(state.googleAccount?.id);
+  const recipients = deliveryRecipients();
   elements.deliveryAccount.textContent = mailto ? "Default email app" : connected ? state.googleAccount.email || "Selected Google account" : "Manual Gmail compose";
   elements.deliveryAccountButton.classList.toggle("is-connected", connected);
   elements.scheduleToggle.checked = !mailto && state.deliverySettings.scheduleEnabled;
@@ -221,7 +226,7 @@ function renderDelivery() {
   }
   elements.sendEmailButton.disabled = state.deliveryLoading || !recipients.length || !state.subject.trim() || !state.body.trim();
   elements.sendEmailButton.title = !recipients.length
-    ? mailto ? "Add a valid recipient email" : "Choose a verified recipient"
+    ? !connected ? "Add a valid recipient email" : "Choose a verified recipient"
     : !connected
       ? mailto ? "Open a prefilled draft in the default email app" : "Open a prefilled Gmail draft and send it manually"
       : "";
@@ -652,7 +657,7 @@ async function enrichProfile({ requestPermission = true, manageButton = true, op
   }
 }
 
-async function findProspectEmail({ automatic = false } = {}) {
+async function findProspectEmail({ automatic = false, personalize = true } = {}) {
   if (!state.profile) return;
   const profileAtStart = state.profile;
   const activeTabIdAtStart = state.activeTabId;
@@ -728,8 +733,11 @@ async function findProspectEmail({ automatic = false } = {}) {
       queueDraftSave();
     }
 
-    setFindEmailLoading(true, "Personalizing");
-    const written = await generateEmail({ silent: automatic, announce: false });
+    let written = false;
+    if (personalize) {
+      setFindEmailLoading(true, "Personalizing");
+      written = await generateEmail({ silent: automatic, announce: false });
+    }
     if (!isCurrentProfile()) return false;
     if (!automatic) {
       const lookupLabel = resolution.source === "contactout" ? `${state.emailSource.match(/(?:ContactOut|Apollo)/i)?.[0] || "Provider"} email` : "LinkedIn Contact Info email";
@@ -951,8 +959,9 @@ async function saveDeliverySettings() {
 
 async function deliverEmail() {
   const mailto = state.settings.deliveryMethod === "mailto";
-  const recipients = mailto ? manualRecipientEmails() : selectedRecipientEmails();
-  if (!recipients.length) { showToast(mailto ? "Add a valid recipient email." : "Choose at least one provider-verified email."); return; }
+  const connected = !mailto && Boolean(state.googleAccount?.id);
+  const recipients = deliveryRecipients();
+  if (!recipients.length) { showToast(!connected ? "Add a valid recipient email." : "Choose at least one provider-verified email."); return; }
   if (!state.subject.trim() || !state.body.trim()) { showToast("Add a subject and message before sending."); return; }
 
   const prospect = currentProspect();
@@ -960,7 +969,7 @@ async function deliverEmail() {
   const saved = await storage.get([QUEUE_STORAGE_KEY]);
   await storage.set({ [QUEUE_STORAGE_KEY]: upsertProspects(saved[QUEUE_STORAGE_KEY] || [], [prospect]) });
 
-  if (mailto || !state.googleAccount?.id) {
+  if (!connected) {
     const composeUrls = recipients.map((recipient) => (mailto ? mailtoComposeUrl : gmailComposeUrl)({
       to: recipient,
       subject: state.subject,
@@ -1094,7 +1103,7 @@ function bindEvents() {
   elements.rewritePersonalizationButton.addEventListener("click", () => generateEmail());
   elements.copyEmailButton.addEventListener("click", () => copyText(elements.emailInput.value.trim(), "Email copied."));
   elements.copyDraftButton.addEventListener("click", () =>
-    copyText(`To: ${(state.settings.deliveryMethod === "mailto" ? manualRecipientEmails() : selectedRecipientEmails()).join(", ")}\nSubject: ${state.subject}\n\n${state.body}`, "Draft copied."),
+    copyText(`To: ${deliveryRecipients().join(", ")}\nSubject: ${state.subject}\n\n${state.body}`, "Draft copied."),
   );
   elements.deliveryAccountButton.addEventListener("click", openSettings);
   elements.scheduleToggle.addEventListener("change", async () => {
@@ -1168,11 +1177,16 @@ async function refreshActiveProfile() {
     showView("workspace");
     if (previewTab === "draft") switchTab("draft");
 
-    if (!state.emailVerified && state.settings.autoEnrich && !state.isPreview) {
+    if (!state.isPreview) {
       const lookupKey = linkedInProfileIdentity(state.profile.url);
       if (lookupKey && !state.autoLookupAttempts.has(lookupKey)) {
         state.autoLookupAttempts.add(lookupKey);
-        findProspectEmail({ automatic: true });
+        runAutomaticProfileWorkflow({
+          researchEnabled: Boolean(state.settings.autoEnrich),
+          hasVerifiedEmail: state.emailVerified,
+          research: () => findProspectEmail({ automatic: true, personalize: false }),
+          write: () => generateEmail({ silent: true, announce: false }),
+        }).catch(() => {});
       }
     }
   } catch (error) {

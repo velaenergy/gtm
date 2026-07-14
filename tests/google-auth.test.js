@@ -9,6 +9,7 @@ import {
   getGoogleAuthToken,
   getGoogleWebAuthToken,
   getPrimaryGoogleAccount,
+  googleOAuthErrorMessage,
 } from "../lib/google-auth.js";
 import { GMAIL_SEND_SCOPE } from "../lib/gmail-send.js";
 
@@ -62,6 +63,13 @@ test("builds an explicit Google account chooser authorization request", () => {
   assert.equal(url.searchParams.get("prompt"), "select_account");
   assert.equal(url.searchParams.get("redirect_uri"), REDIRECT_URI);
   assert.match(url.searchParams.get("scope"), /gmail\.send/);
+});
+
+test("V19 explains the exact redirect URI required for Google OAuth mismatch errors", () => {
+  assert.equal(
+    googleOAuthErrorMessage(new Error("Error 400: redirect_uri_mismatch"), { redirectUri: REDIRECT_URI }),
+    `Google rejected the OAuth redirect. Add this exact Authorized redirect URI to this Web application client in Google Cloud: ${REDIRECT_URI}`,
+  );
 });
 
 test("connects and labels the Google account explicitly chosen by the user", async () => {
