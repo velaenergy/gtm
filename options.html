@@ -258,13 +258,13 @@
             <p class="security-note gmail-note">Chrome extension ID: <code id="extensionId">preview</code>. Google asks for Gmail send access and the selected account's email label; Vela cannot read the inbox.</p>
             <div class="google-chooser-setup">
               <div class="google-chooser-heading">
-                <div><span>Account chooser setup</span><strong id="googleChooserState">Web OAuth client needed</strong></div>
-                <span class="permission-state">One-time admin setup</span>
+                <div><span>Google authorization</span><strong id="googleChooserState">Checking OAuth setup</strong></div>
+                <span class="permission-state">Chrome OAuth ready</span>
               </div>
               <label class="field google-client-field">
-                <span>Google Web OAuth client ID <em>Enables account choice</em></span>
+                <span>Google Web OAuth client ID <em>Optional account chooser</em></span>
                 <input id="googleWebClientId" type="text" inputmode="text" autocomplete="off" placeholder="…apps.googleusercontent.com" />
-                <small>Create a Web application client in the same Google Cloud project, paste its client ID here, then save.</small>
+                <small>Leave blank to use the Chrome profile through the manifest OAuth client. For an account chooser, enter a separate Web application client—never the manifest's Chrome-extension client ID.</small>
               </label>
               <div class="google-redirect-row">
                 <div><span>Authorized redirect URI</span><code id="googleRedirectUri">Available after loading the extension</code></div>

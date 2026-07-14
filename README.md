@@ -168,17 +168,25 @@ With a connected sender, the side panel sends reviewed messages through Gmail's 
 
 **Schedule sends** stores a preferred local time and remains enabled across future side-panel sessions until manually turned off. Each explicit send click schedules that reviewed message for the next occurrence of the chosen time. Jobs and message copy live in Chrome local storage without OAuth tokens; Manifest V3 alarms wake the background worker and missing alarms are restored after Chrome restarts. The dashboard can cancel a queued job, and every status transition updates the separate delivery ledger.
 
-Gmail authorization is intentionally separate from local MailMerge import/export. The account chooser needs a **Web application** OAuth client because Chrome's extension-token API automatically uses the Chrome profile account instead of showing Google's account picker:
+Gmail authorization is intentionally separate from local MailMerge import/export. By default, Vela uses the **Chrome extension** OAuth client declared in `manifest.json` with `chrome.identity.getAuthToken()`. This authorizes the Google account attached to the current Chrome profile and does not use a redirect URI.
+
+To connect the Chrome profile account:
+
+1. In Google Cloud, enable the **Gmail API** for the project containing the manifest OAuth client.
+2. Confirm that client is a **Chrome extension** client registered to Vela GTM's extension ID.
+3. Leave **Settings → Google delivery → Google Web OAuth client ID** blank, save, and click **Connect Gmail**.
+
+An account chooser is optional. It requires a second, distinct **Web application** OAuth client because Chrome's extension-token API does not show Google's account picker:
 
 1. In Google Cloud, enable only the **Gmail API**.
 2. In **Google Auth Platform → Audience**, choose **Internal** when both senders belong to the same Vela Workspace organization. If either sender is outside that organization, choose **External**, keep the app in **Testing**, and add both email addresses under **Test users**. External test grants expire after seven days and must then be reconnected.
 3. Under **Data Access**, add `https://www.googleapis.com/auth/gmail.send` and `https://www.googleapis.com/auth/userinfo.email`.
 4. Under **Clients**, choose **Create client → Web application** and name it `Vela GTM account chooser`.
 5. Add this exact **Authorized redirect URI**: `https://mecnpdbecgmgjolcdldhkeplheojjpki.chromiumapp.org/google`. Do not add a trailing slash and do not add a JavaScript origin.
-6. Copy only the new Web client's `…apps.googleusercontent.com` client ID into **Settings → Google delivery → Google Web OAuth client ID**, then save. Never put the Web client secret in the extension.
+6. Copy only the new Web client's `…apps.googleusercontent.com` client ID into **Settings → Google delivery → Google Web OAuth client ID**, then save. Never paste the manifest's Chrome-extension client ID into this field, and never put the Web client secret in the extension.
 7. Click **Choose Gmail sender**. Google now shows `select_account`; after selection, Vela displays `Sending from: address · explicitly selected`.
 
-The older Chrome Extension client may remain in `manifest.json` for existing primary-profile authorizations, but it cannot provide a stable-Chrome account chooser. Chooser access tokens are transient and never written to Chrome storage. Vela persists only the explicitly selected account ID and email label, silently renews authorization for that same email before delivery, and refuses to send if Google returns a different account. Local `.xlsx` MailMerge import/export does not require Google authorization.
+The Chrome extension client in `manifest.json` is the default authorization path, but it cannot provide a stable-Chrome account chooser. Optional chooser access tokens are transient and never written to Chrome storage. Vela persists only the selected account ID and email label, renews authorization before delivery, and refuses to send through a changed account. Local `.xlsx` MailMerge import/export does not require Google authorization.
 
 ## Development
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   GOOGLE_ACCOUNT_AUTH_MODE,
+  GOOGLE_CHROME_PROFILE_AUTH_MODE,
   GOOGLE_USERINFO_EMAIL_SCOPE,
   buildGoogleWebAuthUrl,
   chooseGoogleAccount,
@@ -10,6 +11,7 @@ import {
   getGoogleWebAuthToken,
   getPrimaryGoogleAccount,
   googleOAuthErrorMessage,
+  googleOAuthStrategy,
 } from "../lib/google-auth.js";
 import { GMAIL_SEND_SCOPE } from "../lib/gmail-send.js";
 
@@ -69,6 +71,17 @@ test("V19 explains the exact redirect URI required for Google OAuth mismatch err
   assert.equal(
     googleOAuthErrorMessage(new Error("Error 400: redirect_uri_mismatch"), { redirectUri: REDIRECT_URI }),
     `Google rejected the OAuth redirect. Add this exact Authorized redirect URI to this Web application client in Google Cloud: ${REDIRECT_URI}`,
+  );
+});
+
+test("V20 never sends the manifest Chrome-extension client through Web OAuth", () => {
+  assert.equal(
+    googleOAuthStrategy({ manifest: MANIFEST, webClientId: MANIFEST.oauth2.client_id }),
+    GOOGLE_CHROME_PROFILE_AUTH_MODE,
+  );
+  assert.equal(
+    googleOAuthStrategy({ manifest: MANIFEST, webClientId: WEB_CLIENT_ID }),
+    GOOGLE_ACCOUNT_AUTH_MODE,
   );
 });
 

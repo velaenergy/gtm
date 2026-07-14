@@ -15,7 +15,7 @@ import {
   GOOGLE_ACCOUNT_STORAGE_KEY,
   getGoogleAuthToken,
   getGoogleWebAuthToken,
-  googleWebOAuthConfigured,
+  googleOAuthStrategy,
 } from "./lib/google-auth.js";
 import { GMAIL_SEND_SCOPE, GmailApiError, buildMimeMessage, sendGmailMessage, uniqueRecipients } from "./lib/gmail-send.js";
 import {
@@ -59,15 +59,15 @@ async function recordProspectDelivery(prospectId, type, detail, { sent = false, 
 
 async function gmailToken(interactive = false, expectedAccountId = "") {
   const configured = await settings();
+  const manifest = chrome.runtime.getManifest();
+  const strategy = googleOAuthStrategy({ manifest, webClientId: configured.googleWebClientId });
   const saved = await chrome.storage.local.get(GOOGLE_ACCOUNT_STORAGE_KEY);
   const account = saved[GOOGLE_ACCOUNT_STORAGE_KEY] || {};
   if (!account.id || (expectedAccountId && account.id !== expectedAccountId)) {
     throw new Error("The selected Gmail sender changed. Review Google delivery in Settings before sending.");
   }
-  if (account.authMode === GOOGLE_ACCOUNT_AUTH_MODE) {
-    if (!googleWebOAuthConfigured(configured.googleWebClientId)) {
-      throw new Error("The Google account chooser client is not configured. Open Settings and add its Web OAuth client ID.");
-    }
+  if (strategy === GOOGLE_ACCOUNT_AUTH_MODE) {
+    if (account.authMode !== GOOGLE_ACCOUNT_AUTH_MODE) throw new Error("Google delivery configuration changed. Reconnect the Gmail sender in Settings.");
     return getGoogleWebAuthToken({
       identity: chrome.identity,
       clientId: configured.googleWebClientId,
@@ -76,9 +76,11 @@ async function gmailToken(interactive = false, expectedAccountId = "") {
       interactive,
     });
   }
+  if (!strategy) throw new Error("Google delivery OAuth is not configured in manifest.json.");
+  if (account.authMode === GOOGLE_ACCOUNT_AUTH_MODE) throw new Error("Google delivery configuration changed. Reconnect the Gmail sender in Settings.");
   return getGoogleAuthToken({
     identity: chrome.identity,
-    manifest: chrome.runtime.getManifest(),
+    manifest,
     scopes: [GMAIL_SEND_SCOPE],
     interactive,
   });
