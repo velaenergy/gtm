@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 
 import { enrichLinkedInProfile } from "./contactout.mjs";
 import { writeOutreach } from "./openai-writer.mjs";
-import { planProspectSearch } from "./search-planner.mjs";
+import { planProspectSearch, respondToResearchMessage } from "./search-planner.mjs";
 
 const host = process.env.HOST || "127.0.0.1";
 const port = Number(process.env.PORT || 8787);
@@ -71,7 +71,7 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  if (request.method !== "POST" || !["/generate", "/enrich", "/plan-search", "/configure"].includes(request.url)) {
+  if (request.method !== "POST" || !["/generate", "/enrich", "/plan-search", "/research-message", "/configure"].includes(request.url)) {
     sendJson(response, 404, { error: "Not found." });
     return;
   }
@@ -103,6 +103,13 @@ const server = createServer(async (request, response) => {
     if (request.url === "/plan-search") {
       const plan = await planProspectSearch(input.brief, { apiKey: openAIApiKey(), model });
       sendJson(response, 200, { data: plan, model });
+      return;
+    }
+    if (request.url === "/research-message") {
+      const turn = await respondToResearchMessage(input.message, {
+        apiKey: openAIApiKey(), model, history: input.history, pendingPlan: input.pendingPlan,
+      });
+      sendJson(response, 200, { data: turn, model });
       return;
     }
     if (input.source !== "vela-gtm-extension" || !input.profile?.url) {

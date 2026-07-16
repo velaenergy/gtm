@@ -13,7 +13,7 @@ Click the toolbar icon once to open Vela beside the active page. The panel stays
 - send a reviewed message directly through the selected Gmail account now or at the next occurrence of a persistent scheduled time, with a prefilled manual Gmail composer fallback when direct access is not connected;
 - keep working from the same panel across tabs instead of reopening a transient popup;
 - select exactly one verified prospect address by default, with an opt-in Settings control for sending separate copies to multiple verified addresses without exposing recipients to each other;
-- export a reviewed, addressed MailMerge workbook for campaign-scale delivery;
+- check the shared Vela Supabase activity log plus the local delivery ledger before every send and warn before repeat outreach;
 - save the current profile and personalization note to one or more named campaigns;
 - save one local draft per LinkedIn profile.
 
@@ -23,21 +23,21 @@ The **Workspace** action opens the larger GTM control room. Its navigation separ
 - **AI research** keeps the search-planning agent and research queue together;
 - **Review queue** isolates drafts that require a human decision;
 - **Scheduled** shows durable queued Gmail jobs in send order and lets the user cancel them before delivery begins;
-- **Sent history** is a local delivery ledger with recipient, subject, selected sender, result, and timestamps;
-- **All prospects**, campaign views, MailMerge exports, imports, and **Settings** remain first-class workspace areas.
+- **Sent history** unifies shared Supabase activity with the local delivery ledger by recipient, subject, selected sender, result, and timestamp;
+- **Contacts** combines imported prospects and team outreach into a searchable record, checks connected Gmail inboxes for delivery-status notifications, marks hard and soft bounces, and stops queued follow-ups to unreachable addresses;
+- **Contacts**, campaign views, source imports, and **Settings** remain first-class workspace areas; the redundant All Prospects page is removed.
 
 From the control room the team can also:
 
 - create named campaigns with campaign-specific prospect totals;
 - edit, duplicate, or delete campaigns without deleting their underlying prospect research;
-- open a campaign to scope research, spreadsheet imports, MailMerge exports, and list actions to its members;
-- export campaign rows as a MailMerge `.xlsx` workbook, including the agent-written subject and message;
+- open a campaign to scope research, spreadsheet imports, and list actions to its members;
 - describe the people they want and open a native LinkedIn People search;
 - capture the profile results currently visible in an open LinkedIn search tab;
-- import MailMerge `.xlsx`, `.xls`, or `.csv` files with an editable column-mapping step, or paste LinkedIn profile URLs with optional background notes;
+- import outreach `.xlsx`, `.xls`, or `.csv` source files with an editable column-mapping step, including historical sent dates, or paste LinkedIn profile URLs with optional background notes;
 - deduplicate every lead by normalized LinkedIn profile URL;
 - research queued profiles sequentially, find LinkedIn contact emails, and generate Vela drafts;
-- track reviewed, exported, and manually marked-sent activity locally while MailMerge handles bulk delivery.
+- sync prospects and scheduled, sent, partial, failed, cancelled, and imported historical activity to the Vela team workspace.
 
 The extension does **not** invent email addresses, store captured HAR credentials, or send messages silently. ContactOut session requests execute inside a normal ContactOut tab, so ContactOut owns its cookies, CSRF token, Cloudflare state, and session rotation. Vela stores only its installation ID and a short-lived reveal approval. Optional provider keys remain background-only.
 
@@ -82,7 +82,7 @@ Settings keeps the browser session and optional ContactOut API fallback as separ
 
 Only high-confidence, non-guessed internal ContactOut addresses are promoted. Guessed addresses remain unverified unless the verification poll explicitly returns `valid` or `verified`. LinkedIn-visible, manually entered, `accept_all`, `invalid`, `disposable`, `unknown`, and placeholder addresses remain unverified.
 
-After profile research, Vela passes bounded LinkedIn and Apollo/ContactOut work context to the configured OpenAI Responses API writer. AI generates only the prospect-specific `workNote`; the selected template supplies every other word in the subject and message. Choosing a template immediately applies that exact template, while **Rewrite personalization** refreshes only the work-note variable from the prospect's About section and role descriptions. Delivery stays locked until that personalization succeeds.
+After profile research, Vela passes bounded LinkedIn and Apollo/ContactOut work context to the configured OpenAI Responses API writer. The selected template acts as a writing guide and source of approved sender facts; AI writes a complete prospect-specific subject and plain-text body with natural paragraph breaks. **Rewrite email** produces another grounded draft with varied wording and structure. Delivery stays locked until a complete draft succeeds.
 
 No ContactOut API token is required for profile reveals when the browser session is connected. An official ContactOut API token may still be saved as an optional fallback and is currently required for ContactOut People Search. AI research searches ContactOut first and falls back to Apollo when both are configured; provider-sourced profiles continue through API enrichment without opening LinkedIn. LinkedIn remains an explicit manual fallback beside each planned search. **Test ContactOut API** validates the optional token and its credits.
 
@@ -158,30 +158,32 @@ curl http://127.0.0.1:8787/health
 
 The writer sends `store: false` and asks the Responses API for a strict JSON schema containing `subject`, `body`, and `workNote`. Its prompt tells the model to use only profile facts supplied by the extension and to leave email discovery to the enrichment flow.
 
-## Gmail delivery, scheduling, and MailMerge
+## Gmail delivery, scheduling, and shared activity
 
-Campaign delivery uses the local **Export MailMerge** workflow. The workbook preserves the supplied format's first five columns exactly—`First Name`, `Last Name`, `Note about work`, `Recipient`, and `Email Sent`—then appends `Subject` and `Message` so the agent's researched personalization and reviewed copy stay together. Exporting marks those prospects as exported in the local workflow ledger; it does not send anything. A MailMerge `.xlsx`, `.xls`, or `.csv` file can be imported again through the visual column-mapping step to retain sent dates and revised copy.
+Team members sign in with an `@velaenergy.ai` Google identity before the extension workspace opens. Supabase is the central source for teammate profiles, approved sender settings, connected Gmail metadata, prospects, and recipient-level activity. Before an immediate or scheduled send, the background worker verifies the mailbox against the active sender roster and checks Supabase plus the local delivery ledger. Prior sent, partial, or scheduled activity produces a recipient-specific warning and requires an explicit send-again confirmation.
 
-Settings keeps provider credentials masked by default and provides an explicit **Show** / **Hide** control for each key. **Email generation** also manages reusable named subject/body templates. Templates are deterministic: AI fills supported work-note variables but cannot rewrite the static subject or message copy.
+Google Sheets is source-only: download a sheet as `.xlsx` or `.csv`, then import it through the editable column-mapping flow. Rows with an existing `Email Sent` value become Supabase activity as well as local history, making old campaign history part of the duplicate check and analytics. There is no Sheets runtime connection or workbook export workflow.
 
-With one or more connected senders, the side panel lets the user choose the exact Gmail account for the current compose and sends reviewed messages through Gmail's official `users.messages.send` endpoint with `gmail.send`. It never requests inbox-reading access, creates a separate message for each selected verified address, and never rotates the sender account. Without a connected sender, the same action opens one prefilled Gmail composer per selected address so the user can review and manually click **Send**. Scheduling remains available only for connected senders. Clicking **Send email** or **Open Gmail** is the approval boundary.
+Settings keeps provider credentials masked by default and provides an explicit **Show** / **Hide** control for each key. **Email generation** also manages reusable named subject/body writing guides. Vela renders a guide-based local fallback, while the AI may vary the final subject, wording, ordering, and paragraph count without changing configured sender facts or the calendar URL.
+
+With one or more connected senders, the side panel lets the user choose the exact Gmail account for the current compose and sends reviewed messages through Gmail's official `users.messages.send` endpoint with `gmail.send`. The `gmail.readonly` scope is used for bounded reply and delivery-status checks: Vela parses matching messages transiently and stores only the failed recipient, bounce category, diagnostic summary, Gmail message ID, and timestamp. Message bodies and OAuth tokens are never copied to Supabase. Each recipient still receives a separate message and sender accounts never rotate automatically. Without a connected sender, the same action opens one prefilled Gmail composer per selected address so the user can review and manually click **Send**. Scheduling remains available only for connected senders. Clicking **Send email** or **Open Gmail** is the approval boundary.
 
 **Schedule sends** stores a preferred local time and remains enabled across future side-panel sessions until manually turned off. Each explicit send click schedules that reviewed message for the next occurrence of the chosen time. Jobs and message copy live in Chrome local storage without OAuth tokens; Manifest V3 alarms wake the background worker and missing alarms are restored after Chrome restarts. The dashboard can cancel a queued job, and every status transition updates the separate delivery ledger.
 
-Gmail authorization is intentionally separate from local MailMerge import/export. Vela always uses Google's Web OAuth account chooser through `chrome.identity.launchWebAuthFlow()` and never binds delivery to the account signed into the Chrome profile. The public Web client ID is built into the internal extension; the client secret is neither required nor shipped.
+Vela sign-in and Gmail connection use Google's Web OAuth account chooser through `chrome.identity.launchWebAuthFlow()` and never silently bind delivery to the account signed into the Chrome profile. Google access tokens remain transient and are never written to Supabase or Chrome storage.
 
 To configure the built-in account chooser in Google Cloud:
 
-1. In Google Cloud, enable only the **Gmail API**.
+1. In Google Cloud, enable the **Gmail API**.
 2. In **Google Auth Platform → Audience**, choose **Internal** when both senders belong to the same Vela Workspace organization. If either sender is outside that organization, choose **External**, keep the app in **Testing**, and add both email addresses under **Test users**. External test grants expire after seven days and must then be reconnected.
-3. Under **Data Access**, add `https://www.googleapis.com/auth/gmail.send` and `https://www.googleapis.com/auth/userinfo.email`.
+3. Under **Data Access**, add `openid`, `email`, `profile`, `https://www.googleapis.com/auth/gmail.send`, `https://www.googleapis.com/auth/gmail.readonly`, and `https://www.googleapis.com/auth/userinfo.email`.
 4. Under **Clients**, choose **Create client → Web application** and name it `Vela GTM account chooser`.
 5. Add this exact **Authorized redirect URI**: `https://mecnpdbecgmgjolcdldhkeplheojjpki.chromiumapp.org/google`. Do not add a trailing slash and do not add a JavaScript origin.
-6. The internal build already contains the Web client's public `…apps.googleusercontent.com` client ID. Never put the Web client secret in the extension.
-7. Click **Add Gmail account**, choose `tony@velaenergy.ai`, and repeat for `tarun@velaenergy.ai` or any other permitted Gmail/Workspace account.
+6. In Supabase Authentication, enable Google using the same Web client ID and its client secret. Keep the secret in Supabase only; never put it in the extension.
+7. Open **Settings → Delivery**, click **Add Gmail account**, and choose the exact `@velaenergy.ai` sender you want to add. No mailboxes are preloaded.
 8. Select the default sender in Settings or use **Send from** beside the side-panel composer to choose the exact account for each immediate or scheduled message.
 
-There is no Chrome-profile OAuth fallback. Account-chooser access tokens are transient and never written to Chrome storage. Vela persists only each connected account's Google ID, email label, authorization mode, and the selected account ID. Every delivery renews authorization for the job's exact account, verifies the returned email, and refuses to send through a changed account. Local `.xlsx` MailMerge import/export does not require Google authorization.
+There is no Chrome-profile OAuth fallback. Account-chooser access tokens are transient and never written to Chrome storage or Supabase. Supabase stores only sender metadata; each browser renews authorization for the job's exact account, verifies the returned email, checks shared activity, and refuses to send through a changed account.
 
 ## Development
 
@@ -210,8 +212,8 @@ Append `?theme=light` or `?theme=dark` to either preview URL to inspect a specif
 
 - `manifest.json` — Manifest V3 permissions, persistent side-panel entry, and LinkedIn content script.
 - `content-script.js` — reads visible profile data, responds to the side panel, and mounts the compact LinkedIn launcher.
-- `dashboard.html`, `dashboard.css`, `dashboard.js` — control room, AI research, review, scheduling, delivery history, campaigns, MailMerge, and imports.
-- `lib/queue.js`, `lib/campaigns.js`, and `lib/mail-merge.js` — prospect state, campaign lifecycle, and workbook round trips.
+- `dashboard.html`, `dashboard.css`, `dashboard.js` — control room, contacts, AI research, review, scheduling, unified sent history, campaigns, and source imports.
+- `lib/queue.js`, `lib/campaigns.js`, `lib/contacts.js`, `lib/spreadsheet-import.js`, and `lib/supabase.js` — prospect state, campaign lifecycle, contact aggregation, source imports, Vela auth, and shared team data.
 - `lib/linkedin-parser.js` — parses current LinkedIn SDUI top-card and experience text without generated CSS classes.
 - `popup.html`, `popup.css`, `popup.js` — persistent profile side panel, verified-recipient selection, templates, direct send, and schedule controls.
 - `options.html`, `options.css`, `options.js` — provider credentials, named templates, theme, Google delivery, and sender defaults.
@@ -227,8 +229,8 @@ Append `?theme=light` or `?theme=dark` to either preview URL to inspect a specif
 - Profile parsing happens locally in the LinkedIn tab.
 - ContactOut browser login remains page-owned; captured HAR session values are never stored or replayed.
 - Only masked lookup metadata and ≤10-minute reveal approvals enter extension storage; ContactOut cookies and CSRF values do not.
-- Drafts, scheduled-message copy, campaign membership, activity tracking, and settings stay in the current Chrome profile. Queue and campaign collections are mirrored into a versioned local backup so a missing primary key after an update can be repaired without resurrecting an intentionally deleted campaign list. Google Web OAuth access tokens are transient and are not persisted.
+- Drafts, scheduled-message copy, campaign membership, and settings stay in the current Chrome profile. Prospects, Gmail account metadata, and delivery activity sync to Supabase for signed-in Vela teammates. Queue and campaign collections are mirrored into a versioned local backup. Google Web OAuth access tokens are transient and are not persisted.
 - Profile data leaves the browser only when ContactOut enrichment or OpenAI writing/search planning runs.
 - Provider keys stay in extension storage/background execution for the internal build and are never sent to LinkedIn tabs or placed in queue records.
 - A production deployment should use the optional Vela server with environment variables or a managed secret store.
-- Direct delivery uses only `gmail.send`, one reviewed message per verified recipient. Campaign-scale delivery remains available through exported MailMerge workbooks.
+- Direct delivery uses only `gmail.send`, one reviewed message per syntactically valid selected recipient. Provider verification remains visible but does not block sending; addresses marked invalid or disposable stay unselectable. Every send checks shared and local history before delivery.

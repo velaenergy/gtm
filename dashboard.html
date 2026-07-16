@@ -8,7 +8,21 @@
     <link rel="icon" href="assets/icon-32.png" />
     <link rel="stylesheet" href="dashboard.css" />
   </head>
-  <body>
+  <body class="auth-pending">
+    <section id="authGate" class="auth-gate" hidden aria-labelledby="authGateTitle">
+      <article class="auth-card" data-slot="card">
+        <span class="auth-logo" aria-hidden="true"><img src="assets/icon-48.png" alt="" /></span>
+        <div data-slot="card-header">
+          <p class="section-kicker">Vela GTM</p>
+          <h1 id="authGateTitle">Sign in to your workspace</h1>
+          <p>Use your <strong>@velaenergy.ai</strong> Google account. Your name and profile come from Google and become visible to your teammates.</p>
+        </div>
+        <div data-slot="card-content">
+          <button id="authSignInButton" class="button button-primary auth-google-button" type="button">Continue with Google</button>
+          <p id="authGateStatus" class="auth-gate-status" role="status" aria-live="polite">Only Vela Energy teammates can continue.</p>
+        </div>
+      </article>
+    </section>
     <div class="app-shell">
       <aside class="sidebar" aria-label="GTM workspace navigation">
         <div class="sidebar-head">
@@ -28,13 +42,13 @@
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 10h5.5V3.5H3.5zM11 16.5h5.5V10H11zM3.5 16.5h5.5V12H3.5zM11 8h5.5V3.5H11z"/></svg>
               <span>Overview</span>
             </button>
-            <button class="nav-item" type="button" data-view="research" data-tooltip="AI research">
+            <button class="nav-item" type="button" data-view="research" data-tooltip="Research">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m14.5 14.5 3 3M16 9a7 7 0 1 1-14 0 7 7 0 0 1 14 0ZM6.5 9h5M9 6.5v5"/></svg>
-              <span>AI research</span><b id="navResearch">0</b>
+              <span>Research</span><b id="navResearch">0</b>
             </button>
-            <button class="nav-item" type="button" data-view="review" data-tooltip="Review queue">
+            <button class="nav-item" type="button" data-view="review" data-tooltip="Approvals">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h9l3 3v10H4zM13 3.5v3h3M7 10h6M7 13h4"/></svg>
-              <span>Review queue</span><b id="navReview">0</b>
+              <span>Approvals</span><b id="navReview">0</b>
             </button>
           </div>
           <div class="nav-group">
@@ -51,16 +65,12 @@
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 5.5h13v10h-13zM3.5 6l6.5 5 6.5-5"/><path d="M14.5 3.5h2v2"/></svg>
               <span>Sent history</span><b id="navTracking">0</b>
             </button>
-            <button class="nav-item" type="button" data-view="drafted" data-tooltip="Mail merge exports">
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h12v13H4zM4 8h12M8 3.5v13"/></svg>
-              <span>Mail merge exports</span><b id="navDrafted">0</b>
-            </button>
           </div>
           <div class="nav-group">
             <p class="nav-label">Records</p>
-            <button class="nav-item" type="button" data-view="all" data-tooltip="All prospects">
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 4.5h13v11h-13zM3.5 8h13M8 8v7.5"/></svg>
-              <span>All prospects</span><b id="navTotal">0</b>
+            <button class="nav-item" type="button" data-view="contacts" data-tooltip="Contacts">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4" y="3.5" width="12" height="13" rx="1.5"/><circle cx="10" cy="8" r="2"/><path d="M6.8 14c.5-2 1.6-3 3.2-3s2.7 1 3.2 3M2.5 6h3M2.5 10h3M2.5 14h3"/></svg>
+              <span>Contacts</span><b id="navContacts">0</b>
             </button>
           </div>
           <div class="nav-group campaign-nav-group">
@@ -69,10 +79,6 @@
           </div>
           <div class="nav-group">
             <p class="nav-label">Sources</p>
-            <button id="captureSearchButton" class="nav-item" type="button" data-tooltip="Capture LinkedIn">
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15ZM2.8 8h14.4M2.8 12h14.4M10 2.5c2 2 2 13 0 15M10 2.5c-2 2-2 13 0 15"/></svg>
-              <span>Capture LinkedIn</span>
-            </button>
             <button id="openImportButton" class="nav-item" type="button" data-tooltip="Import list">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 7l4-4 4 4M3.5 12.5v4h13v-4"/></svg>
               <span>Import list</span>
@@ -104,37 +110,50 @@
             <p id="pageSubtitle">What needs a decision, what is scheduled, and what already went out.</p>
           </header>
 
-          <section id="agentPanel" class="agent-panel" aria-label="Vela agent search" hidden>
-            <form id="searchForm" class="agent-form">
-              <div class="agent-mark" aria-hidden="true"><span></span><span></span><span></span></div>
-              <label class="sr-only" for="searchBrief">Describe the people you want to find</label>
-              <textarea id="searchBrief" rows="2" autocomplete="off" placeholder="Describe the people you want to find, e.g. leaders responsible for power, site selection, or critical operations..."></textarea>
-              <button id="planSearchButton" class="agent-submit" type="submit" aria-label="Plan search">
-                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"/></svg>
-              </button>
-            </form>
-            <div class="agent-footer">
-              <div class="agent-tools"><button type="button" data-prompt="Find VP and director-level data center operators focused on power and critical infrastructure">Data center operators</button><button type="button" data-prompt="Find energy procurement and utility strategy leaders at large industrial loads">Energy buyers</button><button type="button" data-prompt="Find site selection leaders at AI infrastructure and colocation companies">Site selection</button></div>
-              <span><kbd>⌘</kbd><kbd>↵</kbd> to run</span>
+          <section id="agentPanel" class="agent-panel research-chat" aria-label="Research with Vela" hidden>
+            <div id="researchMessages" class="research-messages" role="log" aria-live="polite" aria-label="Research conversation">
+              <article class="research-message research-message-assistant">
+                <div class="research-message-avatar" aria-hidden="true"><img src="assets/icon-32.png" alt="" /></div>
+                <div class="research-message-content">
+                  <p>What are you working on?</p>
+                  <span>Chat with me normally, or ask me to find a specific audience. I’ll only create a research plan when the request actually needs one, and I’ll ask you to confirm before anything runs.</span>
+                  <div class="agent-tools" aria-label="Example research prompts"><button type="button" data-prompt="Find VP and director-level data center operators focused on power and critical infrastructure">Data center operators</button><button type="button" data-prompt="Find energy procurement and utility strategy leaders at large industrial loads">Energy buyers</button><button type="button" data-prompt="Find site selection leaders at AI infrastructure and colocation companies">Site selection</button></div>
+                </div>
+              </article>
             </div>
             <div id="agentActivity" class="agent-activity" hidden aria-live="polite">
-              <div class="agent-activity-copy"><span class="agent-spinner"></span><div><strong id="agentActivityTitle">Working</strong><small id="agentActivityDetail">Preparing the next step</small></div></div>
+              <div class="agent-activity-copy"><span class="agent-spinner"></span><div><strong id="agentActivityTitle" class="shimmer">Thinking…</strong><small id="agentActivityDetail">Preparing the next step</small></div></div>
               <div class="agent-steps" aria-label="Agent tools">
-                <span data-agent-step="plan">Plan</span>
-                <span data-agent-step="source">Find sources</span>
+                <span data-agent-step="plan">Understand</span>
+                <span data-agent-step="source">Source</span>
                 <span data-agent-step="research">Research</span>
-                <span data-agent-step="draft">Draft</span>
+                <span data-agent-step="draft">Prepare</span>
               </div>
             </div>
-            <div id="searchPlan" class="search-plan" hidden>
-              <div class="plan-head"><span>Vela’s plan</span><p id="searchStrategy"></p></div>
-              <div id="searchOptions" class="search-options"></div>
+            <div id="researchRunCard" class="research-run-card" hidden>
+              <div class="research-run-copy">
+                <span id="researchRunStatus" class="research-run-status">Searching</span>
+                <p id="researchRunProgress">Finding matches…</p>
+              </div>
+              <div id="researchRunCounts" class="research-run-counts" aria-label="Search result counts"></div>
+              <div class="research-run-meter" aria-hidden="true"><i id="researchRunBar"></i></div>
             </div>
+            <form id="searchForm" class="agent-form research-composer" data-slot="input-group">
+              <label class="sr-only" for="searchBrief">Message the research agent</label>
+              <textarea id="searchBrief" rows="2" autocomplete="off" placeholder="Describe the people you want to research…"></textarea>
+              <div class="agent-form-footer">
+                <span>Vela will show you the plan before it runs</span>
+                <button id="planSearchButton" class="agent-submit" type="submit" aria-label="Send research message">
+                  <span>Send</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"/></svg>
+                </button>
+              </div>
+            </form>
+            <p class="research-disclaimer">AI can make mistakes. Review the audience and every draft before running outreach.</p>
           </section>
 
           <section id="metricsPanel" class="pipeline" aria-label="Pipeline summary">
             <div class="pipeline-stages">
-              <button class="pipeline-stage" type="button" data-jump-view="all">
+              <button class="pipeline-stage" type="button" data-jump-view="contacts">
                 <span>Prospects</span><strong id="totalStat">0</strong><small id="totalDelta">Across your workspace</small>
               </button>
               <button class="pipeline-stage" type="button" data-jump-view="research">
@@ -155,68 +174,114 @@
             </div>
           </section>
 
-          <section id="analyticsPanel" class="analytics-page" hidden aria-label="GTM analytics">
-            <article class="engagement-panel" aria-labelledby="engagementHeading">
-              <header class="engagement-head">
-                <div>
-                  <p class="section-kicker-visible">Outreach performance</p>
-                  <h2 id="engagementHeading">From first send to conversation</h2>
-                </div>
-                <span id="engagementWindow" class="metric-window">All time</span>
-              </header>
-              <div class="engagement-metrics">
-                <article>
-                  <span>Emails sent</span>
-                  <strong id="engagementSent">0</strong>
-                  <small>Delivered successfully</small>
-                </article>
-                <article>
-                  <span>Replies</span>
-                  <strong id="engagementReplies">0</strong>
-                  <small>Conversations started</small>
-                </article>
-                <article>
-                  <span>Response rate</span>
-                  <strong id="engagementRate">0%</strong>
-                  <small id="engagementRateDetail">No sends yet</small>
-                </article>
-                <article>
-                  <span>Meetings booked</span>
-                  <strong id="engagementMeetings">0</strong>
-                  <small>Calendar outcomes</small>
-                </article>
+          <section id="analyticsPanel" class="analytics-page analytics-v2" hidden aria-label="Team outreach analytics">
+            <header class="analytics-commandbar" aria-label="Analytics controls">
+              <div>
+                <p class="analytics-command-kicker"><span></span>Live delivery intelligence</p>
+                <strong>Team performance</strong>
+                <small id="analyticsScopeDetail">Every teammate · last 7 days</small>
               </div>
-              <div class="conversion-track" aria-label="Outreach conversion funnel">
-                <span id="conversionSent" style="--value:0%"><i></i><small>Sent</small></span>
-                <span id="conversionReplied" style="--value:0%"><i></i><small>Replied</small></span>
-                <span id="conversionBooked" style="--value:0%"><i></i><small>Booked</small></span>
+              <div id="analyticsRange" class="analytics-range" role="group" aria-label="Analytics date range">
+                <button class="is-active" type="button" data-days="7">7D</button>
+                <button type="button" data-days="30">30D</button>
+                <button type="button" data-days="90">90D</button>
               </div>
-            </article>
+            </header>
 
-            <div class="analytics-grid">
-              <article class="panel analytics-chart-panel">
-                <header class="panel-head analytics-panel-head">
-                  <div><h2>GTM sent per day</h2><p>Successful sends from this Chrome workspace</p></div>
-                  <span class="metric-window">Last 14 days</span>
+            <div id="analyticsMemberFilter" class="analytics-member-filter" role="group" aria-label="Filter analytics by teammate"></div>
+
+            <div class="analytics-hero-grid">
+              <article class="panel analytics-chart-panel" data-slot="card">
+                <header class="analytics-chart-head" data-slot="card-header">
+                  <div>
+                    <p id="analyticsScopeTitle">All team output</p>
+                    <div class="analytics-hero-number"><strong id="analyticsWeekSent">0</strong><span>emails sent</span></div>
+                  </div>
+                  <div class="chart-legend" aria-label="Chart legend"><span><i class="legend-sent"></i>Sent</span><span><i class="legend-replies"></i>Replies</span></div>
                 </header>
-                <div id="dailySendChart" class="daily-send-chart" role="img" aria-label="Emails sent per day for the last 14 days"></div>
-                <footer class="analytics-chart-summary">
-                  <span><small>Last 7 days</small><strong id="analyticsWeekSent">0</strong></span>
+                <div id="dailySendChart" class="daily-send-chart" role="img" aria-label="Emails sent and replies per day"></div>
+                <footer class="analytics-chart-summary" data-slot="card-footer">
                   <span><small>Daily average</small><strong id="analyticsDailyAverage">0</strong></span>
                   <span><small>Best day</small><strong id="analyticsBestDay">—</strong></span>
+                  <span><small>Period reply rate</small><strong id="analyticsPeriodReplyRate">0%</strong></span>
                 </footer>
               </article>
 
-              <article class="panel analytics-outcomes-panel">
-                <header class="panel-head">
-                  <div><h2>Delivery outcomes</h2><p>Current local send ledger</p></div>
+              <article class="panel analytics-leaderboard-card" data-slot="card">
+                <header class="analytics-card-title" data-slot="card-header">
+                  <div><p>Team leaderboard</p><h2>Who is sending</h2></div>
+                  <span id="analyticsActiveSenders">0 active</span>
                 </header>
-                <div id="analyticsDeliveryBreakdown" class="analytics-outcomes"></div>
+                <div id="analyticsLeaderboard" class="analytics-leaderboard" data-slot="card-content"></div>
+              </article>
+            </div>
+
+            <div class="analytics-metrics" aria-label="Selected performance summary">
+              <article class="panel analytics-stat-card is-blue" data-slot="card"><span>Emails sent</span><strong id="analyticsSentToday">0</strong><small id="analyticsSentTodayDetail">In the selected period</small></article>
+              <article class="panel analytics-stat-card is-cyan" data-slot="card"><span>People reached</span><strong id="analyticsProspectsContacted">0</strong><small id="analyticsProspectsDetail">Unique recipients</small></article>
+              <article class="panel analytics-stat-card is-green" data-slot="card"><span>Replies received</span><strong id="engagementReplies">0</strong><small id="engagementRateDetail">Human replies in this period</small></article>
+              <article class="panel analytics-stat-card is-amber" data-slot="card"><span>Reply rate</span><strong id="analyticsSendRate">0%</strong><small id="analyticsSendRateDetail">Replies divided by people reached</small></article>
+            </div>
+
+            <article class="panel analytics-team-card" data-slot="card">
+              <header class="analytics-card-title analytics-team-head" data-slot="card-header">
+                <div><p>Person-level reporting</p><h2>Team performance</h2><small id="analyticsTeamDescription">Who sent outreach in the selected period.</small></div>
+                <span>Click a teammate to drill down</span>
+              </header>
+              <div class="analytics-table-wrap" data-slot="card-content">
+                <table data-slot="table">
+                  <thead data-slot="table-header"><tr data-slot="table-row"><th data-slot="table-head">Teammate</th><th data-slot="table-head">Sent</th><th data-slot="table-head">People</th><th data-slot="table-head">Replies</th><th data-slot="table-head">Reply rate</th><th data-slot="table-head">Team share</th><th data-slot="table-head">Last send</th></tr></thead>
+                  <tbody id="analyticsTeamBody" data-slot="table-body"></tbody>
+                </table>
+              </div>
+            </article>
+
+            <div class="analytics-operations-grid">
+              <article class="panel mailbox-capacity-card" data-slot="card" aria-labelledby="mailboxCapacityHeading">
+                <header class="analytics-card-title" data-slot="card-header">
+                  <div><p>Today’s guardrails</p><h2 id="mailboxCapacityHeading">Mailbox capacity</h2></div>
+                  <span id="mailboxCapacityTotal">0 / 0 sent</span>
+                </header>
+                <div id="mailboxCapacityList" class="mailbox-capacity-list" data-slot="card-content"></div>
+              </article>
+
+              <article class="panel sequence-analytics-card" data-slot="card">
+                <header class="analytics-card-title" data-slot="card-header">
+                  <div><p>Automated outreach</p><h2>Sequence health</h2></div>
+                  <span id="analyticsReplyRate">0% reply rate</span>
+                </header>
+                <div class="sequence-summary" aria-label="Sequence summary">
+                  <span><small>Active</small><strong id="analyticsActiveSequences">0</strong><em id="analyticsActiveSequencesDetail">Waiting</em></span>
+                  <span><small>Follow-ups</small><strong id="analyticsFollowUpsSent">0</strong><em id="analyticsFollowUpsDetail">Sent automatically</em></span>
+                </div>
+                <div class="sequence-funnel" data-slot="card-content">
+                  <div><span>Initial</span><strong id="sequenceInitialCount">0</strong></div>
+                  <i aria-hidden="true"></i>
+                  <div><span>F/U 1</span><strong id="sequenceStepOneCount">0</strong></div>
+                  <i aria-hidden="true"></i>
+                  <div><span>F/U 2</span><strong id="sequenceStepTwoCount">0</strong></div>
+                  <i aria-hidden="true"></i>
+                  <div><span>F/U 3</span><strong id="sequenceStepThreeCount">0</strong></div>
+                  <i aria-hidden="true"></i>
+                  <div><span>Replies</span><strong id="sequenceReplyCount">0</strong></div>
+                </div>
+              </article>
+
+              <article class="panel analytics-activity-card" data-slot="card">
+                <header class="analytics-card-title" data-slot="card-header"><div><p>Delivery stream</p><h2>Recent sends</h2></div><span>Newest first</span></header>
+                <div id="analyticsActivityList" class="analytics-activity-list" data-slot="card-content"></div>
               </article>
             </div>
           </section>
 
           <section id="overviewPanel" class="overview" aria-label="Outreach overview">
+            <article class="panel overview-team-pulse" data-slot="card" aria-labelledby="overviewTeamPulseTitle">
+              <header class="panel-head" data-slot="card-header">
+                <div><h2 id="overviewTeamPulseTitle">Team sending pulse</h2><p id="overviewTeamPulseMeta">Who is moving outreach forward this week.</p></div>
+                <button class="panel-link" type="button" data-jump-view="analytics">Open analytics</button>
+              </header>
+              <div id="overviewTeamPulse" class="team-pulse" data-slot="card-content"></div>
+            </article>
             <article class="panel overview-main">
               <header class="panel-head">
                 <div><h2>Needs a response</h2><p><span id="overviewResponseCount">0</span> conversations waiting on you</p></div>
@@ -249,31 +314,84 @@
             </div>
           </section>
 
-          <section id="trackingPanel" class="tracking-panel" hidden aria-labelledby="trackingHeading">
-            <div class="tracking-head">
-              <div><h2 id="trackingHeading">Stored workflow activity</h2><p>Vela records imports, research, drafts, exports, and sent marks in this Chrome profile. Nothing here triggers an email.</p></div>
-            </div>
-            <div class="tracking-grid">
-              <article><span>Imported</span><strong id="trackingImported">0</strong><small>Spreadsheet + LinkedIn</small></article>
-              <article><span>Researched</span><strong id="trackingResearched">0</strong><small>Profile context prepared</small></article>
-              <article><span>Mail merge</span><strong id="trackingDrafted">0</strong><small>Exported for sending</small></article>
-              <article><span>Email sent</span><strong id="trackingSent">0</strong><small>Imported or marked manually</small></article>
-            </div>
-            <div id="trackingActivity" class="tracking-activity"></div>
-          </section>
-
           <section id="operationsPanel" class="operations-panel" hidden aria-labelledby="operationsTitle">
             <header class="operations-head">
               <div><p id="operationsKicker" class="section-kicker">Delivery</p><h2 id="operationsTitle">Scheduled sends</h2><p id="operationsDescription">Every queued Gmail send, in the order Vela will run it.</p></div>
               <button id="operationsPrimaryAction" class="button button-outline" type="button" data-jump-view="review">Review more drafts</button>
             </header>
             <div id="deliveryList" class="delivery-list"></div>
+            <div id="historyWorkspace" class="history-workspace" hidden>
+              <div class="history-summary" aria-label="Sent history summary">
+                <article data-slot="card"><span>Messages</span><strong id="historyTotal">0</strong><small>Rows in this ledger</small></article>
+                <article data-slot="card"><span>People reached</span><strong id="historyPeople">0</strong><small>Unique recipients</small></article>
+                <article data-slot="card"><span>Teammates</span><strong id="historyTeammates">0</strong><small>People who sent</small></article>
+                <article data-slot="card"><span>Delivered</span><strong id="historyDelivered">0</strong><small>Successful outcomes</small></article>
+              </div>
+              <article class="history-table-card" data-slot="card">
+                <div class="history-toolbar" data-slot="card-header">
+                  <label class="history-search" data-slot="input-group">
+                    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.7" cy="8.7" r="5.2"/><path d="m12.6 12.6 4 4"/></svg>
+                    <span class="sr-only">Search sent history</span>
+                    <input id="historySearch" type="search" placeholder="Search people, subjects, senders…" autocomplete="off" />
+                  </label>
+                  <label class="history-sender-filter"><span class="sr-only">Filter by teammate</span><select id="historySenderFilter"><option value="all">All teammates</option></select></label>
+                  <span id="historyResultCount" class="history-result-count">0 messages</span>
+                </div>
+                <div class="history-table-wrap" data-slot="card-content">
+                  <table class="history-table" data-slot="table">
+                    <thead data-slot="table-header"><tr data-slot="table-row"><th data-slot="table-head">Sent by</th><th data-slot="table-head">Recipient</th><th data-slot="table-head">Message</th><th data-slot="table-head">Mailbox</th><th data-slot="table-head">Result</th><th data-slot="table-head">Sent</th></tr></thead>
+                    <tbody id="historyBody" data-slot="table-body"></tbody>
+                  </table>
+                  <div id="historyEmpty" class="history-empty" hidden><h3>No messages match</h3><p>Try another teammate or clear the search.</p></div>
+                </div>
+                <div id="historyPagination" class="data-pagination" data-slot="card-footer" hidden></div>
+              </article>
+            </div>
+          </section>
+
+          <section id="contactsPanel" class="contacts-panel panel" data-slot="card" hidden aria-label="Team contacts">
+            <header class="contacts-command-bar" data-slot="card-header">
+              <label class="contacts-search">
+                <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.7" cy="8.7" r="5.2"/><path d="m12.6 12.6 4 4"/></svg>
+                <span class="sr-only">Search contacts</span>
+                <input id="contactsSearch" type="search" placeholder="Search contacts…" autocomplete="off" />
+              </label>
+              <div class="contacts-toolbar-actions">
+                <label class="contacts-status-filter">
+                  <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 5h13M6 10h8M8.5 15h3"/></svg>
+                  <span class="sr-only">Filter contacts by status</span>
+                  <select id="contactsStatusFilter"><option value="all">All statuses</option><option value="bounced">Bounced</option><option value="replied">Replied</option><option value="contacted">Contacted</option><option value="scheduled">Scheduled</option><option value="imported">Imported</option><option value="ready">Ready</option><option value="researching">Researching</option></select>
+                </label>
+                <button id="contactsInboxSyncButton" class="button button-outline contacts-inbox-sync" type="button">
+                  <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 6a7 7 0 1 0 1 7M16 3v3h-3"/></svg>
+                  Check inbox
+                </button>
+                <button id="contactsImportButton" class="button contacts-import-button" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 7l4-4 4 4M3.5 12.5v4h13v-4"/></svg> Import list</button>
+              </div>
+            </header>
+            <div class="contacts-filter-bar">
+              <div class="contacts-view-tabs" role="group" aria-label="Contact summary filters">
+                <button type="button" data-contact-filter="all" aria-pressed="false"><span>All contacts</span><strong id="contactsTotalMetric">0</strong></button>
+                <button type="button" data-contact-filter="contacted" aria-pressed="false"><span>Reached</span><strong id="contactsReachedMetric">0</strong></button>
+                <button type="button" data-contact-filter="replied" aria-pressed="false"><span>Replied</span><strong id="contactsRepliedMetric">0</strong></button>
+                <button type="button" data-contact-filter="bounced" class="is-risk" aria-pressed="false"><span>Bounced</span><strong id="contactsBouncedMetric">0</strong></button>
+              </div>
+              <p class="contacts-sync-state" role="status"><i aria-hidden="true"></i><span id="contactsInboxState">Gmail checks run every 30 minutes.</span></p>
+            </div>
+            <div class="contacts-table-wrap" data-slot="card-content">
+              <table class="contacts-table" data-slot="table">
+                <thead data-slot="table-header"><tr data-slot="table-row"><th data-slot="table-head">Contact</th><th data-slot="table-head">Company</th><th data-slot="table-head">Status</th><th data-slot="table-head">Delivery</th><th data-slot="table-head">Last activity</th><th data-slot="table-head">Owner</th><th data-slot="table-head"><span class="sr-only">Open contact</span></th></tr></thead>
+                <tbody id="contactsBody"></tbody>
+              </table>
+              <div id="contactsEmpty" class="contacts-empty" data-slot="empty" hidden><span class="empty-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M6 19c.7-4 2.7-6 6-6s5.3 2 6 6"/></svg></span><h3>No contacts found</h3><p>Try another search or import a list to add people to the workspace.</p></div>
+            </div>
+            <footer class="contacts-footer" data-slot="card-footer"><span id="contactsCount">0 contacts</span><div id="contactsPagination" class="data-pagination" hidden></div><span>100 per page · shared with your workspace</span></footer>
           </section>
 
           <section id="queueSection" class="queue-section" aria-labelledby="queueHeading" hidden>
             <div class="queue-titlebar">
               <div class="queue-heading-wrap">
-                <div><h2 id="queueHeading">All prospects</h2><p id="queueDescription">Every prospect across research, review, and mail merge.</p></div>
+                <div><h2 id="queueHeading">People</h2><p id="queueDescription">People in the active workflow.</p></div>
                 <div id="campaignActions" class="campaign-actions" hidden>
                   <button id="campaignActionsButton" class="button button-ghost campaign-actions-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="campaignActionsMenu">
                     <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="4" cy="10" r="1"/><circle cx="10" cy="10" r="1"/><circle cx="16" cy="10" r="1"/></svg>
@@ -289,8 +407,8 @@
               </div>
               <div class="queue-actions">
                 <button id="newCampaignButtonTop" class="button button-ghost" type="button">+ Campaign</button>
-                <button id="mailMergeReadyButton" class="button button-outline" type="button">Export ready</button>
-                <button id="processButton" class="button button-primary" type="button">Research queue</button>
+                <button id="sendAllButton" class="button button-outline" type="button">Send approved</button>
+                <button id="processButton" class="button button-primary" type="button">Draft qualified</button>
               </div>
             </div>
 
@@ -309,8 +427,9 @@
 
             <div id="bulkBar" class="bulk-bar" hidden>
               <span><strong id="selectedCount">0</strong> selected</span>
-              <button id="bulkResearchButton" type="button">Research</button>
-              <button id="bulkMailMergeButton" type="button">Export MailMerge</button>
+              <button id="bulkResearchButton" type="button">Verify + draft</button>
+              <button id="bulkApproveButton" type="button">Approve</button>
+              <button id="bulkSendButton" type="button">Send now</button>
               <button id="clearSelectionButton" type="button">Clear</button>
             </div>
 
@@ -318,7 +437,7 @@
               <table>
                 <thead><tr>
                   <th class="check-cell"><input id="selectAll" type="checkbox" aria-label="Select all visible prospects" /></th>
-                  <th>Person</th><th>Company / role</th><th>Email</th><th>Stage</th><th>Draft</th><th>Updated</th><th><span class="sr-only">Actions</span></th>
+                  <th>Person</th><th>Company / role</th><th>Vela fit</th><th>Email</th><th>Stage</th><th>Draft</th><th>Updated</th><th><span class="sr-only">Actions</span></th>
                 </tr></thead>
                 <tbody id="queueBody"></tbody>
               </table>
@@ -328,7 +447,7 @@
                 <p>Try another filter or ask the Vela agent to build a new search.</p>
               </div>
             </div>
-            <div class="table-footer"><span id="resultCount">0 prospects</span><span>Local workspace · updates automatically</span></div>
+            <div class="table-footer"><span id="resultCount">0 people</span><div><span>↑↓ navigate · Enter opens · A approves</span><button id="nextResearchBatchButton" type="button" hidden>Research next batch <span aria-hidden="true">→</span></button></div></div>
           </section>
         </div>
       </main>
@@ -342,7 +461,12 @@
       </header>
       <div class="drawer-content">
         <div class="prospect-summary"><span id="drawerAvatar" class="person-avatar">VG</span><div><strong id="drawerName">Prospect</strong><p id="drawerHeadline"></p><p id="drawerLocation" class="prospect-location"></p><a id="drawerLinkedIn" href="#" target="_blank" rel="noreferrer">Open LinkedIn profile ↗</a></div></div>
-        <div class="review-status"><span><i></i>Human review required</span><small>Nothing is sent from this screen</small></div>
+        <div class="review-status"><span><i></i>Human approval required</span><small><kbd>⌘↵</kbd> approve · <kbd>Esc</kbd> close</small></div>
+
+        <section class="drawer-section fit-review" aria-labelledby="targetFitTitle">
+          <div class="drawer-section-head"><div><p class="section-kicker">Vela target check</p><h3 id="targetFitTitle">Audience fit</h3><small id="drawerFitReason">Run verification to score this person against Vela’s target context.</small></div><span id="drawerFitBadge" class="fit-pill fit-pending">Pending</span></div>
+          <div id="drawerFitEvidence" class="fit-evidence"></div>
+        </section>
 
         <section class="drawer-section email-review" aria-labelledby="emailReviewTitle">
           <div class="drawer-section-head"><div><p class="section-kicker">Email</p><h3 id="emailReviewTitle">Choose a recipient</h3><small id="drawerEmailSource">Contact details found during research</small></div><span id="drawerEmailStatus" class="verification-pill">Found</span></div>
@@ -374,15 +498,23 @@
       <footer class="drawer-footer">
         <button id="markSentButton" class="button button-ghost" type="button">Mark email sent</button>
         <button id="saveReviewButton" class="button button-outline" type="button">Save changes</button>
-        <button id="approveDraftButton" class="button button-primary" type="button">Approve &amp; export</button>
+        <button id="approveDraftButton" class="button button-primary" type="button">Approve draft</button>
       </footer>
     </aside>
+
+    <dialog id="sendDialog" class="modal send-modal" aria-labelledby="sendDialogTitle">
+      <form method="dialog" class="modal-card send-card">
+        <header><div><p class="modal-kicker">Gmail delivery</p><h2 id="sendDialogTitle">Send approved messages?</h2></div><button class="icon-button" value="cancel" aria-label="Close send dialog"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg></button></header>
+        <div class="send-dialog-body"><div class="send-count"><strong id="sendDialogCount">0</strong><span>personalized messages</span></div><p id="sendDialogDescription">Only qualified people with a verified recipient and approved draft will send.</p><div class="send-safety"><span>✓ One message per person</span><span>✓ Existing duplicate checks remain active</span><span>✓ Failures stop no other sends</span></div></div>
+        <footer><button class="button button-ghost" value="cancel">Cancel</button><button id="confirmBulkSendButton" class="button button-primary" type="button">Send all now</button></footer>
+      </form>
+    </dialog>
 
     <dialog id="importDialog" class="modal import-modal">
       <form method="dialog" class="modal-card import-card">
         <header><div><h2>Import prospects</h2></div><button class="icon-button" value="cancel" aria-label="Close import dialog"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg></button></header>
         <div class="import-source-tabs" role="tablist" aria-label="Import source">
-          <button class="is-active" type="button" role="tab" aria-selected="true" data-import-source="spreadsheet"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h12v13H4zM4 8h12M8 3.5v13"/></svg> Spreadsheet</button>
+          <button class="is-active" type="button" role="tab" aria-selected="true" data-import-source="spreadsheet"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h12v13H4zM4 8h12M8 3.5v13"/></svg> Google Sheet / file</button>
           <button type="button" role="tab" aria-selected="false" data-import-source="linkedin"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5h12M4 10h12M4 15h8"/></svg> LinkedIn URLs</button>
         </div>
         <div class="modal-body import-body">
@@ -390,9 +522,9 @@
             <label id="dropZone" class="drop-zone" for="importFileInput">
               <input id="importFileInput" type="file" accept=".xlsx,.xls,.csv" />
               <span class="drop-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V5M8 9l4-4 4 4M5 15v4h14v-4"/></svg></span>
-              <strong id="importFileName">Drop a spreadsheet here</strong>
-              <small>or choose an .xlsx, .xls, or .csv file</small>
-              <em>MailMerge.xlsx columns are recognized automatically</em>
+              <strong id="importFileName">Drop a Google Sheet export here</strong>
+              <small>Download as .xlsx or .csv, or choose any compatible spreadsheet</small>
+              <em>Existing sent dates are imported into shared activity</em>
             </label>
             <div id="mappingStage" class="mapping-stage" hidden>
               <div class="mapping-head"><div><strong>Map columns</strong><span id="mappingSummary">Match each source column to a Vela field.</span></div><button id="replaceImportFile" type="button">Choose another file</button></div>

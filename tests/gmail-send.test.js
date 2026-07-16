@@ -5,11 +5,12 @@ import {
   GmailApiError,
   buildMimeMessage,
   gmailSendPayload,
+  gmailThreadHasReply,
   sendGmailMessage,
   uniqueRecipients,
 } from "../lib/gmail-send.js";
 
-test("builds one safe RFC message for one verified recipient", () => {
+test("builds one safe RFC message for one valid recipient", () => {
   const message = buildMimeMessage({ to: "person@example.com", subject: "Power in Montréal", body: "Hi,\n\nHello." });
   assert.match(message, /^To: person@example\.com\r\n/);
   assert.match(message, /Subject: =\?UTF-8\?B\?/);
@@ -17,7 +18,7 @@ test("builds one safe RFC message for one verified recipient", () => {
 });
 
 test("rejects multi-address headers and header injection", () => {
-  assert.throws(() => buildMimeMessage({ to: "one@example.com,two@example.com", subject: "Hi", body: "Body" }), /valid verified recipient/);
+  assert.throws(() => buildMimeMessage({ to: "one@example.com,two@example.com", subject: "Hi", body: "Body" }), /valid recipient/);
   assert.throws(() => buildMimeMessage({ to: "one@example.com", subject: "Hi\r\nBcc: bad@example.com", body: "Body" }), /line breaks/);
 });
 
@@ -26,6 +27,33 @@ test("deduplicates recipients while keeping separate MIME payloads", () => {
   const payload = gmailSendPayload({ to: "one@example.com", subject: "Hello", body: "Body" });
   assert.deepEqual(Object.keys(payload), ["raw"]);
   assert.match(payload.raw, /^[A-Za-z0-9_-]+$/);
+});
+
+test("follow-ups carry Gmail thread and RFC reply references", () => {
+  const payload = gmailSendPayload({
+    to: "one@example.com",
+    subject: "Seeking advice",
+    body: "Following up",
+    threadId: "thread-1",
+    replyToMessageId: "<initial@vela.energy>",
+    messageId: "<follow-up@vela.energy>",
+  });
+  assert.equal(payload.threadId, "thread-1");
+  const mime = buildMimeMessage({ to: "one@example.com", subject: "Seeking advice", body: "Following up", replyToMessageId: "<initial@vela.energy>" });
+  assert.match(mime, /In-Reply-To: <initial@vela\.energy>/);
+  assert.match(mime, /References: <initial@vela\.energy>/);
+});
+
+test("reply detection checks only newer inbound thread messages", async () => {
+  const replied = await gmailThreadHasReply("token", { threadId: "thread-1", senderEmail: "tarun@vela.energy", sentAt: "2026-07-15T00:00:00.000Z" }, {
+    async fetchImpl() {
+      return { ok: true, async json() { return { messages: [
+        { internalDate: String(Date.parse("2026-07-15T00:01:00.000Z")), payload: { headers: [{ name: "From", value: "Tarun <tarun@vela.energy>" }] } },
+        { internalDate: String(Date.parse("2026-07-15T00:02:00.000Z")), payload: { headers: [{ name: "From", value: "Prospect <person@example.com>" }] } },
+      ] }; } };
+    },
+  });
+  assert.equal(replied, true);
 });
 
 test("posts messages.send and surfaces Gmail errors", async () => {

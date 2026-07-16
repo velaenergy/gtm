@@ -10,20 +10,20 @@ import {
   providerLabel,
 } from "../lib/provider-priority.js";
 
-test("prefers ContactOut when both enrichment providers are configured", () => {
+test("prefers Apollo when both enrichment providers are configured", () => {
   assert.deepEqual(
     configuredEnrichmentProviders({ contactOutApiKey: "contactout", apolloApiKey: "apollo" }),
-    [PROVIDER.CONTACTOUT, PROVIDER.APOLLO],
+    [PROVIDER.APOLLO, PROVIDER.CONTACTOUT],
   );
-  assert.equal(preferredProvider({ contactOutApiKey: "contactout", apolloApiKey: "apollo" }), PROVIDER.CONTACTOUT);
+  assert.equal(preferredProvider({ contactOutApiKey: "contactout", apolloApiKey: "apollo" }), PROVIDER.APOLLO);
 });
 
-test("uses the browser session first for enrichment but not undocumented People Search", () => {
+test("uses Apollo first and never uses ContactOut for people discovery", () => {
   const settings = { contactOutSessionEnabled: true, contactOutApiKey: "contactout", apolloApiKey: "apollo" };
-  assert.deepEqual(configuredEnrichmentProviders(settings), [PROVIDER.CONTACTOUT_SESSION, PROVIDER.CONTACTOUT, PROVIDER.APOLLO]);
-  assert.equal(preferredProvider(settings), PROVIDER.CONTACTOUT_SESSION);
+  assert.deepEqual(configuredEnrichmentProviders(settings), [PROVIDER.APOLLO, PROVIDER.CONTACTOUT_SESSION, PROVIDER.CONTACTOUT]);
+  assert.equal(preferredProvider(settings), PROVIDER.APOLLO);
   assert.deepEqual(configuredSearchProviders({ contactOutSessionEnabled: true }), []);
-  assert.equal(preferredSearchProvider(settings), PROVIDER.CONTACTOUT);
+  assert.equal(preferredSearchProvider(settings), PROVIDER.APOLLO);
 });
 
 test("falls back to Apollo when ContactOut is not configured", () => {

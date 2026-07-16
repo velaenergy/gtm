@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildWriterRequest, mergeEnrichedProfile, normalizeWorkNote, normalizeWriterResponse, openerQualityIssues, writerGenerationMode } from "../lib/ai-writer.js";
+import { buildWriterRequest, fullDraftQualityIssues, mergeEnrichedProfile, normalizeWorkNote, normalizeWriterResponse, openerQualityIssues, writerGenerationMode } from "../lib/ai-writer.js";
 import { buildOpenAIRequest, responseOutputText, writeOutreach } from "../server/openai-writer.mjs";
 
 test("builds a bounded writer payload from visible profile data", () => {
@@ -60,17 +60,17 @@ test("keeps richer LinkedIn role descriptions when provider experience is thinne
   assert.equal(merged.experiences[0].details, "Owns grid strategy and utility partnerships.");
 });
 
-test("V27 an explicit rewrite keeps the template draft and requests personalization only", () => {
-  assert.equal(writerGenerationMode("personalization", { explicitRewrite: true }), "personalization");
-  assert.equal(writerGenerationMode("full", { explicitRewrite: true }), "personalization");
-  assert.equal(writerGenerationMode("personalization"), "personalization");
+test("V27 an explicit rewrite sends the template as a guide and requests a complete email", () => {
+  assert.equal(writerGenerationMode("personalization", { explicitRewrite: true }), "full");
+  assert.equal(writerGenerationMode("full", { explicitRewrite: true }), "full");
+  assert.equal(writerGenerationMode("personalization"), "full");
   const request = buildWriterRequest(
     { name: "Ben Kurian", headline: "Global Head of Cybersecurity" },
-    { senderName: "Tarun", aiGenerationMode: "personalization" },
+    { senderName: "Tarun", aiGenerationMode: "full" },
     "You lead cybersecurity across DWS.",
     { subject: "Current subject", body: "Hi Ben,\n\nCurrent full draft." },
     {
-      generationMode: "personalization",
+      generationMode: "full",
       recipient: { email: "ben.kurian@dws.com", type: "work", source: "ContactOut", verified: true },
       template: {
         id: "quick-intro",
@@ -83,7 +83,7 @@ test("V27 an explicit rewrite keeps the template draft and requests personalizat
       },
     },
   );
-  assert.equal(request.generationMode, "personalization");
+  assert.equal(request.generationMode, "full");
   assert.equal(request.recipient.email, "ben.kurian@dws.com");
   assert.equal(request.recipient.type, "work");
   assert.equal(request.currentDraft.body, "Hi Ben,\n\nCurrent full draft.");
@@ -104,8 +104,9 @@ test("uses gpt-5.4-mini and strict structured output without storing the respons
   assert.equal(request.store, false);
   assert.equal(request.text.format.type, "json_schema");
   assert.equal(request.text.format.strict, true);
-  assert.match(request.instructions, /only the workNote personalization slot/i);
-  assert.match(request.instructions, /subject and body verbatim/i);
+  assert.match(request.instructions, /complete, natural first-touch outreach email/i);
+  assert.match(request.instructions, /Vary the subject, transitions, wording, paragraph count/i);
+  assert.match(request.instructions, /Do not hard-wrap lines inside a paragraph/i);
   assert.match(request.instructions, /Do not default to praise/);
   assert.match(request.instructions, /When context is thin, be honest and specific/);
   assert.match(request.instructions, /About section and each role description/i);
@@ -127,10 +128,31 @@ test("rejects short and generic AI outreach patterns", () => {
   assert.match(openerQualityIssues("Your current role at Wells Fargo and teaching experience, suggests you can explain complex systems.").join(" "), /inline template slot/i);
 });
 
-test("V27 ignores model-written email copy and preserves the rendered template", async () => {
+test("V27 validates natural complete drafts and required sender details", () => {
+  const input = { sender: { name: "Tarun", calendarUrl: "https://cal.example/vela" } };
+  assert.match(fullDraftQualityIssues({ subject: "Hi", body: "Too short", workNote: "Grid operations" }, input).join(" "), /too short/i);
+  assert.match(fullDraftQualityIssues({
+    subject: "Power planning at Relay",
+    body: "Hi Alex,\n\nThis paragraph has enough words to make the accidental fixed-width\nline break visible even though it should flow naturally in Gmail. It continues with Vela context and a clear request for a short conversation next week.\n\nWould you have 20 minutes? https://cal.example/vela\n\nBest,\nTarun",
+    workNote: "Alex leads grid operations at Relay.",
+  }, input).join(" "), /fixed-width line breaks/i);
+  assert.deepEqual(fullDraftQualityIssues({
+    subject: "Power planning at Relay",
+    body: "Hi Alex,\n\nYou lead grid operations at Relay, where interconnection timing shapes which projects can move. I wanted to compare notes on the places large loads lose the most time.\n\nI’m Tarun, building Vela to help energy-intensive teams navigate utilities and power procurement. Would you be open to a 20-minute conversation next week? https://cal.example/vela\n\nBest,\nTarun",
+    workNote: "Alex leads grid operations at Relay.",
+  }, input), []);
+});
+
+test("V27 uses model-written subject and variable paragraph structure", async () => {
+  const generated = {
+    subject: "Interconnection timing at Relay",
+    body: "Hi Alex,\n\nYou lead grid operations at Relay, where interconnection timing can shape which large-load projects move forward. I wanted to ask where your team sees the biggest avoidable delays today.\n\nI’m Tarun, CEO of Vela Energy. We’re building AI agents that help energy-intensive teams navigate utilities, interconnection, and power procurement so projects get energized faster.\n\nWould you be open to a 20-minute conversation next week? https://cal.com/team/velaenergy\n\nBest,\nTarun",
+    workNote: "Alex leads grid operations at Relay and works through interconnection delays for large energy users.",
+  };
   const result = await writeOutreach(
     {
       profile: { name: "Alex" },
+      sender: { name: "Tarun", calendarUrl: "https://cal.com/team/velaenergy" },
       currentDraft: { subject: "Template subject", body: "Hi Alex,\n\nTemplate body.\n\nBest,\nTarun" },
     },
     {
@@ -140,17 +162,13 @@ test("V27 ignores model-written email copy and preserves the rendered template",
         return {
           ok: true,
           async json() {
-            return { output: [{ content: [{ type: "output_text", text: '{"subject":"AI changed this","body":"AI rewrote everything","workNote":"Your grid operations work at Relay and experience navigating interconnection delays for large energy users."}' }] }] };
+            return { output: [{ content: [{ type: "output_text", text: JSON.stringify(generated) }] }] };
           },
         };
       },
     },
   );
-  assert.deepEqual(result, {
-    subject: "Template subject",
-    body: "Hi Alex,\n\nTemplate body.\n\nBest,\nTarun",
-    workNote: "Your grid operations work at Relay and experience navigating interconnection delays for large energy users.",
-  });
+  assert.deepEqual(result, generated);
   assert.equal(responseOutputText({ output_text: "direct" }), "direct");
   assert.deepEqual(normalizeWriterResponse({ data: result, model: "gpt-5.4-mini" }), {
     ...result,

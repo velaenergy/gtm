@@ -22,8 +22,18 @@
     <main class="settings-page">
       <div class="page-heading">
         <h1>Settings</h1>
-        <p>Configure how Vela GTM looks, enriches profiles, and fills outreach drafts.</p>
+        <p>Manage workspace identity, outreach, delivery, integrations, and diagnostics.</p>
       </div>
+
+      <nav class="settings-subnav" aria-label="Settings sections">
+        <button type="button" data-settings-target="templatesHeading" class="is-active">Templates</button>
+        <button type="button" data-settings-target="gmailHeading">Delivery</button>
+        <button type="button" data-settings-target="teamWorkspaceHeading">Workspace</button>
+        <button type="button" data-settings-target="credentialsHeading">AI &amp; enrichment</button>
+        <button type="button" data-settings-target="trackingHeading">Integrations</button>
+        <button type="button" data-settings-target="appearanceHeading">Appearance</button>
+        <button type="button" data-settings-target="diagnosticsHeading">Diagnostics</button>
+      </nav>
 
       <form id="settingsForm">
         <section class="settings-section" aria-labelledby="appearanceHeading">
@@ -100,7 +110,7 @@
                 <input id="contactOutApiKey" type="password" autocomplete="off" placeholder="Paste your ContactOut key" />
                 <button type="button" data-secret-toggle="contactOutApiKey">Show</button>
               </div>
-              <small>Used only if the browser session fails, and for ContactOut People Search.</small>
+              <small>Used only as a verified-email fallback after Apollo discovery and enrichment.</small>
             </label>
             <label class="field">
               <span>Apollo API key</span>
@@ -108,7 +118,7 @@
                 <input id="apolloApiKey" type="password" autocomplete="off" placeholder="Paste your Apollo key" />
                 <button type="button" data-secret-toggle="apolloApiKey">Show</button>
               </div>
-              <small>Optional fallback when ContactOut does not return a verified address.</small>
+              <small>Required for 100-person discovery and used first for profile and contact enrichment.</small>
             </label>
             <label class="field">
               <span>OpenAI API key</span>
@@ -151,67 +161,34 @@
           <div class="section-heading inline-heading">
             <div>
               <h2 id="templatesHeading">Email templates</h2>
-              <p>Create, rename, and delete the outreach drafts available in the profile popup.</p>
+              <p>Write the email once. Prospect and AI chips fill what changes for each person.</p>
             </div>
-            <span id="templateCount" class="permission-state has-access">0 templates</span>
+            <button id="addTemplateButton" class="template-add" type="button"><span aria-hidden="true">+</span> New template</button>
           </div>
-          <div class="template-manager">
-            <aside class="template-sidebar" aria-label="Saved email templates">
-              <div class="template-sidebar-head">
-                <strong>Saved templates</strong>
-                <button id="addTemplateButton" class="template-add" type="button"><span aria-hidden="true">+</span> New</button>
-              </div>
-              <div id="templateList" class="template-list" role="tablist" aria-label="Email templates"></div>
-            </aside>
-            <div class="template-workspace" role="tabpanel" aria-labelledby="templateEditorHeading">
-              <div class="template-workspace-head">
-                <div>
-                  <span>Editing template</span>
-                  <h3 id="templateEditorHeading">Template details</h3>
-                </div>
-                <button id="deleteTemplateButton" class="template-delete" type="button">Delete template</button>
-              </div>
-              <label class="field template-name-field">
-                <span>Template name</span>
-                <input id="templateName" type="text" maxlength="60" autocomplete="off" />
-                <small>Rename the template here. The name updates in the popup as you type.</small>
-              </label>
-              <label class="field"><span>Subject</span><input id="templateSubject" type="text" autocomplete="off" placeholder="Quick intro + would love to pick your brain" /></label>
-              <div class="template-sender-block">
-                <div class="template-sender-heading">
-                  <strong>Sender for this template</strong>
-                  <small>These values stay with this template and fill <code>{{senderName}}</code> and <code>{{calendarUrl}}</code>.</small>
-                </div>
-                <div class="field-grid">
-                  <label class="field">
-                    <span>Sender name</span>
-                    <input id="templateSenderName" type="text" autocomplete="name" placeholder="Tarun" />
-                  </label>
-                  <label class="field">
-                    <span>Calendar URL</span>
-                    <input id="templateCalendarUrl" type="url" inputmode="url" placeholder="https://cal.com/team/velaenergy" />
-                  </label>
-                </div>
-              </div>
-              <div class="template-variable-row"><span>Insert a variable</span><code>{{firstName}}</code> <code>{{workNote}}</code> <code>{{workNoteInline}}</code> <code>{{workNoteSentence}}</code> <code>{{shortRole}}</code> <code>{{senderName}}</code> <code>{{calendarUrl}}</code></div>
-              <label class="field"><span>Message</span><textarea id="templateBody" rows="11" spellcheck="true"></textarea></label>
-              <p class="template-required-note">Vela keeps at least one complete template so new drafts always have a fallback.</p>
-            </div>
+          <div class="template-section-heading"><div><h3>Cold emails</h3><p>The first-touch email personalized for every prospect.</p></div><span id="templateCount" class="permission-state has-access">0 templates</span></div>
+          <div id="templateList" class="template-card-grid" aria-label="Cold email templates"></div>
+          <div class="template-section-heading follow-up-heading"><div><h3>Follow-ups</h3><p>Automatic nudges sent in the original thread when there is no reply.</p></div><button id="addFollowUpButton" class="provider-test" type="button">+ New follow-up</button></div>
+          <div id="followUpList" class="template-card-grid" aria-label="Follow-up templates"></div>
+          <div class="template-ai-settings" hidden>
+            <div class="generation-options"><label class="generation-option"><input type="radio" name="aiGenerationMode" value="full" checked disabled /></label></div>
           </div>
-          <div class="template-ai-settings">
-            <div>
-              <strong>AI writing</strong>
-              <small>Vela fills only the personalized work-note variable. Your subject and template message stay unchanged.</small>
+
+          <dialog id="templateDialog" class="settings-dialog template-dialog" aria-labelledby="templateEditorHeading">
+            <div class="template-dialog-content">
+              <div class="dialog-heading"><div><span id="templateDialogKind">Cold email</span><h2 id="templateEditorHeading">Edit template</h2><p>Emails already drafted from it keep the copy they were drafted with.</p></div><button id="closeTemplateDialogButton" class="dialog-close" type="button" aria-label="Close template editor">×</button></div>
+              <div class="template-dialog-grid">
+                <label class="field"><span>Name</span><input id="templateName" type="text" maxlength="60" autocomplete="off" /></label>
+                <fieldset class="writer-mode"><legend>Who writes it</legend><label><input type="radio" name="templateWriterMode" value="gaps" checked /><span>You, with AI in the gaps</span></label><label><input type="radio" name="templateWriterMode" value="full" /><span>✣ AI writes it all</span></label></fieldset>
+              </div>
+              <label id="templateSubjectField" class="field"><span>Subject</span><input id="templateSubject" type="text" autocomplete="off" /></label>
+              <p id="followUpThreadNote" class="thread-note" hidden>This sends as a reply in the original email’s thread — no subject needed, just the message.</p>
+              <label class="field"><span>Body</span><textarea id="templateBody" rows="12" spellcheck="true"></textarea></label>
+              <div class="variable-insert"><span>Insert</span><button type="button" data-template-variable="firstName">First name</button><button type="button" data-template-variable="company">Company</button><button type="button" data-template-variable="shortRole">Current role</button><button type="button" data-template-variable="aiPersonalizedThing" class="ai-chip">✣ AI writes this</button><p><strong>Outlined chips</strong> fill from the prospect. <em>Accent chips</em> are written by AI for each prospect.</p></div>
+              <div id="sequenceEditor" class="sequence-editor"><div><strong>Automatic follow-up sequence</strong><p>If they don’t reply, send these in the same thread. Any recorded reply stops the sequence.</p></div><label class="cadence-field">every <input id="followUpCadenceDays" type="number" min="1" max="30" value="3" /> business days</label><div id="sequenceSteps" class="sequence-steps"></div><small>Leave every step on “None” to turn follow-ups off for this template.</small></div>
+              <input id="templateSenderName" type="hidden" /><input id="templateCalendarUrl" type="hidden" />
+              <div class="dialog-actions template-dialog-actions"><button id="deleteTemplateButton" class="template-delete" type="button">Delete</button><span></span><button id="cancelTemplateDialogButton" type="button">Cancel</button><button id="saveTemplateDialogButton" type="button">Save template</button></div>
             </div>
-            <div class="generation-options" aria-label="AI generation mode">
-              <label class="generation-option">
-                <input type="radio" name="aiGenerationMode" value="personalization" checked disabled />
-                <span class="generation-radio" aria-hidden="true"></span>
-                <span><strong>Personalization only</strong><small>AI uses About and role descriptions to fill {{workNoteInline}}; every other word comes from your selected template.</small></span>
-                <em>Recommended</em>
-              </label>
-            </div>
-          </div>
+          </dialog>
         </section>
 
         <section class="settings-section" aria-labelledby="gmailHeading">
@@ -254,7 +231,7 @@
               </div>
               <div id="gmailAccountsList" class="gmail-accounts-list" aria-label="Connected Gmail senders"></div>
             </div>
-            <p class="gmail-privacy-note">Google asks only for permission to send mail and identify the selected address. Vela cannot read the inbox.</p>
+            <p class="gmail-privacy-note">Google grants send access plus bounded read-only checks for replies and delivery failures. Vela stores bounce metadata, never inbox message bodies or OAuth tokens.</p>
             <details id="googleConnectionDetails" class="connection-details">
               <summary>Google connection setup</summary>
               <div class="google-chooser-setup">
@@ -276,10 +253,47 @@
             </details>
           </div>
           <label class="switch-row recipient-mode-switch">
-            <span><strong>Allow multiple recipient emails</strong><small>Off by default. Turn this on to select and send separate copies to more than one verified address for a prospect.</small></span>
-            <input id="allowMultipleRecipients" type="checkbox" />
+            <span><strong>Allow multiple recipient emails</strong><small>On by default. Select one or several addresses and send a separate copy to each recipient.</small></span>
+            <input id="allowMultipleRecipients" type="checkbox" checked />
             <i aria-hidden="true"></i>
           </label>
+        </section>
+
+        <section class="settings-section" aria-labelledby="teamWorkspaceHeading">
+          <div class="section-heading inline-heading">
+            <div>
+              <h2 id="teamWorkspaceHeading">Vela team workspace</h2>
+              <p>One place for workspace access, members, and the Gmail accounts your team adds as needed.</p>
+            </div>
+            <span id="teamAuthState" class="permission-state">Signed out</span>
+          </div>
+          <div class="workspace-identity-card">
+            <div class="workspace-identity-mark" aria-hidden="true">
+              <svg viewBox="0 0 20 20"><path d="M10 2.5 16 5v4.5c0 3.8-2.1 6.3-6 8-3.9-1.7-6-4.2-6-8V5zM7.5 10l1.7 1.7 3.5-3.8"/></svg>
+            </div>
+            <div><span>Signed-in teammate</span><strong id="teamAuthDetail">Use an @velaenergy.ai Google account.</strong><small>Supabase is protected by Row Level Security. Google tokens never enter the workspace database.</small></div>
+            <div class="tracking-actions">
+              <button id="signInVelaButton" class="provider-test" type="button">Sign in with Vela Google</button>
+              <button id="signOutVelaButton" class="provider-test" type="button" hidden>Sign out</button>
+            </div>
+          </div>
+          <div class="workspace-members-card">
+            <div class="workspace-members-head">
+              <div><h3>Members</h3><p>The first teammate to create the workspace is the admin. Later @velaenergy.ai sign-ins join as members.</p></div>
+              <button id="refreshTeamMembersButton" class="provider-test" type="button">Refresh</button>
+            </div>
+            <div class="workspace-members-table-wrap">
+              <table class="workspace-members-table">
+                <thead><tr><th>Person</th><th>Access</th><th>Joined</th><th>Action</th></tr></thead>
+                <tbody id="teamMembersBody"></tbody>
+              </table>
+              <div id="teamMembersEmpty" class="workspace-empty" hidden>
+                <span aria-hidden="true">+</span><strong>No workspace members yet</strong><p>Sign in with your Vela Google account to create or join the workspace.</p>
+              </div>
+            </div>
+            <div class="workspace-members-foot"><span>Only the admin can remove or restore members.</span><span id="teamMemberCount">0 members</span></div>
+          </div>
+          <p class="tracking-detail">Gmail senders are not preloaded. Add each account from Delivery when the team is ready to use it.</p>
         </section>
 
         <section class="settings-section" aria-labelledby="diagnosticsHeading">

@@ -6,6 +6,7 @@ import {
   GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY,
   GOOGLE_USERINFO_EMAIL_SCOPE,
   buildGoogleWebAuthUrl,
+  authorizeGoogleAccount,
   chooseGoogleAccount,
   disconnectGoogle,
   getGoogleWebAuthToken,
@@ -27,6 +28,13 @@ const FIXED_CRYPTO = {
     bytes.fill(7);
     return bytes;
   },
+  subtle: {
+    async digest(algorithm, value) {
+      assert.equal(algorithm, "SHA-256");
+      assert.ok(value.byteLength > 0);
+      return new Uint8Array(32).fill(9).buffer;
+    },
+  },
 };
 
 function chooserIdentity(calls = []) {
@@ -39,12 +47,14 @@ function chooserIdentity(calls = []) {
       calls.push(details);
       const request = new URL(details.url);
       const response = new URL(request.searchParams.get("redirect_uri"));
-      response.hash = new URLSearchParams({
+      const payload = {
         access_token: "chosen-gmail-token",
         expires_in: "3600",
         scope: request.searchParams.get("scope"),
         state: request.searchParams.get("state"),
-      }).toString();
+      };
+      if (request.searchParams.get("response_type")?.includes("id_token")) payload.id_token = "chosen-google-id-token";
+      response.hash = new URLSearchParams(payload).toString();
       return response.toString();
     },
   };
@@ -68,7 +78,39 @@ test("builds an explicit Google account chooser authorization request", () => {
   assert.equal(url.searchParams.get("response_type"), "token");
   assert.equal(url.searchParams.get("prompt"), "select_account");
   assert.equal(url.searchParams.get("redirect_uri"), REDIRECT_URI);
+  assert.equal(url.searchParams.get("hd"), "velaenergy.ai");
   assert.match(url.searchParams.get("scope"), /gmail\.send/);
+});
+
+test("requests an ID token when the Google chooser also signs into Vela", () => {
+  const url = new URL(buildGoogleWebAuthUrl({
+    clientId: WEB_CLIENT_ID,
+    redirectUri: REDIRECT_URI,
+    scopes: [GMAIL_SEND_SCOPE, "openid", "email"],
+    state: "secure-state",
+    nonce: "hashed-google-nonce",
+    interactive: true,
+    includeIdToken: true,
+  }));
+  assert.equal(url.searchParams.get("response_type"), "id_token token");
+  assert.equal(url.searchParams.get("nonce"), "hashed-google-nonce");
+});
+
+test("sends Google the hashed nonce and returns the raw nonce for Supabase verification", async () => {
+  const calls = [];
+  const authorization = await authorizeGoogleAccount({
+    identity: chooserIdentity(calls),
+    clientId: WEB_CLIENT_ID,
+    scopes: [],
+    includeIdToken: true,
+    fetchImpl: accountFetch("tony@velaenergy.ai"),
+    cryptoImpl: FIXED_CRYPTO,
+  });
+  const request = new URL(calls[0].url);
+  assert.equal(authorization.nonce, "07".repeat(32));
+  assert.equal(request.searchParams.get("nonce"), "09".repeat(32));
+  assert.notEqual(authorization.nonce, request.searchParams.get("nonce"));
+  assert.equal(authorization.idToken, "chosen-google-id-token");
 });
 
 test("V19 explains the exact redirect URI required for Google OAuth mismatch errors", () => {

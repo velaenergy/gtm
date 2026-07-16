@@ -33,13 +33,17 @@ test("ContactOut connection failures distinguish signed-out from broken sessions
   assert.equal(contactOutConnectionState({ detail: "ContactOut returned HTTP 500." }), "error");
 });
 
-test("recipient selection defaults to exactly one verified address", () => {
+test("recipient selection allows multiple addresses by default", () => {
   const recipients = ["primary@example.com", "alternate@example.com"];
-  assert.equal(DEFAULT_SETTINGS.allowMultipleRecipients, false);
+  assert.equal(DEFAULT_SETTINGS.allowMultipleRecipients, true);
   assert.equal(DEFAULT_SETTINGS.deliveryMethod, "gmail");
   assert.deepEqual(
     normalizeRecipientSelection(recipients, recipients),
     ["primary@example.com"],
+  );
+  assert.deepEqual(
+    normalizeRecipientSelection(recipients, recipients, { allowMultiple: DEFAULT_SETTINGS.allowMultipleRecipients }),
+    recipients,
   );
   assert.deepEqual(
     normalizeRecipientSelection(recipients, [], { preferred: "alternate@example.com" }),
@@ -47,7 +51,7 @@ test("recipient selection defaults to exactly one verified address", () => {
   );
 });
 
-test("recipient selection keeps multiple addresses only after opt-in", () => {
+test("recipient selection keeps multiple addresses when multi-select is enabled", () => {
   assert.deepEqual(
     normalizeRecipientSelection(
       ["primary@example.com", "alternate@example.com"],
@@ -75,17 +79,17 @@ test("V22 selecting an alternate verified recipient promotes it into compose con
   });
 });
 
-test("V19 manual Gmail compose accepts a valid visible email while direct send stays verified-only", () => {
+test("Gmail delivery accepts a valid visible email even when verification is incomplete", () => {
   const input = {
     currentEmail: "visible@example.com",
     verifiedEmails: [],
     selectedRecipients: [],
   };
   assert.deepEqual(deliveryRecipientEmails({ ...input, gmailConnected: false }), ["visible@example.com"]);
-  assert.deepEqual(deliveryRecipientEmails({ ...input, gmailConnected: true }), []);
+  assert.deepEqual(deliveryRecipientEmails({ ...input, gmailConnected: true }), ["visible@example.com"]);
 });
 
-test("unverified ContactOut candidates remain visible without crossing the direct-send boundary", () => {
+test("unverified ContactOut candidates can be selected for direct send", () => {
   const contactDetails = {
     emails: ["verified@example.com"],
     workEmails: ["verified@example.com"],
@@ -98,9 +102,9 @@ test("unverified ContactOut candidates remain visible without crossing the direc
     },
   };
   assert.deepEqual(contactEmailCandidates({ contactDetails }), [
-    { email: "verified@example.com", status: "verified", verification: "verified", selectable: true, type: "work" },
-    { email: "checking@example.com", status: "checking", verification: "pending", selectable: true, type: "work" },
-    { email: "invalid@example.com", status: "invalid", verification: "blocked", selectable: false, type: "work" },
+    { email: "verified@example.com", status: "verified", verification: "verified", selectable: true, type: "work", sources: [], source: "Unknown source" },
+    { email: "checking@example.com", status: "checking", verification: "pending", selectable: true, type: "work", sources: [], source: "Unknown source" },
+    { email: "invalid@example.com", status: "invalid", verification: "blocked", selectable: false, type: "work", sources: [], source: "Unknown source" },
   ]);
   assert.deepEqual(
     contactEmailCandidates({ currentEmail: "checking@example.com", contactDetails }).map((candidate) => candidate.email),
@@ -118,7 +122,7 @@ test("unverified ContactOut candidates remain visible without crossing the direc
     visibleEmails: ["verified@example.com", "checking@example.com"],
     verifiedEmails: ["verified@example.com"],
     selectedRecipients: ["checking@example.com"],
-  }), []);
+  }), ["checking@example.com"]);
 });
 
 const profile = {
@@ -143,15 +147,12 @@ test("the default outreach play resolves all variables", () => {
   const inlineOpener = "you have led operations across Stream Data Centers, AWS, and the Navy; I wanted to ask where large loads lose the most time getting powered";
   const variables = templateVariables(profile, { senderName: "Tarun", calendarUrl: "https://cal.com/team/velaenergy" }, opener);
   const message = applyTemplate(TEMPLATES[0], variables);
-  assert.match(message.subject, /Quick intro/);
+  assert.match(message.subject, /Seeking advice \+ your work at Stream Data Centers/);
   assert.match(message.body, /^Hi Joshua,/);
-  assert.match(message.body, /a16z Speedrun and Z Fellows/);
-  assert.ok(message.body.indexOf(inlineOpener) < message.body.indexOf("I'm Tarun, CEO"));
-  assert.match(message.body, /really impressed by/i);
-  assert.match(message.body, /Tony \(my co-founder\)/);
-  assert.match(message.body, /AI agent products that help large energy loads get powered on faster/);
-  assert.match(message.body, /would love to pick your brain/i);
-  assert.match(message.body, /20-30 minutes/);
+  assert.match(message.body, /a16z \(the world's largest venture capital firm\)/);
+  assert.ok(message.body.indexOf(opener) < message.body.indexOf("I'm Tony."));
+  assert.match(message.body, /left Tesla to build the company full-time/);
+  assert.match(message.body, /Would you be open to a 20-minute conversation/);
   assert.doesNotMatch(message.body, /\[[^\]]+\]\(https?:\/\//);
   assert.doesNotMatch(message.body, /20[–—]30/);
   assert.doesNotMatch(message.body, /{{\w+}}/);
@@ -165,7 +166,7 @@ test("inline personalization is grammatical inside the pick-your-brain template"
   );
   const variables = templateVariables({ name: "Micah" }, DEFAULT_SETTINGS, workNote);
   const message = applyTemplate(TEMPLATES[0], variables);
-  assert.match(message.body, /impressed by your current role/);
+  assert.match(message.body, /Your current role in information security/);
   assert.doesNotMatch(message.body, /\.\./);
 });
 
@@ -205,8 +206,8 @@ Best,
     applyTemplate({ subject: "Quick intro + would love to pick your brain", body: legacyBody }, variables),
     variables,
   );
-  assert.equal(migratedDraft.subject, TEMPLATES[0].subject);
-  assert.match(migratedDraft.body, /I'm Tarun, CEO of Vela Energy/);
+  assert.equal(migratedDraft.subject, applyTemplate(TEMPLATES[0], variables).subject);
+  assert.match(migratedDraft.body, /I'm Tony\./);
 });
 
 test("updates the prior untouched built-in quick intro without overwriting custom templates", () => {
@@ -226,8 +227,8 @@ Best,
     subject: "Quick intro — would value your perspective",
     body: previousBody,
   }] });
-  assert.equal(updated.subject, "Quick intro + would love to pick your brain");
-  assert.match(updated.body, /Tony \(my co-founder\)/);
+  assert.equal(updated.subject, "Seeking advice + your work at {{company}}");
+  assert.match(updated.body, /I'm Tony\./);
 
   const [custom] = emailTemplates({ emailTemplates: [{
     id: "quick-intro",
@@ -299,8 +300,27 @@ test("normalizes common enrichment response shapes and confidence scales", () =>
     phones: [],
     emailStatus: "",
     emailStatuses: {},
+    emailSources: {},
     profile: null,
   });
+});
+
+test("keeps an explicit source on each enrichment email candidate", () => {
+  const apollo = normalizeEnrichmentResponse({
+    email: "work@example.com",
+    emails: ["work@example.com"],
+    emailStatus: "verified",
+    emailStatuses: { "work@example.com": "verified" },
+    source: "Apollo verified contact",
+  });
+  assert.deepEqual(apollo.emailSources, { "work@example.com": ["Apollo"] });
+  assert.equal(contactEmailCandidates({ contactDetails: apollo })[0].source, "Apollo");
+
+  const linkedIn = contactEmailCandidates({
+    currentEmail: "visible@example.com",
+    currentEmailSource: "LinkedIn Contact Info overlay",
+  });
+  assert.deepEqual(linkedIn[0].sources, ["LinkedIn"]);
 });
 
 test("preserves per-address ContactOut verification statuses", () => {

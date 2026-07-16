@@ -1,10 +1,10 @@
-import { DEFAULT_SETTINGS, contactOutConnectionState, emailTemplates, normalizeEmailTemplates, resolveTheme } from "./lib/message.js";
+import { DEFAULT_SETTINGS, contactOutConnectionState, emailTemplates, followUpTemplates, normalizeEmailTemplates, normalizeFollowUpTemplates, resolveTheme } from "./lib/message.js";
 import {
   GOOGLE_ACCOUNT_AUTH_MODE,
   GOOGLE_ACCOUNTS_STORAGE_KEY,
   GOOGLE_ACCOUNT_STORAGE_KEY,
   GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY,
-  chooseGoogleAccount,
+  authorizeGoogleAccount,
   disconnectGoogle,
   getGoogleWebAuthToken,
   googleAuthStrategyForAccount,
@@ -14,7 +14,7 @@ import {
   selectedGoogleAccount,
   upsertGoogleAccount,
 } from "./lib/google-auth.js";
-import { GMAIL_SEND_SCOPE } from "./lib/gmail-send.js";
+import { GMAIL_READONLY_SCOPE, GMAIL_SEND_SCOPE } from "./lib/gmail-send.js";
 import { clearDiagnostics, formatDiagnostic, readDiagnostics } from "./lib/diagnostics.js";
 import { parseCredentialImport } from "./lib/settings-import.js";
 
@@ -56,6 +56,14 @@ const openAIApiKey = document.getElementById("openAIApiKey");
 const agentServerState = document.getElementById("agentServerState");
 const includeContactOutPhone = document.getElementById("includeContactOutPhone");
 const allowMultipleRecipients = document.getElementById("allowMultipleRecipients");
+const teamAuthState = document.getElementById("teamAuthState");
+const teamAuthDetail = document.getElementById("teamAuthDetail");
+const signInVelaButton = document.getElementById("signInVelaButton");
+const signOutVelaButton = document.getElementById("signOutVelaButton");
+const refreshTeamMembersButton = document.getElementById("refreshTeamMembersButton");
+const teamMembersBody = document.getElementById("teamMembersBody");
+const teamMembersEmpty = document.getElementById("teamMembersEmpty");
+const teamMemberCount = document.getElementById("teamMemberCount");
 const gmailConnectionSetup = document.getElementById("gmailConnectionSetup");
 const templateName = document.getElementById("templateName");
 const templateSubject = document.getElementById("templateSubject");
@@ -65,6 +73,19 @@ const templateCalendarUrl = document.getElementById("templateCalendarUrl");
 const templateList = document.getElementById("templateList");
 const templateCount = document.getElementById("templateCount");
 const templateEditorHeading = document.getElementById("templateEditorHeading");
+const templateDialog = document.getElementById("templateDialog");
+const templateDialogKind = document.getElementById("templateDialogKind");
+const closeTemplateDialogButton = document.getElementById("closeTemplateDialogButton");
+const cancelTemplateDialogButton = document.getElementById("cancelTemplateDialogButton");
+const saveTemplateDialogButton = document.getElementById("saveTemplateDialogButton");
+const templateSubjectField = document.getElementById("templateSubjectField");
+const followUpThreadNote = document.getElementById("followUpThreadNote");
+const followUpList = document.getElementById("followUpList");
+const addFollowUpButton = document.getElementById("addFollowUpButton");
+const sequenceEditor = document.getElementById("sequenceEditor");
+const sequenceSteps = document.getElementById("sequenceSteps");
+const followUpCadenceDays = document.getElementById("followUpCadenceDays");
+const templateWriterInputs = [...document.querySelectorAll('input[name="templateWriterMode"]')];
 const addTemplateButton = document.getElementById("addTemplateButton");
 const deleteTemplateButton = document.getElementById("deleteTemplateButton");
 const toast = document.getElementById("toast");
@@ -97,9 +118,13 @@ let toastTimer;
 let contactOutSessionConnected = false;
 let contactOutSessionMode = "checking";
 let editableTemplates = [];
+let editableFollowUps = [];
 let activeTemplateId = "";
+let activeTemplateKind = "cold";
 let connectedGoogleAccounts = [];
 let selectedGoogleAccountId = "";
+let currentTeamUser = null;
+let teamMembers = [];
 let lastSavedSettings = { ...DEFAULT_SETTINGS };
 let hasUnsavedChanges = false;
 
@@ -131,58 +156,129 @@ function markUnsaved() {
 }
 
 function activeEditableTemplate() {
-  return editableTemplates.find((template) => template.id === activeTemplateId) || editableTemplates[0];
+  const list = activeTemplateKind === "follow-up" ? editableFollowUps : editableTemplates;
+  return list.find((template) => template.id === activeTemplateId) || list[0];
 }
 
 function commitTemplateFields() {
   const active = activeEditableTemplate();
   if (!active) return;
   active.name = templateName.value.trim() || "Untitled template";
-  active.subject = templateSubject.value;
+  if (activeTemplateKind === "cold") active.subject = templateSubject.value;
   active.body = templateBody.value;
-  active.senderName = templateSenderName.value.trim();
-  active.calendarUrl = templateCalendarUrl.value.trim();
+  active.writerMode = templateWriterInputs.find((input) => input.checked)?.value === "full" ? "full" : "gaps";
+  if (activeTemplateKind === "cold") {
+    active.senderName = templateSenderName.value.trim();
+    active.calendarUrl = templateCalendarUrl.value.trim();
+    active.followUpCadenceDays = Math.min(30, Math.max(1, Number(followUpCadenceDays.value) || 3));
+    active.followUpTemplateIds = [...sequenceSteps.querySelectorAll("select")].map((select) => select.value).filter(Boolean);
+  }
+}
+
+function templateBadges(template, followUp = false) {
+  const variables = [...`${template.subject || ""}\n${template.body || ""}`.matchAll(/{{(\w+)}}/g)].map((match) => match[1]);
+  const unique = [...new Set(variables.filter((name) => name !== "aiPersonalizedThing"))];
+  return `${unique.length ? `<span class="template-badge">${unique.length} variable${unique.length === 1 ? "" : "s"}</span>` : ""}${/aiPersonalizedThing/.test(template.body || "") ? '<span class="template-badge ai">✣ 1 AI</span>' : ""}${followUp ? '<span class="template-badge">Reply</span>' : ""}`;
+}
+
+function renderTemplatePreview(element, value = "") {
+  const labels = { firstName: "First name", company: "Company", shortRole: "Current role", aiPersonalizedThing: "✣ AI: Personalized thing" };
+  const fragment = document.createDocumentFragment();
+  String(value).split(/({{\w+}})/g).forEach((part) => {
+    const match = /^{{(\w+)}}$/.exec(part);
+    if (!match) fragment.append(document.createTextNode(part));
+    else {
+      const chip = document.createElement("span");
+      chip.className = `inline-variable${match[1] === "aiPersonalizedThing" ? " ai" : ""}`;
+      chip.textContent = labels[match[1]] || match[1];
+      fragment.append(chip);
+    }
+  });
+  element.replaceChildren(fragment);
 }
 
 function renderTemplateList() {
   const fragment = document.createDocumentFragment();
   for (const template of editableTemplates) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.role = "tab";
-    button.className = template.id === activeTemplateId ? "is-active" : "";
-    button.setAttribute("aria-selected", String(template.id === activeTemplateId));
-    const name = document.createElement("span");
-    const action = document.createElement("small");
-    name.textContent = template.name || "Untitled template";
-    action.textContent = template.id === activeTemplateId ? "Editing" : "Edit";
-    button.append(name, action);
-    button.addEventListener("click", () => {
-      commitTemplateFields();
+    const card = document.createElement("article");
+    card.className = "email-template-card";
+    card.innerHTML = `<header><strong></strong><div>${templateBadges(template)}</div></header><h4></h4><p></p><footer><button type="button">Edit</button><span>${template.followUpTemplateIds?.length || 0} follow-ups · every ${template.followUpCadenceDays || 3} business days</span></footer>`;
+    card.querySelector("strong").textContent = template.name || "Untitled template";
+    renderTemplatePreview(card.querySelector("h4"), template.subject || "No subject yet");
+    renderTemplatePreview(card.querySelector("p"), template.body || "Add the email copy.");
+    card.querySelector("button").addEventListener("click", () => {
+      activeTemplateKind = "cold";
       activeTemplateId = template.id;
       renderTemplateEditor();
+      templateDialog.showModal();
+      templateName.focus();
     });
-    fragment.append(button);
+    fragment.append(card);
   }
   templateList.replaceChildren(fragment);
   templateCount.textContent = `${editableTemplates.length} template${editableTemplates.length === 1 ? "" : "s"}`;
 }
 
+function renderFollowUpList() {
+  const fragment = document.createDocumentFragment();
+  for (const template of editableFollowUps) {
+    const card = document.createElement("article");
+    card.className = "email-template-card follow-up-card";
+    card.innerHTML = `<header><strong></strong><div>${templateBadges(template, true)}</div></header><p></p><footer><button type="button">Edit</button><span>Same-thread follow-up</span></footer>`;
+    card.querySelector("strong").textContent = template.name;
+    renderTemplatePreview(card.querySelector("p"), template.body);
+    card.querySelector("button").addEventListener("click", () => {
+      activeTemplateKind = "follow-up";
+      activeTemplateId = template.id;
+      renderTemplateEditor();
+      templateDialog.showModal();
+      templateName.focus();
+    });
+    fragment.append(card);
+  }
+  followUpList.replaceChildren(fragment);
+}
+
+function renderSequenceSteps(template) {
+  sequenceSteps.replaceChildren();
+  for (let index = 0; index < 3; index += 1) {
+    const label = document.createElement("label");
+    const select = document.createElement("select");
+    label.append(`Step ${index + 1}`, select);
+    select.append(new Option("None", ""));
+    for (const followUp of editableFollowUps) select.append(new Option(followUp.name, followUp.id));
+    select.value = template.followUpTemplateIds?.[index] || "";
+    sequenceSteps.append(label);
+  }
+}
+
 function renderTemplateEditor() {
   const active = activeEditableTemplate();
   if (!active) return;
+  const followUp = activeTemplateKind === "follow-up";
   templateName.value = active.name;
-  templateSubject.value = active.subject;
+  templateSubject.value = active.subject || "";
   templateBody.value = active.body;
   templateSenderName.value = active.senderName || DEFAULT_SETTINGS.senderName;
   templateCalendarUrl.value = active.calendarUrl || DEFAULT_SETTINGS.calendarUrl;
-  templateEditorHeading.textContent = active.name || "Untitled template";
-  deleteTemplateButton.disabled = editableTemplates.length <= 1;
+  templateDialogKind.textContent = followUp ? "Follow-up message" : "Cold email";
+  templateEditorHeading.textContent = followUp ? "Edit follow-up" : "Edit template";
+  templateSubjectField.hidden = followUp;
+  followUpThreadNote.hidden = !followUp;
+  sequenceEditor.hidden = followUp;
+  followUpCadenceDays.value = active.followUpCadenceDays || 3;
+  const writer = templateWriterInputs.find((input) => input.value === (active.writerMode || "gaps"));
+  if (writer) writer.checked = true;
+  if (!followUp) renderSequenceSteps(active);
+  deleteTemplateButton.disabled = followUp ? editableFollowUps.length <= 1 : editableTemplates.length <= 1;
   renderTemplateList();
+  renderFollowUpList();
 }
 
 function fillTemplates(settings) {
   editableTemplates = emailTemplates(settings).map((template) => ({ ...template }));
+  editableFollowUps = followUpTemplates(settings).map((template) => ({ ...template }));
+  activeTemplateKind = "cold";
   activeTemplateId = editableTemplates[0]?.id || "";
   renderTemplateEditor();
 }
@@ -322,7 +418,7 @@ function fillForm(settings) {
   renderDeliveryMethod();
   renderContactOutApiStatus({ state: contactOutApiKey.value.trim() ? "ready" : "unconfigured" });
   fillTemplates(settings);
-  const generationInput = generationInputs.find((input) => input.value === "personalization");
+  const generationInput = generationInputs.find((input) => input.value === "full");
   if (generationInput) generationInput.checked = true;
   autoEnrich.checked = Boolean(settings.autoEnrich);
   const savedTheme = ["light", "dark", "system"].includes(settings.theme) ? settings.theme : DEFAULT_SETTINGS.theme;
@@ -376,6 +472,8 @@ form.addEventListener("submit", async (event) => {
     }
     const savedTemplates = normalizeEmailTemplates(editableTemplates);
     if (!savedTemplates.length) throw new Error("Keep at least one complete email template.");
+    if (editableFollowUps.some((template) => !template.name.trim() || !template.body.trim())) throw new Error("Every follow-up needs a name and message.");
+    const savedFollowUps = normalizeFollowUpTemplates(editableFollowUps);
 
     const nextSettings = {
         endpointUrl: "",
@@ -391,8 +489,9 @@ form.addEventListener("submit", async (event) => {
         includeContactOutPhone: includeContactOutPhone.checked,
         allowMultipleRecipients: allowMultipleRecipients.checked,
         deliveryMethod: deliveryMethodInputs.find((input) => input.checked)?.value === "mailto" ? "mailto" : "gmail",
-        aiGenerationMode: "personalization",
+        aiGenerationMode: "full",
         emailTemplates: savedTemplates,
+        followUpTemplates: savedFollowUps,
         templateSubject: savedTemplates[0].subject,
         templateBody: savedTemplates[0].body,
         autoEnrich: autoEnrich.checked,
@@ -400,6 +499,18 @@ form.addEventListener("submit", async (event) => {
         senderName: savedTemplates[0].senderName || DEFAULT_SETTINGS.senderName,
         calendarUrl: savedTemplates[0].calendarUrl || DEFAULT_SETTINGS.calendarUrl,
     };
+    let syncedToTeam = false;
+    if (isExtension) {
+      const authResponse = await chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_AUTH_STATUS" });
+      if (authResponse?.ok && authResponse.data?.signedIn) {
+        const syncResponse = await chrome.runtime.sendMessage({
+          type: "VELA_GTM_TEAM_TEMPLATES_SYNC",
+          templates: { emailTemplates: savedTemplates, followUpTemplates: savedFollowUps },
+        });
+        if (!syncResponse?.ok) throw new Error(syncResponse?.error || "Could not sync templates to the Vela workspace.");
+        syncedToTeam = true;
+      }
+    }
     await storage.set({ velaGtmSettings: nextSettings });
     lastSavedSettings = cloneSettings(nextSettings);
     setUnsavedChanges(false);
@@ -407,7 +518,7 @@ form.addEventListener("submit", async (event) => {
     renderGoogleChooserSetup({ saved: true });
     if (isExtension) await probeGmailConnection();
     else renderGmailConnection({ oauthConfigured: Boolean(googleOAuthStrategy({ webClientId: googleWebClientId.value })) });
-    showToast("Vela GTM settings saved.");
+    showToast(syncedToTeam ? "Settings saved and templates synced to Vela." : "Settings saved locally. Sign in to share templates.");
   } catch (error) {
     showToast(error instanceof Error ? error.message : "Could not save settings.");
   }
@@ -426,9 +537,8 @@ templateBody.addEventListener("input", commitTemplateFields);
 templateSenderName.addEventListener("input", commitTemplateFields);
 templateCalendarUrl.addEventListener("input", commitTemplateFields);
 addTemplateButton.addEventListener("click", () => {
-  commitTemplateFields();
   const id = `custom-${Date.now().toString(36)}`;
-  const previous = activeEditableTemplate();
+  const previous = editableTemplates[0];
   editableTemplates.push({
     id,
     name: "New template",
@@ -437,20 +547,77 @@ addTemplateButton.addEventListener("click", () => {
     body: "",
     senderName: previous?.senderName || DEFAULT_SETTINGS.senderName,
     calendarUrl: previous?.calendarUrl || DEFAULT_SETTINGS.calendarUrl,
+    writerMode: "gaps",
+    followUpCadenceDays: 3,
+    followUpTemplateIds: [],
   });
+  activeTemplateKind = "cold";
   activeTemplateId = id;
   renderTemplateEditor();
+  templateDialog.showModal();
   templateName.select();
   markUnsaved();
 });
 deleteTemplateButton.addEventListener("click", () => {
-  if (editableTemplates.length <= 1) return;
-  const index = editableTemplates.findIndex((template) => template.id === activeTemplateId);
-  editableTemplates = editableTemplates.filter((template) => template.id !== activeTemplateId);
-  activeTemplateId = editableTemplates[Math.max(0, index - 1)]?.id || editableTemplates[0].id;
+  const list = activeTemplateKind === "follow-up" ? editableFollowUps : editableTemplates;
+  if (list.length <= 1) return;
+  const index = list.findIndex((template) => template.id === activeTemplateId);
+  if (activeTemplateKind === "follow-up") {
+    editableFollowUps = editableFollowUps.filter((template) => template.id !== activeTemplateId);
+    editableTemplates = editableTemplates.map((template) => ({ ...template, followUpTemplateIds: (template.followUpTemplateIds || []).filter((id) => id !== activeTemplateId) }));
+    activeTemplateId = editableFollowUps[Math.max(0, index - 1)]?.id || editableFollowUps[0].id;
+  } else {
+    editableTemplates = editableTemplates.filter((template) => template.id !== activeTemplateId);
+    activeTemplateId = editableTemplates[Math.max(0, index - 1)]?.id || editableTemplates[0].id;
+  }
   renderTemplateEditor();
+  templateDialog.close();
   markUnsaved();
 });
+
+addFollowUpButton.addEventListener("click", () => {
+  const id = `follow-up-${Date.now().toString(36)}`;
+  editableFollowUps.push({ id, name: "New follow-up", body: "Hi {{firstName}},\n\n", writerMode: "gaps" });
+  activeTemplateKind = "follow-up";
+  activeTemplateId = id;
+  renderTemplateEditor();
+  templateDialog.showModal();
+  templateName.select();
+  markUnsaved();
+});
+
+closeTemplateDialogButton.addEventListener("click", () => templateDialog.close());
+cancelTemplateDialogButton.addEventListener("click", () => templateDialog.close());
+saveTemplateDialogButton.addEventListener("click", () => {
+  commitTemplateFields();
+  if (!templateName.value.trim() || !templateBody.value.trim() || (activeTemplateKind === "cold" && !templateSubject.value.trim())) {
+    showToast("Add a name, subject, and message before saving this template.");
+    return;
+  }
+  renderTemplateList();
+  renderFollowUpList();
+  markUnsaved();
+  templateDialog.close();
+  showToast("Template updated. Save changes to publish it.");
+});
+
+document.querySelectorAll("[data-template-variable]").forEach((button) => button.addEventListener("click", () => {
+  const token = `{{${button.dataset.templateVariable}}}`;
+  const start = templateBody.selectionStart;
+  templateBody.setRangeText(token, start, templateBody.selectionEnd, "end");
+  templateBody.focus();
+  markUnsaved();
+}));
+
+function activateSettingsSection(button) {
+  const target = document.getElementById(button.dataset.settingsTarget)?.closest(".settings-section");
+  document.querySelectorAll("[data-settings-target]").forEach((item) => item.classList.toggle("is-active", item === button));
+  document.querySelectorAll(".settings-section").forEach((section) => { section.hidden = section !== target; });
+  target?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+document.querySelectorAll("[data-settings-target]").forEach((button) => button.addEventListener("click", () => activateSettingsSection(button)));
+activateSettingsSection(document.querySelector("[data-settings-target].is-active"));
 
 for (const button of document.querySelectorAll("[data-secret-toggle]")) {
   button.addEventListener("click", () => {
@@ -679,6 +846,143 @@ function googleChooserReady({ webClientId = "" } = {}) {
   return googleOAuthStrategy({ webClientId }) === GOOGLE_ACCOUNT_AUTH_MODE;
 }
 
+function renderTeamAuth({ checking = false, user = null, error = "" } = {}) {
+  currentTeamUser = user;
+  teamAuthState.textContent = checking ? "Checking" : user ? user.role === "admin" ? "Admin" : "Member" : error ? "Needs attention" : "Signed out";
+  teamAuthState.classList.toggle("has-access", Boolean(user));
+  teamAuthState.classList.toggle("has-error", Boolean(error));
+  teamAuthDetail.textContent = user?.email || error || "Use an @velaenergy.ai Google account.";
+  signInVelaButton.hidden = Boolean(user);
+  signOutVelaButton.hidden = !user;
+  signInVelaButton.disabled = checking;
+}
+
+function memberInitials(value = "") {
+  const words = String(value || "").trim().split(/\s+/).filter(Boolean);
+  return (words.length > 1 ? `${words[0][0]}${words.at(-1)[0]}` : words[0]?.slice(0, 2) || "V").toUpperCase();
+}
+
+function memberJoinDate(value = "") {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime())
+    ? new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(date)
+    : "—";
+}
+
+function appendMemberText(parent, tag, value, className = "") {
+  const element = document.createElement(tag);
+  element.textContent = value;
+  if (className) element.className = className;
+  parent.append(element);
+  return element;
+}
+
+function renderTeamMembers() {
+  const fragment = document.createDocumentFragment();
+  const isAdmin = currentTeamUser?.role === "admin";
+  for (const member of teamMembers) {
+    const isCurrent = member.id === currentTeamUser?.id || member.email === currentTeamUser?.email;
+    const row = document.createElement("tr");
+    if (!member.is_active) row.classList.add("is-inactive");
+
+    const person = document.createElement("td");
+    const identity = appendMemberText(person, "div", "", "workspace-member-identity");
+    appendMemberText(identity, "span", memberInitials(member.full_name || member.email), "workspace-member-avatar");
+    const personCopy = appendMemberText(identity, "div", "", "workspace-member-copy");
+    appendMemberText(personCopy, "strong", member.full_name || member.email?.split("@")[0] || "Vela teammate");
+    appendMemberText(personCopy, "span", member.email || "");
+
+    const access = document.createElement("td");
+    const accessWrap = appendMemberText(access, "div", "", "workspace-member-access");
+    const roleLabel = member.is_active ? member.role === "admin" ? "Admin" : "Member" : "Removed";
+    appendMemberText(accessWrap, "span", roleLabel, `workspace-member-role${member.role === "admin" ? " is-admin" : ""}${!member.is_active ? " is-removed" : ""}`);
+    if (isCurrent) appendMemberText(accessWrap, "small", "You");
+
+    const joined = document.createElement("td");
+    joined.className = "workspace-member-joined";
+    joined.textContent = memberJoinDate(member.created_at);
+
+    const action = document.createElement("td");
+    if (isAdmin && !isCurrent && member.role !== "admin") {
+      const button = appendMemberText(action, "button", member.is_active ? "Remove" : "Restore", `workspace-member-action${member.is_active ? " is-destructive" : ""}`);
+      button.type = "button";
+      button.dataset.memberId = member.id;
+      button.dataset.memberActive = String(Boolean(member.is_active));
+      button.setAttribute("aria-label", `${member.is_active ? "Remove" : "Restore"} ${member.full_name || member.email}`);
+    } else {
+      appendMemberText(action, "span", "—", "workspace-member-no-action");
+    }
+    row.append(person, access, joined, action);
+    fragment.append(row);
+  }
+  teamMembersBody.replaceChildren(fragment);
+  teamMembersEmpty.hidden = teamMembers.length > 0;
+  teamMemberCount.textContent = `${teamMembers.length} ${teamMembers.length === 1 ? "member" : "members"}`;
+}
+
+async function refreshTeamAuth() {
+  if (!isExtension) { renderTeamAuth(); renderTeamMembers(); return; }
+  renderTeamAuth({ checking: true });
+  const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_AUTH_STATUS" });
+  if (!response?.ok) { renderTeamAuth({ error: response?.error || "Could not check the team session." }); teamMembers = []; renderTeamMembers(); return; }
+  renderTeamAuth({ user: response.data?.user || null });
+  if (response.data?.signedIn) {
+    const [accountsResponse, sendersResponse, templatesResponse, membersResponse] = await Promise.all([
+      chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_GMAIL_READ" }),
+      chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_SENDERS_READ" }),
+      chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_TEMPLATES_READ" }),
+      chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_MEMBERS_READ" }),
+    ]);
+    teamMembers = membersResponse?.ok && Array.isArray(membersResponse.data) ? membersResponse.data : [];
+    renderTeamMembers();
+    if (templatesResponse?.ok && !hasUnsavedChanges && templatesResponse.data?.emailTemplates?.length) {
+      const sharedSettings = {
+        ...lastSavedSettings,
+        emailTemplates: normalizeEmailTemplates(templatesResponse.data.emailTemplates),
+        followUpTemplates: normalizeFollowUpTemplates(templatesResponse.data.followUpTemplates),
+      };
+      await storage.set({ velaGtmSettings: sharedSettings });
+      lastSavedSettings = cloneSettings(sharedSettings);
+      fillTemplates(sharedSettings);
+      setUnsavedChanges(false);
+    }
+    if (accountsResponse?.ok) {
+      const allowed = new Set((sendersResponse?.ok ? sendersResponse.data : []).map((sender) => String(sender.email).toLowerCase()));
+      const shared = (accountsResponse.data || []).filter((account) => allowed.has(String(account.email).toLowerCase())).map((account) => ({ id: account.id, email: account.email, authMode: GOOGLE_ACCOUNT_AUTH_MODE }));
+      const approvedAccounts = [...connectedGoogleAccounts, ...shared].filter((account) => allowed.has(String(account.email).toLowerCase()));
+      const selected = selectedGoogleAccount(approvedAccounts, selectedGoogleAccountId);
+      await persistGoogleAccounts(approvedAccounts, selected?.id || "");
+      renderGmailConnection({ connected: Boolean(selected), oauthConfigured: true, email: selected?.email, authMode: selected?.authMode });
+    }
+  } else {
+    teamMembers = [];
+    renderTeamMembers();
+  }
+}
+
+async function signInToTeam() {
+  if (!isExtension) return showToast("Load the extension in Chrome to sign in.");
+  try {
+    signInVelaButton.disabled = true;
+    const authorization = await authorizeGoogleAccount({
+      identity: chrome.identity,
+      clientId: DEFAULT_SETTINGS.googleWebClientId,
+      scopes: [],
+      includeIdToken: true,
+    });
+    const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_SIGN_IN", idToken: authorization.idToken, accessToken: authorization.token, nonce: authorization.nonce });
+    if (!response?.ok) throw new Error(response?.error || "Vela sign-in failed.");
+    renderTeamAuth({ user: response.data.user });
+    await refreshTeamAuth();
+    showToast(`Signed in as ${response.data.user.email}.`);
+  } catch (error) {
+    renderTeamAuth({ error: error instanceof Error ? error.message : "Vela sign-in failed." });
+    showToast(error instanceof Error ? error.message : "Vela sign-in failed.");
+  } finally {
+    signInVelaButton.disabled = false;
+  }
+}
+
 function revealGoogleChooserSetup() {
   gmailChooserHint.hidden = false;
   googleConnectionDetails.open = true;
@@ -772,7 +1076,7 @@ async function probeGmailConnection() {
       await getGoogleWebAuthToken({
         identity: chrome.identity,
         clientId: configuredSettings.googleWebClientId,
-        scopes: [GMAIL_SEND_SCOPE],
+        scopes: [GMAIL_SEND_SCOPE, GMAIL_READONLY_SCOPE],
         expectedEmail: account.email,
       });
     } else {
@@ -802,14 +1106,26 @@ connectGmailButton.addEventListener("click", async () => {
   }
   try {
     connectGmailButton.disabled = true;
-    const selected = await chooseGoogleAccount({
+    const authorization = await authorizeGoogleAccount({
       identity: chrome.identity,
       clientId: configuredSettings.googleWebClientId,
-      scopes: [GMAIL_SEND_SCOPE],
+      scopes: [GMAIL_SEND_SCOPE, GMAIL_READONLY_SCOPE],
+      includeIdToken: true,
     });
+    const selected = authorization.account;
+    const authResponse = await chrome.runtime.sendMessage({
+      type: "VELA_GTM_TEAM_SIGN_IN",
+      idToken: authorization.idToken,
+      accessToken: authorization.token,
+      nonce: authorization.nonce,
+    });
+    if (!authResponse?.ok) throw new Error(authResponse?.error || "Vela team sign-in failed.");
+    const syncResponse = await chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_GMAIL_SYNC", account: selected });
+    if (!syncResponse?.ok) throw new Error(syncResponse?.error || "Could not share the Gmail account with the team.");
     await persistGoogleAccounts(upsertGoogleAccount(connectedGoogleAccounts, selected), selected.id);
     renderGmailConnection({ connected: true, oauthConfigured: true, email: selected.email, authMode: selected.authMode });
-    showToast(`${selected.email} connected for direct Gmail sending.`);
+    renderTeamAuth({ user: authResponse.data.user });
+    showToast(`${selected.email} connected and available to the Vela team.`);
   } catch (error) {
     renderGmailConnection({ oauthConfigured: true, detail: error instanceof Error ? error.message : "Could not connect Google delivery." });
     showToast(error instanceof Error ? error.message : "Could not connect Google delivery.");
@@ -848,9 +1164,50 @@ copyGoogleRedirectButton.addEventListener("click", async () => {
   }
 });
 
-loadSettings().then(() => Promise.all([probeContactOutSession(), probeGmailConnection(), refreshDiagnostics()]));
+signInVelaButton.addEventListener("click", signInToTeam);
+refreshTeamMembersButton.addEventListener("click", async () => {
+  refreshTeamMembersButton.disabled = true;
+  await refreshTeamAuth();
+  refreshTeamMembersButton.disabled = false;
+  showToast(currentTeamUser ? "Workspace members refreshed." : "Sign in to load workspace members.");
+});
+teamMembersBody.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-member-id]");
+  if (!button || !isExtension) return;
+  const member = teamMembers.find((candidate) => candidate.id === button.dataset.memberId);
+  if (!member) return;
+  const currentlyActive = button.dataset.memberActive === "true";
+  if (currentlyActive && !globalThis.confirm(`Remove ${member.full_name || member.email} from the Vela workspace? Their shared-data access will stop immediately.`)) return;
+  button.disabled = true;
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "VELA_GTM_TEAM_MEMBER_SET_ACTIVE",
+      memberId: member.id,
+      isActive: !currentlyActive,
+    });
+    if (!response?.ok) throw new Error(response?.error || "Could not update workspace access.");
+    await refreshTeamAuth();
+    showToast(`${member.full_name || member.email} ${currentlyActive ? "removed from" : "restored to"} the workspace.`);
+  } catch (error) {
+    button.disabled = false;
+    showToast(error instanceof Error ? error.message : "Could not update workspace access.");
+  }
+});
+signOutVelaButton.addEventListener("click", async () => {
+  const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_SIGN_OUT" });
+  if (!response?.ok) return showToast(response?.error || "Could not sign out.");
+  renderTeamAuth();
+  teamMembers = [];
+  renderTeamMembers();
+  showToast("Signed out of the Vela team workspace.");
+});
+
+loadSettings().then(async () => {
+  await Promise.all([probeContactOutSession(), probeGmailConnection(), refreshDiagnostics(), refreshTeamAuth()]);
+});
 globalThis.addEventListener("focus", () => {
   if (contactOutSessionEnabled.checked && !contactOutSessionConnected) probeContactOutSession();
+  refreshTeamAuth();
   refreshDiagnostics();
 });
 globalThis.matchMedia?.("(prefers-color-scheme: dark)").addEventListener("change", () => {

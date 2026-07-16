@@ -29,7 +29,8 @@ assert.ok(manifest.permissions.includes("tabs"), "tabs is required for sequentia
 assert.ok(manifest.host_permissions.includes("https://gmail.googleapis.com/*"), "Gmail send API origin is required.");
 assert.ok(manifest.host_permissions.includes("https://www.googleapis.com/*"), "Google user-info origin is required to verify the explicitly selected sender.");
 assert.ok(!manifest.permissions.includes("cookies"), "The ContactOut browser bridge must not request broad cookie access.");
-assert.ok(!manifest.host_permissions.includes("https://sheets.googleapis.com/*"), "Google Sheets API access is not part of this extension.");
+assert.ok(manifest.host_permissions.includes("https://qkqtsrfbdrvcstwtcanx.supabase.co/*"), "The Vela Supabase origin is required for team sync.");
+assert.ok(!manifest.host_permissions.includes("https://sheets.googleapis.com/*"), "Google Sheets must remain an import source, not a runtime dependency.");
 assert.ok(manifest.host_permissions.includes("https://contactout.com/*"), "ContactOut browser-session origin is required.");
 assert.ok(manifest.host_permissions.includes("https://api.contactout.com/*"), "ContactOut API origin is required.");
 assert.equal(manifest.background.service_worker, "background.js");
@@ -63,5 +64,5 @@ await Promise.all(["popup.js", "popup.css"].map((file) => access(resolve(root, f
 const dashboardHtml = await readFile(resolve(root, "dashboard.html"), "utf8");
 assert.match(dashboardHtml, /src="dashboard\.js"/);
 assert.match(dashboardHtml, /href="dashboard\.css"/);
-await Promise.all(["dashboard.js", "dashboard.css", "lib/queue.js", "lib/delivery-ledger.js", "lib/google-auth.js", "lib/gmail-send.js", "lib/schedule.js", "lib/mail-merge.js", "vendor/xlsx.full.min.js"].map((file) => access(resolve(root, file))));
+await Promise.all(["dashboard.js", "dashboard.css", "lib/queue.js", "lib/delivery-ledger.js", "lib/google-auth.js", "lib/supabase.js", "lib/gmail-send.js", "lib/schedule.js", "lib/spreadsheet-import.js", "vendor/xlsx.full.min.js"].map((file) => access(resolve(root, file))));
 console.log(`Manifest valid: ${referencedFiles.length} referenced files found.`);

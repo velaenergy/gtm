@@ -32,10 +32,12 @@
     "https://www.linkedin.com/*",
     "https://contactout.com/*",
     "https://gmail.googleapis.com/*",
+    "https://qkqtsrfbdrvcstwtcanx.supabase.co/*",
     "https://www.googleapis.com/*",
     "https://api.contactout.com/*",
     "https://api.apollo.io/*",
     "https://api.openai.com/*",
+    "https://qkqtsrfbdrvcstwtcanx.supabase.co/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
   ],
