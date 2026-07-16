@@ -8,6 +8,7 @@ import {
   currentTeamMembership,
   duplicateRecipientMatches,
   isVelaEmail,
+  recordSharedActivity,
   requireApprovedSender,
   sharedActivity,
   sharedApprovedSenders,
@@ -138,6 +139,36 @@ test("[V32] reads every ordered Supabase activity page instead of stopping at 10
   assert.match(urls[0], /order=occurred_at\.desc,id\.desc/);
   assert.match(urls[0], /limit=1000&offset=0/);
   assert.match(urls[1], /limit=1000&offset=1000/);
+});
+
+test("[V36] upserts large historical imports in bounded batches", async () => {
+  const storage = memoryStorage();
+  storage.values[SUPABASE_SESSION_STORAGE_KEY] = {
+    accessToken: "supabase-access",
+    refreshToken: "supabase-refresh",
+    expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    user: { id: "user-1", email: "tarun@velaenergy.ai" },
+  };
+  const calls = [];
+  const records = Array.from({ length: 1201 }, (_, index) => ({
+    id: `import-${index}`,
+    status: "sent",
+    mode: "imported",
+    recipients: [`person${index}@example.com`],
+    completedAt: "2026-07-15T12:00:00.000Z",
+  }));
+
+  await recordSharedActivity(records, {
+    storage,
+    fetchImpl: async (url, options) => {
+      calls.push({ url: String(url), options, body: JSON.parse(options.body) });
+      return jsonResponse([]);
+    },
+  });
+
+  assert.deepEqual(calls.map((call) => call.body.length), [500, 500, 201]);
+  assert.ok(calls.every((call) => call.url.includes("on_conflict=client_event_id")));
+  assert.ok(calls.every((call) => call.options.headers.Prefer.includes("resolution=merge-duplicates")));
 });
 
 test("reads workspace members in join order through the authenticated team session", async () => {
