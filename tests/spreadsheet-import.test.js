@@ -6,6 +6,7 @@ import {
   historicalDeliveryRecords,
   mappedRowsToProspects,
 } from "../lib/spreadsheet-import.js";
+import { OUTREACH_SUBJECT } from "../lib/message.js";
 
 const SOURCE_HEADERS = ["First Name", "Last Name", "Note about work", "Recipient", "Email Sent", "Subject", "Message"];
 
@@ -21,6 +22,7 @@ test("imports source rows as reviewable prospects", () => {
   assert.equal(result.prospects.length, 1);
   assert.equal(result.prospects[0].email, "malay@example.com");
   assert.equal(result.prospects[0].status, "ready");
+  assert.equal(result.prospects[0].subject, OUTREACH_SUBJECT);
 });
 
 test("converts imported sent dates into central activity records", () => {

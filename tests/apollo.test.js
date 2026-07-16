@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { apolloAccountStatus, broadenApolloPeopleFilters, enrichViaApollo, peopleSearchViaApollo, searchApolloPeopleWithRecovery, titlesOnlyApolloPeopleFilters } from "../lib/apollo.js";
+import { apolloAccountStatus, broadenApolloPeopleFilters, bulkEnrichViaApollo, enrichViaApollo, peopleSearchViaApollo, searchApolloPeopleWithRecovery, titlesOnlyApolloPeopleFilters } from "../lib/apollo.js";
 
 test("Apollo people match uses x-api-key and only promotes verified email", async () => {
   const result = await enrichViaApollo({ url: "https://www.linkedin.com/in/alex-morgan", name: "Alex Morgan", experiences: [{ company: "Grid Works" }] }, {
@@ -8,7 +8,7 @@ test("Apollo people match uses x-api-key and only promotes verified email", asyn
     fetchImpl: async (url, options) => {
       assert.equal(url.origin, "https://api.apollo.io");
       assert.equal(url.pathname, "/v1/people/bulk_enrich");
-      assert.equal(url.searchParams.get("reveal_personal_emails"), "true");
+      assert.equal(url.searchParams.get("reveal_personal_emails"), "false");
       assert.equal(options.headers["x-api-key"], "apollo-secret");
       assert.equal(JSON.parse(options.body).details[0].linkedin_url, "https://www.linkedin.com/in/alex-morgan");
       return { ok: true, status: 200, async json() { return { matches: [{ name: "Alex Morgan", title: "VP Operations", email: "alex@grid.example", email_status: "verified", employment_history: [{ organization_name: "Grid Works", title: "VP Operations", current: true }] }] }; } };
@@ -17,6 +17,24 @@ test("Apollo people match uses x-api-key and only promotes verified email", asyn
   assert.equal(result.email, "alex@grid.example");
   assert.equal(result.emailStatus, "verified");
   assert.equal(result.profile.company.name, "Grid Works");
+});
+
+test("Apollo enriches qualified prospects in credit-efficient batches of ten", async () => {
+  const profiles = Array.from({ length: 10 }, (_, index) => ({ providerId: `apollo-${index}`, name: `Person ${index}` }));
+  let calls = 0;
+  const results = await bulkEnrichViaApollo(profiles, {
+    apiKey: "apollo-secret",
+    fetchImpl: async (url, options) => {
+      calls += 1;
+      assert.equal(url.searchParams.get("reveal_personal_emails"), "false");
+      assert.equal(url.searchParams.get("reveal_phone_number"), "false");
+      assert.equal(JSON.parse(options.body).details.length, 10);
+      return { ok: true, status: 200, async json() { return { matches: profiles.map((profile, index) => ({ id: profile.providerId, email: `person${index}@example.com`, email_status: "verified" })) }; } };
+    },
+  });
+  assert.equal(calls, 1);
+  assert.equal(results.length, 10);
+  assert.equal(results[9].email, "person9@example.com");
 });
 
 test("Apollo people search maps filters and keeps API-ID results without requiring LinkedIn", async () => {
@@ -34,6 +52,18 @@ test("Apollo people search maps filters and keeps API-ID results without requiri
   assert.equal(result.total, 2);
   assert.equal(result.prospects.length, 2);
   assert.equal(result.prospects[0].url, "https://www.linkedin.com/in/alex-morgan");
+});
+
+test("[V48] Apollo people search scalarizes planner company lists", async () => {
+  await peopleSearchViaApollo({ company: ["AI infrastructure", "colocation companies"] }, {
+    apiKey: "apollo-secret",
+    fetchImpl: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      assert.equal(typeof body.q_organization_name, "string");
+      assert.equal(body.q_organization_name, "AI infrastructure colocation companies");
+      return { ok: true, status: 200, async json() { return { total_entries: 0, people: [] }; } };
+    },
+  });
 });
 
 test("Apollo people search keeps ID-only results and caps one page at 100", async () => {

@@ -2,7 +2,7 @@ import { contactOutAccountStatus, enrichViaContactOut } from "./lib/contactout.j
 import { writeOutreach } from "./server/openai-writer.mjs";
 import { planProspectSearch, respondToResearchMessage } from "./server/search-planner.mjs";
 import { verifyTargetFit } from "./server/target-fit.mjs";
-import { apolloAccountStatus, enrichViaApollo } from "./lib/apollo.js";
+import { apolloAccountStatus, bulkEnrichViaApollo, enrichViaApollo } from "./lib/apollo.js";
 import {
   contactOutSessionStatus,
   openContactOutSessionLogin,
@@ -24,8 +24,11 @@ import {
 import { DEFAULT_SETTINGS } from "./lib/message.js";
 import { GMAIL_READONLY_SCOPE, GMAIL_SEND_SCOPE, GmailApiError, buildMimeMessage, gmailThreadHasReply, sendGmailMessage, uniqueRecipients } from "./lib/gmail-send.js";
 import { listGmailBounces } from "./lib/gmail-bounces.js";
+import { scanFullGtmMailbox, scanIncrementalGtmMailbox } from "./lib/gmail-gtm-sync.js";
 import {
   activeSupabaseSession,
+  claimRecipientSend,
+  completeRecipientSend,
   currentTeamMembership,
   duplicateActivity,
   duplicateRecipientMatches,
@@ -34,17 +37,22 @@ import {
   sharedActivity,
   sharedApprovedSenders,
   sharedGmailAccounts,
+  sharedGtmEmailMessages,
+  sharedGtmMailboxSyncStates,
   sharedOutreachTemplates,
   sharedProspects,
-  sharedResearchRuns,
+  clearSharedProspects,
+  sharedResearchLists,
   sharedTeamProfiles,
   signInWithGoogleTokens,
   signOutSupabase,
   setTeamMemberActive,
   syncGmailAccount,
+  recordGtmEmailMessages,
   syncOutreachTemplates,
   syncProspects,
-  syncResearchRun,
+  syncResearchLists,
+  upsertGtmMailboxSyncState,
 } from "./lib/supabase.js";
 import {
   SCHEDULED_SENDS_STORAGE_KEY,
@@ -70,12 +78,55 @@ import { buildFollowUpJobs, hasRecordedReply } from "./lib/follow-up.js";
 import {
   PROVIDER_ACTION,
   RUNTIME_CAPABILITIES_MESSAGE,
+  WORKSPACE_ACTION,
   runtimeCapabilities,
 } from "./lib/runtime-protocol.js";
+import {
+  RESEARCH_AUTOMATION_DUE_STORAGE_KEY,
+  RESEARCH_AUTOMATIONS_STORAGE_KEY,
+  nextAutomationRun,
+  normalizeResearchAutomation,
+  researchAutomationAlarmName,
+  researchAutomationIdFromAlarm,
+} from "./lib/research-workspace.js";
 
 const TEAM_SYNC_STATE_STORAGE_KEY = "velaGtmTeamSyncState";
 const GMAIL_BOUNCE_SYNC_STATE_STORAGE_KEY = "velaGtmGmailBounceSyncState";
 const GMAIL_BOUNCE_ALARM = "vela-gtm-bounce-sync";
+
+async function scheduleResearchAutomation(automation = {}) {
+  const name = researchAutomationAlarmName(automation.id);
+  if (!automation.id) return automation;
+  if (!automation.isActive) {
+    await alarmsApi()?.clear?.(name);
+    return automation;
+  }
+  const nextRunAt = automation.nextRunAt || nextAutomationRun(automation.cadenceMinutes);
+  await requireAlarmsApi().create(name, { when: Math.max(Date.now() + 1_000, Date.parse(nextRunAt)) });
+  return { ...automation, nextRunAt };
+}
+
+async function markResearchAutomationDue(id = "") {
+  const saved = await chrome.storage.local.get(RESEARCH_AUTOMATION_DUE_STORAGE_KEY);
+  const due = [...new Set([...(Array.isArray(saved[RESEARCH_AUTOMATION_DUE_STORAGE_KEY]) ? saved[RESEARCH_AUTOMATION_DUE_STORAGE_KEY] : []), id].filter(Boolean))].slice(-20);
+  await chrome.storage.local.set({ [RESEARCH_AUTOMATION_DUE_STORAGE_KEY]: due });
+  const local = await chrome.storage.local.get(RESEARCH_AUTOMATIONS_STORAGE_KEY);
+  const automations = (Array.isArray(local[RESEARCH_AUTOMATIONS_STORAGE_KEY]) ? local[RESEARCH_AUTOMATIONS_STORAGE_KEY] : []).map(normalizeResearchAutomation);
+  const automation = automations.find((item) => item.id === id && item.isActive);
+  if (!automation) return;
+  const nextRunAt = nextAutomationRun(automation.cadenceMinutes);
+  const updated = normalizeResearchAutomation({ ...automation, lastRunAt: new Date().toISOString(), nextRunAt, updatedAt: new Date().toISOString() });
+  await chrome.storage.local.set({ [RESEARCH_AUTOMATIONS_STORAGE_KEY]: [updated, ...automations.filter((item) => item.id !== id)] });
+  await scheduleResearchAutomation(updated);
+}
+
+async function restoreResearchAutomationAlarms() {
+  const local = await chrome.storage.local.get(RESEARCH_AUTOMATIONS_STORAGE_KEY);
+  const automations = (Array.isArray(local[RESEARCH_AUTOMATIONS_STORAGE_KEY]) ? local[RESEARCH_AUTOMATIONS_STORAGE_KEY] : []).map(normalizeResearchAutomation);
+  await Promise.all(automations.filter((item) => item.isActive).map(scheduleResearchAutomation));
+}
+const GMAIL_GTM_SYNC_ALARM = "vela-gtm-history-sync";
+const GMAIL_GTM_SYNC_PROGRESS_STORAGE_KEY = "velaGtmGmailHistorySyncProgress";
 
 async function enablePersistentSidePanel() {
   if (!chrome.sidePanel?.setPanelBehavior) return;
@@ -343,12 +394,153 @@ async function ensureBounceAlarm() {
   await api.create(GMAIL_BOUNCE_ALARM, { delayInMinutes: 5, periodInMinutes: 30 });
 }
 
+async function ensureGtmHistoryAlarm() {
+  const api = alarmsApi();
+  if (!api?.create) return;
+  await api.create(GMAIL_GTM_SYNC_ALARM, { delayInMinutes: 10, periodInMinutes: 360 });
+}
+
+async function syncGtmMailboxes({ interactive = false, full = false } = {}) {
+  const saved = await chrome.storage.local.get([
+    GOOGLE_ACCOUNTS_STORAGE_KEY,
+    GOOGLE_ACCOUNT_STORAGE_KEY,
+    DELIVERY_LOG_STORAGE_KEY,
+  ]);
+  const accounts = normalizeGoogleAccounts(saved[GOOGLE_ACCOUNTS_STORAGE_KEY] || [], saved[GOOGLE_ACCOUNT_STORAGE_KEY]);
+  if (!accounts.length) throw new Error("Connect a Gmail sender before syncing outreach history.");
+
+  const configured = await settings();
+  const [existingMessages, syncStates, teamActivity, sharedTemplates] = await Promise.all([
+    sharedGtmEmailMessages({ includeBody: false, storage: chrome.storage.local }),
+    sharedGtmMailboxSyncStates({ storage: chrome.storage.local }),
+    sharedActivity({ storage: chrome.storage.local }),
+    sharedOutreachTemplates({ storage: chrome.storage.local }).catch(() => ({ emailTemplates: [], followUpTemplates: [] })),
+  ]);
+  const templates = {
+    emailTemplates: sharedTemplates.emailTemplates?.length ? sharedTemplates.emailTemplates : configured.emailTemplates,
+    followUpTemplates: sharedTemplates.followUpTemplates?.length ? sharedTemplates.followUpTemplates : configured.followUpTemplates,
+  };
+  const deliveryLog = normalizeDeliveryLog(saved[DELIVERY_LOG_STORAGE_KEY]);
+  const stateByAccount = new Map(syncStates.map((state) => [String(state.gmail_account_id || ""), state]));
+  const errors = [];
+  const aggregate = {
+    checkedAccounts: accounts.length,
+    messagesScanned: 0,
+    gtmMessagesFound: 0,
+    sentMessagesFound: 0,
+    threadsFound: 0,
+    repliesFound: 0,
+    bouncesFound: 0,
+    fullSync: Boolean(full),
+    errors,
+    checkedAt: "",
+  };
+
+  for (const account of accounts) {
+    const previous = stateByAccount.get(account.id) || {};
+    const accountMessages = existingMessages.filter((message) => message.gmailAccountId === account.id);
+    const knownRecords = [
+      ...deliveryLog.filter((record) => record.accountId === account.id || record.senderEmail === account.email),
+      ...teamActivity.filter((record) => record.senderEmail === account.email),
+      ...accountMessages,
+    ];
+    const startedAt = new Date().toISOString();
+    try {
+      await upsertGtmMailboxSyncState(account.id, {
+        lastHistoryId: previous.last_history_id || "",
+        lastFullSyncAt: previous.last_full_sync_at || null,
+        lastIncrementalSyncAt: previous.last_incremental_sync_at || null,
+        syncStatus: "syncing",
+        messagesScanned: previous.messages_scanned || 0,
+        gtmMessagesFound: previous.gtm_messages_found || accountMessages.length,
+        repliesFound: previous.replies_found || accountMessages.filter((message) => message.messageKind === "reply").length,
+        bouncesFound: previous.bounces_found || accountMessages.filter((message) => message.messageKind === "bounce").length,
+      }, { storage: chrome.storage.local });
+      const authorization = await gmailToken(interactive, account.id);
+      const scanOptions = {
+        account: authorization.account,
+        templates,
+        knownRecords,
+        persistBatch: (batch) => recordGtmEmailMessages(batch, { storage: chrome.storage.local }),
+        onProgress: (progress) => chrome.storage.local.set({
+          [GMAIL_GTM_SYNC_PROGRESS_STORAGE_KEY]: { accountId: account.id, accountEmail: account.email, startedAt, ...progress },
+        }),
+      };
+      let didFull = full || !previous.last_history_id || !accountMessages.length;
+      didFull ||= previous.sync_scope !== "all_sent_threads";
+      let result;
+      if (didFull) {
+        result = await scanFullGtmMailbox(authorization.token, scanOptions);
+      } else {
+        try {
+          result = await scanIncrementalGtmMailbox(authorization.token, {
+            ...scanOptions,
+            startHistoryId: previous.last_history_id,
+          });
+        } catch (error) {
+          if (!(error instanceof GmailApiError) || error.status !== 404) throw error;
+          didFull = true;
+          result = await scanFullGtmMailbox(authorization.token, scanOptions);
+        }
+      }
+      const canonicalMessages = await sharedGtmEmailMessages({ accountId: account.id, includeBody: false, storage: chrome.storage.local });
+      const canonicalOutgoing = canonicalMessages.filter((message) => message.direction === "outgoing");
+      const finishedAt = new Date().toISOString();
+      await upsertGtmMailboxSyncState(account.id, {
+        lastHistoryId: result.latestHistoryId || previous.last_history_id || "",
+        lastFullSyncAt: didFull ? finishedAt : previous.last_full_sync_at || null,
+        lastIncrementalSyncAt: didFull ? previous.last_incremental_sync_at || null : finishedAt,
+        syncStatus: "complete",
+        syncScope: "all_sent_threads",
+        messagesScanned: canonicalMessages.length,
+        gtmMessagesFound: canonicalMessages.length,
+        sentMessagesFound: canonicalOutgoing.length,
+        threadsFound: new Set(canonicalMessages.map((message) => message.gmailThreadId)).size,
+        repliesFound: canonicalMessages.filter((message) => message.messageKind === "reply").length,
+        bouncesFound: canonicalMessages.filter((message) => message.messageKind === "bounce").length,
+      }, { storage: chrome.storage.local });
+      aggregate.messagesScanned += canonicalMessages.length;
+      aggregate.gtmMessagesFound += canonicalMessages.length;
+      aggregate.sentMessagesFound = (aggregate.sentMessagesFound || 0) + canonicalOutgoing.length;
+      aggregate.threadsFound = (aggregate.threadsFound || 0) + new Set(canonicalMessages.map((message) => message.gmailThreadId)).size;
+      aggregate.repliesFound += canonicalMessages.filter((message) => message.messageKind === "reply").length;
+      aggregate.bouncesFound += canonicalMessages.filter((message) => message.messageKind === "bounce").length;
+      aggregate.fullSync ||= didFull;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Gmail history sync failed.";
+      errors.push({ account: account.email, error: message });
+      await upsertGtmMailboxSyncState(account.id, {
+        lastHistoryId: previous.last_history_id || "",
+        lastFullSyncAt: previous.last_full_sync_at || null,
+        lastIncrementalSyncAt: previous.last_incremental_sync_at || null,
+        syncStatus: "error",
+        syncScope: previous.sync_scope || "gtm_only",
+        messagesScanned: previous.messages_scanned || 0,
+        gtmMessagesFound: previous.gtm_messages_found || accountMessages.length,
+        sentMessagesFound: previous.sent_messages_found || 0,
+        threadsFound: previous.threads_found || 0,
+        repliesFound: previous.replies_found || 0,
+        bouncesFound: previous.bounces_found || 0,
+        lastError: message,
+      }, { storage: chrome.storage.local }).catch(() => {});
+    }
+  }
+  aggregate.checkedAt = new Date().toISOString();
+  await chrome.storage.local.set({ [GMAIL_GTM_SYNC_PROGRESS_STORAGE_KEY]: { ...aggregate, status: errors.length ? "error" : "complete" } });
+  if (errors.length === accounts.length) throw new Error(errors[0].error);
+  return aggregate;
+}
+
 async function teamSnapshot() {
   const saved = await chrome.storage.local.get(DELIVERY_LOG_STORAGE_KEY);
   const localRecords = normalizeDeliveryLog(saved[DELIVERY_LOG_STORAGE_KEY]).map((record) => ({ ...record, source: "local" }));
   try {
-    const records = await sharedActivity({ storage: chrome.storage.local });
-    return { records: [...records, ...localRecords], backendStatus: "synced" };
+    const [records, gtmMessages, mailboxSyncStates] = await Promise.all([
+      sharedActivity({ storage: chrome.storage.local }),
+      sharedGtmEmailMessages({ includeBody: false, storage: chrome.storage.local }),
+      sharedGtmMailboxSyncStates({ storage: chrome.storage.local }),
+    ]);
+    return { records: [...records, ...localRecords], gtmMessages, mailboxSyncStates, backendStatus: "synced" };
   } catch (error) {
     return {
       records: localRecords,
@@ -387,6 +579,38 @@ async function requireDuplicateOverride(input = {}) {
   throw error;
 }
 
+async function reserveRecipientsForDelivery(input = {}, recipients = [], claimId = "", senderEmail = "") {
+  const claimed = [];
+  try {
+    for (const recipient of recipients) {
+      const reservation = await claimRecipientSend({
+        recipient,
+        claimId,
+        senderEmail,
+        prospectIdentity: input.prospectId || "",
+        force: Boolean(input.duplicateOverride),
+      }, { storage: chrome.storage.local });
+      if (!reservation.claimed) {
+        const error = new Error(reservation.reason === "active"
+          ? `${recipient} is already being emailed by another teammate. This send was stopped before Gmail ran.`
+          : `${recipient} already has a completed Vela send. Confirm a deliberate resend before trying again.`);
+        error.code = reservation.reason === "active" ? "RECIPIENT_SEND_IN_PROGRESS" : "DUPLICATE_RECIPIENT";
+        error.reservation = reservation;
+        throw error;
+      }
+      claimed.push(recipient);
+    }
+    return claimed;
+  } catch (error) {
+    await Promise.all(claimed.map((recipient) => completeRecipientSend({ recipient, claimId, outcome: "failed" }, { storage: chrome.storage.local }).catch(() => false)));
+    if (error?.code) throw error;
+    const reservationError = new Error("Vela could not reserve this recipient with the team ledger, so sending was stopped to prevent a duplicate. Try again after team sync reconnects.");
+    reservationError.code = "TEAM_DEDUP_UNAVAILABLE";
+    reservationError.cause = error;
+    throw reservationError;
+  }
+}
+
 async function importHistoricalDeliveries(records = []) {
   const normalized = (Array.isArray(records) ? records : [])
     .map((record) => ({ ...record, status: DELIVERY_STATUS.SENT, mode: "imported" }))
@@ -408,12 +632,16 @@ async function importHistoricalDeliveries(records = []) {
 async function sendDelivery(input = {}) {
   const recipients = uniqueRecipients(input.recipients);
   if (!recipients.length) throw new Error("Select at least one verified recipient.");
-  for (const recipient of recipients) buildMimeMessage({ to: recipient, subject: input.subject, body: input.body });
+  const deliveryId = input.id || crypto.randomUUID();
+  const messageKind = input.kind === "follow-up" ? "follow_up" : "initial";
+  const messageMetadata = { templateId: input.templateId, eventId: deliveryId, messageKind };
+  for (const recipient of recipients) buildMimeMessage({ to: recipient, subject: input.subject, body: input.body, ...messageMetadata });
   if (!input.accountId) throw new Error("Connect and choose a Gmail sender in Settings.");
   await requireDuplicateOverride({ ...input, recipients });
 
   let authorization = await gmailToken(false, input.accountId);
   await requireApprovedSender(authorization.account.email, { storage: chrome.storage.local });
+  await reserveRecipientsForDelivery(input, recipients, deliveryId, authorization.account.email);
   let { token } = authorization;
   const deliveryInput = { ...input, senderEmail: authorization.account.email };
   let refreshAttempted = false;
@@ -424,14 +652,14 @@ async function sendDelivery(input = {}) {
       const messageId = input.messageId || `<${crypto.randomUUID()}@vela.energy>`;
       let result;
       try {
-        result = await sendGmailMessage(token, { to: recipient, subject: input.subject, body: input.body, messageId, threadId: input.threadId, replyToMessageId: input.replyToMessageId });
+        result = await sendGmailMessage(token, { to: recipient, subject: input.subject, body: input.body, messageId, threadId: input.threadId, replyToMessageId: input.replyToMessageId, ...messageMetadata });
       } catch (error) {
         if (!(error instanceof GmailApiError) || error.status !== 401 || refreshAttempted) throw error;
         refreshAttempted = true;
         await chrome.identity.removeCachedAuthToken({ token }).catch(() => {});
         authorization = await gmailToken(false, input.accountId);
         token = authorization.token;
-        result = await sendGmailMessage(token, { to: recipient, subject: input.subject, body: input.body, messageId, threadId: input.threadId, replyToMessageId: input.replyToMessageId });
+        result = await sendGmailMessage(token, { to: recipient, subject: input.subject, body: input.body, messageId, threadId: input.threadId, replyToMessageId: input.replyToMessageId, ...messageMetadata });
       }
       sent.push({ recipient, messageId, ...result });
     } catch (error) {
@@ -439,7 +667,6 @@ async function sendDelivery(input = {}) {
     }
   }
   const completedAt = new Date().toISOString();
-  const deliveryId = input.id || crypto.randomUUID();
   const status = !sent.length ? DELIVERY_STATUS.FAILED : failed.length ? DELIVERY_STATUS.PARTIAL : DELIVERY_STATUS.SENT;
   const { tracking } = await recordAndSyncDelivery({
     ...deliveryInput,
@@ -449,7 +676,15 @@ async function sendDelivery(input = {}) {
     completedAt,
     updatedAt: completedAt,
     error: failed.map((item) => `${item.recipient}: ${item.error}`).join("; "),
+    gmailMessageId: sent[0]?.id || "",
+    threadId: sent[0]?.threadId || input.threadId || "",
   });
+  const sentRecipients = new Set(sent.map((item) => String(item.recipient || "").toLowerCase()));
+  await Promise.all(recipients.map((recipient) => completeRecipientSend({
+    recipient,
+    claimId: deliveryId,
+    outcome: sentRecipients.has(String(recipient).toLowerCase()) ? "sent" : "failed",
+  }, { storage: chrome.storage.local }).catch(() => false)));
   if (!sent.length) {
     const error = new Error(failed[0]?.error || "Gmail did not send the message.");
     error.deliveryRecorded = true;
@@ -658,7 +893,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       RUNTIME_CAPABILITIES_MESSAGE,
       "VELA_GTM_CONFIGURE_SIDE_PANEL", "VELA_GTM_EMAIL_SEND", "VELA_GTM_EMAIL_SCHEDULE", "VELA_GTM_EMAIL_SCHEDULE_CANCEL", "VELA_GTM_EMAIL_DUPLICATE_CHECK",
       "VELA_GTM_TEAM_AUTH_STATUS", "VELA_GTM_TEAM_SIGN_IN", "VELA_GTM_TEAM_INTERACTIVE_SIGN_IN", "VELA_GTM_TEAM_SIGN_OUT", "VELA_GTM_TEAM_ACTIVITY_READ", "VELA_GTM_TEAM_ACTIVITY_IMPORT",
-      "VELA_GTM_TEAM_GMAIL_READ", "VELA_GTM_TEAM_GMAIL_SYNC", "VELA_GTM_GMAIL_BOUNCES_SYNC", "VELA_GTM_TEAM_SENDERS_READ", "VELA_GTM_TEAM_MEMBERS_READ", "VELA_GTM_TEAM_MEMBER_SET_ACTIVE", "VELA_GTM_TEAM_PROSPECTS_READ", "VELA_GTM_TEAM_PROSPECTS_SYNC", "VELA_GTM_TEAM_RESEARCH_RUNS_READ", "VELA_GTM_TEAM_RESEARCH_RUN_SYNC", "VELA_GTM_TEAM_TEMPLATES_READ", "VELA_GTM_TEAM_TEMPLATES_SYNC",
+      "VELA_GTM_TEAM_GMAIL_READ", "VELA_GTM_TEAM_GMAIL_SYNC", ...Object.values(WORKSPACE_ACTION), "VELA_GTM_TEAM_SENDERS_READ", "VELA_GTM_TEAM_MEMBERS_READ", "VELA_GTM_TEAM_MEMBER_SET_ACTIVE", "VELA_GTM_TEAM_PROSPECTS_READ", "VELA_GTM_TEAM_PROSPECTS_SYNC", "VELA_GTM_TEAM_PROSPECTS_CLEAR", "VELA_GTM_RESEARCH_AUTOMATION_SYNC", "VELA_GTM_TEAM_RESEARCH_LISTS_READ", "VELA_GTM_TEAM_RESEARCH_LISTS_SYNC", "VELA_GTM_TEAM_TEMPLATES_READ", "VELA_GTM_TEAM_TEMPLATES_SYNC",
     ].includes(message?.type);
   if (!supported) return false;
   (async () => {
@@ -677,13 +912,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "VELA_GTM_TEAM_GMAIL_READ") return sharedGmailAccounts({ storage: chrome.storage.local });
     if (message.type === "VELA_GTM_TEAM_SENDERS_READ") return sharedApprovedSenders({ storage: chrome.storage.local });
     if (message.type === "VELA_GTM_TEAM_GMAIL_SYNC") return syncGmailAccount(message.account, { storage: chrome.storage.local });
-    if (message.type === "VELA_GTM_GMAIL_BOUNCES_SYNC") return syncGmailBounces({ interactive: Boolean(message.interactive) });
+    if (message.type === WORKSPACE_ACTION.GMAIL_BOUNCES_SYNC) return syncGmailBounces({ interactive: Boolean(message.interactive) });
+    if (message.type === WORKSPACE_ACTION.GMAIL_HISTORY_SYNC) return syncGtmMailboxes({ interactive: Boolean(message.interactive), full: Boolean(message.full) });
     if (message.type === "VELA_GTM_TEAM_MEMBERS_READ") return sharedTeamProfiles({ storage: chrome.storage.local });
     if (message.type === "VELA_GTM_TEAM_MEMBER_SET_ACTIVE") return setTeamMemberActive(message.memberId, message.isActive, { storage: chrome.storage.local });
     if (message.type === "VELA_GTM_TEAM_PROSPECTS_READ") return sharedProspects({ storage: chrome.storage.local });
     if (message.type === "VELA_GTM_TEAM_PROSPECTS_SYNC") return syncProspects(message.prospects, { storage: chrome.storage.local });
-    if (message.type === "VELA_GTM_TEAM_RESEARCH_RUNS_READ") return sharedResearchRuns({ storage: chrome.storage.local });
-    if (message.type === "VELA_GTM_TEAM_RESEARCH_RUN_SYNC") return syncResearchRun(message.run, { storage: chrome.storage.local });
+    if (message.type === "VELA_GTM_TEAM_PROSPECTS_CLEAR") return clearSharedProspects({ storage: chrome.storage.local });
+    if (message.type === "VELA_GTM_RESEARCH_AUTOMATION_SYNC") {
+      const automation = normalizeResearchAutomation(message.automation);
+      const local = await chrome.storage.local.get(RESEARCH_AUTOMATIONS_STORAGE_KEY);
+      const automations = (Array.isArray(local[RESEARCH_AUTOMATIONS_STORAGE_KEY]) ? local[RESEARCH_AUTOMATIONS_STORAGE_KEY] : []).map(normalizeResearchAutomation);
+      const scheduled = await scheduleResearchAutomation(automation);
+      await chrome.storage.local.set({ [RESEARCH_AUTOMATIONS_STORAGE_KEY]: [scheduled, ...automations.filter((item) => item.id !== scheduled.id)] });
+      return scheduled;
+    }
+    if (message.type === "VELA_GTM_TEAM_RESEARCH_LISTS_READ") return sharedResearchLists({ storage: chrome.storage.local });
+    if (message.type === "VELA_GTM_TEAM_RESEARCH_LISTS_SYNC") return syncResearchLists(message.lists, { storage: chrome.storage.local });
     if (message.type === "VELA_GTM_TEAM_TEMPLATES_READ") return sharedOutreachTemplates({ storage: chrome.storage.local });
     if (message.type === "VELA_GTM_TEAM_TEMPLATES_SYNC") return syncOutreachTemplates(message.templates, { storage: chrome.storage.local });
     const configured = await settings();
@@ -709,6 +954,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message.type === PROVIDER_ACTION.APOLLO) {
       return enrichViaApollo(message.profile, { apiKey: configured.apolloApiKey, includePhone: configured.includeContactOutPhone });
+    }
+    if (message.type === PROVIDER_ACTION.APOLLO_BULK) {
+      return bulkEnrichViaApollo(message.profiles, { apiKey: configured.apolloApiKey, includePhone: false, revealPersonalEmails: false });
     }
     if (message.type === PROVIDER_ACTION.APOLLO_STATUS) {
       return apolloAccountStatus({ apiKey: configured.apolloApiKey });
@@ -767,6 +1015,15 @@ if (alarmsApi()?.onAlarm?.addListener) {
       syncGmailBounces().catch(() => {});
       return;
     }
+    if (alarm.name === GMAIL_GTM_SYNC_ALARM) {
+      syncGtmMailboxes().catch(() => {});
+      return;
+    }
+    const automationId = researchAutomationIdFromAlarm(alarm.name);
+    if (automationId) {
+      markResearchAutomationDue(automationId).catch(() => {});
+      return;
+    }
     const id = jobIdFromAlarm(alarm.name);
     if (id) processScheduledJob(id);
   });
@@ -782,9 +1039,13 @@ chrome.runtime.onInstalled.addListener(() => {
   maintainWorkspaceBackup().catch(() => {});
   restoreScheduledAlarms().catch(() => {});
   ensureBounceAlarm().catch(() => {});
+  ensureGtmHistoryAlarm().catch(() => {});
+  restoreResearchAutomationAlarms().catch(() => {});
 });
 chrome.runtime.onStartup.addListener(() => {
   maintainWorkspaceBackup().catch(() => {});
   restoreScheduledAlarms().catch(() => {});
   ensureBounceAlarm().catch(() => {});
+  ensureGtmHistoryAlarm().catch(() => {});
+  restoreResearchAutomationAlarms().catch(() => {});
 });

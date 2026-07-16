@@ -178,9 +178,10 @@
               <div class="dialog-heading"><div><span id="templateDialogKind">Cold email</span><h2 id="templateEditorHeading">Edit template</h2><p>Emails already drafted from it keep the copy they were drafted with.</p></div><button id="closeTemplateDialogButton" class="dialog-close" type="button" aria-label="Close template editor">×</button></div>
               <div class="template-dialog-grid">
                 <label class="field"><span>Name</span><input id="templateName" type="text" maxlength="60" autocomplete="off" /></label>
+                <label id="templateSenderField" class="field"><span>Send from</span><select id="templateSenderEmail"><option value="">Use selected Gmail sender</option></select><small>Pin this template to Tony, Tarun, or another connected workspace mailbox.</small></label>
                 <fieldset class="writer-mode"><legend>Who writes it</legend><label><input type="radio" name="templateWriterMode" value="gaps" checked /><span>You, with AI in the gaps</span></label><label><input type="radio" name="templateWriterMode" value="full" /><span>✣ AI writes it all</span></label></fieldset>
               </div>
-              <label id="templateSubjectField" class="field"><span>Subject</span><input id="templateSubject" type="text" autocomplete="off" /></label>
+              <label id="templateSubjectField" class="field"><span>Subject · used for every first-touch email</span><input id="templateSubject" type="text" value="Quick intro + would love to pick your brain" readonly /></label>
               <p id="followUpThreadNote" class="thread-note" hidden>This sends as a reply in the original email’s thread — no subject needed, just the message.</p>
               <label class="field"><span>Body</span><textarea id="templateBody" rows="12" spellcheck="true"></textarea></label>
               <div class="variable-insert"><span>Insert</span><button type="button" data-template-variable="firstName">First name</button><button type="button" data-template-variable="company">Company</button><button type="button" data-template-variable="shortRole">Current role</button><button type="button" data-template-variable="aiPersonalizedThing" class="ai-chip">✣ AI writes this</button><p><strong>Outlined chips</strong> fill from the prospect. <em>Accent chips</em> are written by AI for each prospect.</p></div>

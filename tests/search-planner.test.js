@@ -14,6 +14,8 @@ test("builds a strict, non-stored search planning request", () => {
   assert.equal(request.text.format.strict, true);
   assert.equal(request.text.format.schema.properties.searches.minItems, 1);
   assert.equal(request.text.format.schema.properties.searches.maxItems, 1);
+  assert.equal(request.text.format.schema.properties.searches.items.properties.filters.properties.company.maxItems, 1);
+  assert.match(request.instructions, /exact employer name/i);
 });
 
 test("normalizes a structured Vela search plan", async () => {

@@ -3,7 +3,7 @@ create table public.research_runs (
   brief text not null,
   status text not null default 'planning'
     check (status in ('planning', 'searching', 'auditing', 'complete', 'error')),
-  requested_count integer not null default 100 check (requested_count between 1 and 100),
+  requested_count integer not null default 300 check (requested_count between 1 and 300),
   found_count integer not null default 0 check (found_count >= 0),
   audited_count integer not null default 0 check (audited_count >= 0),
   strong_count integer not null default 0 check (strong_count >= 0),

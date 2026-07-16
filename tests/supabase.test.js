@@ -5,13 +5,20 @@ import {
   SUPABASE_SESSION_STORAGE_KEY,
   activityRecordFromRow,
   activityRowsForDelivery,
+  claimRecipientSend,
+  completeRecipientSend,
   currentTeamMembership,
   duplicateRecipientMatches,
+  duplicateActivity,
+  gtmMessageRecordFromRow,
   isVelaEmail,
+  recordGtmEmailMessages,
   recordSharedActivity,
   requireApprovedSender,
   sharedActivity,
   sharedApprovedSenders,
+  sharedGtmEmailMessages,
+  sharedGtmMailboxSyncStates,
   sharedOutreachTemplates,
   sharedTeamProfiles,
   sharedResearchRuns,
@@ -19,7 +26,9 @@ import {
   setTeamMemberActive,
   syncGmailAccount,
   syncOutreachTemplates,
+  syncProspects,
   syncResearchRun,
+  upsertGtmMailboxSyncState,
 } from "../lib/supabase.js";
 
 function memoryStorage() {
@@ -96,6 +105,60 @@ test("maps one delivery into recipient-level activity rows without storing Googl
   assert.equal(JSON.stringify(rows).includes("token"), false);
 });
 
+test("stores canonical GTM Gmail messages and maps them back to analytics records", async () => {
+  const storage = memoryStorage();
+  storage.values[SUPABASE_SESSION_STORAGE_KEY] = {
+    accessToken: "supabase-access", refreshToken: "supabase-refresh",
+    expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    user: { id: "user-1", email: "riddhiman.rana@velaenergy.ai" },
+  };
+  const calls = [];
+  const message = {
+    gmailAccountId: "google-riddhiman", gmailMessageId: "message-1", gmailThreadId: "thread-1", gmailHistoryId: "100",
+    direction: "incoming", messageKind: "reply", templateId: "template-1", classificationSource: "thread_reply",
+    senderEmail: "person@example.com", recipientEmails: ["riddhiman.rana@velaenergy.ai"], subject: "Re: Seeking advice",
+    bodyText: "Happy to chat.", occurredAt: "2026-07-16T12:00:00.000Z",
+  };
+  const saved = await recordGtmEmailMessages([message], {
+    storage,
+    fetchImpl: async (url, options) => {
+      const body = JSON.parse(options.body);
+      calls.push({ url: String(url), options, body });
+      return jsonResponse(body.map((row) => ({ id: "row-1", ...row, gmail_accounts: { email: "riddhiman.rana@velaenergy.ai" } })));
+    },
+  });
+  assert.equal(calls[0].body[0].captured_by, "user-1");
+  assert.equal(calls[0].body[0].message_kind, "reply");
+  assert.match(calls[0].url, /on_conflict=gmail_account_id,gmail_message_id/);
+  assert.equal(saved[0].accountEmail, "riddhiman.rana@velaenergy.ai");
+  assert.equal(saved[0].bodyText, "Happy to chat.");
+  assert.equal(gtmMessageRecordFromRow(calls[0].body[0]).gmailMessageId, "message-1");
+});
+
+test("reads paginated GTM history without bodies and upserts mailbox cursors", async () => {
+  const storage = memoryStorage();
+  storage.values[SUPABASE_SESSION_STORAGE_KEY] = {
+    accessToken: "supabase-access", refreshToken: "supabase-refresh",
+    expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    user: { id: "user-1", email: "riddhiman.rana@velaenergy.ai" },
+  };
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url: String(url), options });
+    if (String(url).includes("gtm_mailbox_sync_state") && options.method === "GET") return jsonResponse([{ gmail_account_id: "google-riddhiman", last_history_id: "99", sync_status: "complete" }]);
+    if (String(url).includes("gtm_mailbox_sync_state")) return jsonResponse(JSON.parse(options.body));
+    return jsonResponse([{ gmail_account_id: "google-riddhiman", gmail_message_id: "message-1", gmail_thread_id: "thread-1", sender_email: "person@example.com", message_kind: "reply", occurred_at: "2026-07-16T12:00:00.000Z" }]);
+  };
+  const messages = await sharedGtmEmailMessages({ storage, fetchImpl });
+  const states = await sharedGtmMailboxSyncStates({ storage, fetchImpl });
+  const cursor = await upsertGtmMailboxSyncState("google-riddhiman", { lastHistoryId: "100", syncStatus: "complete", messagesScanned: 20, gtmMessagesFound: 4, repliesFound: 1, bouncesFound: 1 }, { storage, fetchImpl });
+  assert.equal(messages[0].bodyText, "");
+  assert.equal(states[0].last_history_id, "99");
+  assert.equal(cursor.last_history_id, "100");
+  assert.equal(JSON.parse(calls.find((call) => call.options.method === "POST").options.body)[0].updated_by, "user-1");
+  assert.equal(calls.some((call) => call.url.includes("body_text")), false);
+});
+
 test("normalizes Supabase activity and produces recipient-specific duplicate warnings", () => {
   const record = activityRecordFromRow({
     client_event_id: "delivery-1:one@example.com:sent",
@@ -114,6 +177,77 @@ test("normalizes Supabase activity and produces recipient-specific duplicate war
     subject: "",
     source: "supabase",
   }]);
+});
+
+test("imported history keeps the importer separate from the actual sender", () => {
+  const record = activityRecordFromRow({
+    client_event_id: "import-1:one@example.com:sent",
+    recipient_email: "one@example.com",
+    status: "sent",
+    delivery_mode: "imported",
+    actor_id: "user-1",
+    metadata: { actor_email: "riddhiman@velaenergy.ai" },
+    team_profiles: { id: "user-1", email: "riddhiman@velaenergy.ai", full_name: "Riddhiman Rana" },
+  });
+  assert.equal(record.operatorId, "");
+  assert.equal(record.operatorEmail, "");
+  assert.equal(record.operatorName, "");
+});
+
+test("V41 includes canonical Gmail history in duplicate-recipient checks", async () => {
+  const storage = memoryStorage();
+  storage.values[SUPABASE_SESSION_STORAGE_KEY] = {
+    accessToken: "supabase-access", refreshToken: "supabase-refresh",
+    expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    user: { id: "user-1", email: "tarun@velaenergy.ai" },
+  };
+  const urls = [];
+  const records = await duplicateActivity(["Person@Example.com"], {
+    storage,
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      return String(url).includes("gtm_email_messages")
+        ? jsonResponse([{ id: "row-1", gmail_message_id: "gmail-1", recipient_emails: ["person@example.com"], subject: "Earlier outreach", occurred_at: "2026-07-01T12:00:00.000Z", gmail_accounts: { email: "tony@velaenergy.ai" } }])
+        : jsonResponse([]);
+    },
+  });
+  assert.equal(records.length, 1);
+  assert.equal(records[0].source, "gmail");
+  assert.deepEqual(records[0].recipients, ["person@example.com"]);
+  assert.equal(duplicateRecipientMatches(["person@example.com"], records)[0].status, "sent");
+  assert.equal(urls.some((url) => url.includes("recipient_emails=ov.")), true);
+});
+
+test("atomically claims and completes a shared recipient send through RPC", async () => {
+  const storage = memoryStorage();
+  storage.values[SUPABASE_SESSION_STORAGE_KEY] = {
+    accessToken: "supabase-access", refreshToken: "supabase-refresh",
+    expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    user: { id: "user-1", email: "tarun@velaenergy.ai" },
+  };
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url: String(url), options, body: JSON.parse(options.body) });
+    return jsonResponse(String(url).includes("claim_recipient_send")
+      ? { claimed: true, recipient: "person@example.com", claim_id: "44444444-4444-4444-8444-444444444444" }
+      : true);
+  };
+  const claim = await claimRecipientSend({ recipient: "Person@Example.com", claimId: "44444444-4444-4444-8444-444444444444", senderEmail: "Tony@VelaEnergy.ai", prospectIdentity: "linkedin:person" }, { storage, fetchImpl });
+  const completed = await completeRecipientSend({ recipient: "person@example.com", claimId: "44444444-4444-4444-8444-444444444444", outcome: "sent" }, { storage, fetchImpl });
+  assert.equal(claim.claimed, true);
+  assert.equal(completed, true);
+  assert.deepEqual(calls[0].body, {
+    p_recipient_email: "person@example.com",
+    p_claim_id: "44444444-4444-4444-8444-444444444444",
+    p_sender_email: "tony@velaenergy.ai",
+    p_prospect_identity: "linkedin:person",
+    p_force: false,
+  });
+  assert.deepEqual(calls[1].body, {
+    p_recipient_email: "person@example.com",
+    p_claim_id: "44444444-4444-4444-8444-444444444444",
+    p_outcome: "sent",
+  });
 });
 
 test("[V32] reads every ordered Supabase activity page instead of stopping at 1000", async () => {
@@ -168,6 +302,34 @@ test("[V36] upserts large historical imports in bounded batches", async () => {
 
   assert.deepEqual(calls.map((call) => call.body.length), [500, 500, 201]);
   assert.ok(calls.every((call) => call.url.includes("on_conflict=client_event_id")));
+  assert.ok(calls.every((call) => call.options.headers.Prefer.includes("resolution=merge-duplicates")));
+});
+
+test("[V44] upserts every large prospect import in bounded batches", async () => {
+  const storage = memoryStorage();
+  storage.values[SUPABASE_SESSION_STORAGE_KEY] = {
+    accessToken: "supabase-access",
+    refreshToken: "supabase-refresh",
+    expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    user: { id: "user-1", email: "tarun@velaenergy.ai" },
+  };
+  const calls = [];
+  const prospects = Array.from({ length: 1201 }, (_, index) => ({
+    email: `person${index}@example.com`,
+    name: `Person ${index}`,
+    source: "GTM LOG.xlsx",
+  }));
+
+  await syncProspects(prospects, {
+    storage,
+    fetchImpl: async (url, options) => {
+      calls.push({ url: String(url), options, body: JSON.parse(options.body) });
+      return jsonResponse([]);
+    },
+  });
+
+  assert.deepEqual(calls.map((call) => call.body.length), [500, 500, 201]);
+  assert.ok(calls.every((call) => call.url.includes("on_conflict=identity_key")));
   assert.ok(calls.every((call) => call.options.headers.Prefer.includes("resolution=merge-duplicates")));
 });
 
@@ -236,7 +398,7 @@ test("syncs and reads shared research-run ownership and audit counts", async () 
   assert.equal(runs[0].operatorName, "Tarun");
   const body = JSON.parse(calls.find((call) => call.options.method === "POST").options.body)[0];
   assert.equal(body.created_by, "user-1");
-  assert.equal(body.requested_count, 100);
+  assert.equal(body.requested_count, 300);
   assert.equal(body.total_found, 7_700_000);
 });
 
@@ -261,7 +423,7 @@ test("[V35] research-run sync survives a not-yet-applied total_found migration",
   const runs = await sharedResearchRuns({ storage, fetchImpl });
   assert.equal(synced.totalFound, 7_700_000);
   assert.equal(runs[0].operatorName, "Tarun");
-  assert.equal(calls.filter((call) => call.options.method === "POST").length, 2);
+  assert.equal(calls.filter((call) => call.options.method === "POST").length, 3);
   assert.equal(Object.hasOwn(JSON.parse(calls.findLast((call) => call.options.method === "POST").options.body)[0], "total_found"), false);
 });
 

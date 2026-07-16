@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   DEFAULT_SETTINGS,
+  OUTREACH_SUBJECT,
   TEMPLATES,
   applyTemplate,
   buildWorkNote,
@@ -147,7 +148,7 @@ test("the default outreach play resolves all variables", () => {
   const inlineOpener = "you have led operations across Stream Data Centers, AWS, and the Navy; I wanted to ask where large loads lose the most time getting powered";
   const variables = templateVariables(profile, { senderName: "Tarun", calendarUrl: "https://cal.com/team/velaenergy" }, opener);
   const message = applyTemplate(TEMPLATES[0], variables);
-  assert.match(message.subject, /Seeking advice \+ your work at Stream Data Centers/);
+  assert.equal(message.subject, OUTREACH_SUBJECT);
   assert.match(message.body, /^Hi Joshua,/);
   assert.match(message.body, /a16z \(the world's largest venture capital firm\)/);
   assert.ok(message.body.indexOf(opener) < message.body.indexOf("I'm Tony."));
@@ -210,7 +211,7 @@ Best,
   assert.match(migratedDraft.body, /I'm Tony\./);
 });
 
-test("updates the prior untouched built-in quick intro without overwriting custom templates", () => {
+test("updates prior and custom templates to the canonical outreach subject", () => {
   const previousBody = `Hi {{firstName}},
 
 I'm {{senderName}}, CEO of Vela Energy. My cofounder Tony Li and I recently raised a $1.3M pre-seed round from a16z Speedrun and Z Fellows. We both come from energy-intensive backgrounds: I'm a nationally recognized inventor in energy, and Tony left Tesla to build Vela with me full-time.
@@ -227,7 +228,7 @@ Best,
     subject: "Quick intro — would value your perspective",
     body: previousBody,
   }] });
-  assert.equal(updated.subject, "Seeking advice + your work at {{company}}");
+  assert.equal(updated.subject, OUTREACH_SUBJECT);
   assert.match(updated.body, /I'm Tony\./);
 
   const [custom] = emailTemplates({ emailTemplates: [{
@@ -236,7 +237,7 @@ Best,
     subject: "A custom subject",
     body: `${previousBody}\n\nCustom closing`,
   }] });
-  assert.equal(custom.subject, "A custom subject");
+  assert.equal(custom.subject, OUTREACH_SUBJECT);
   assert.match(custom.body, /Custom closing$/);
 });
 
@@ -256,13 +257,14 @@ test("mailtoComposeUrl safely encodes a default email-app draft", () => {
   assert.equal(url.searchParams.get("body"), "Hi Josh,\nTalk soon?");
 });
 
-test("normalizes reusable named templates and keeps stable unique IDs", () => {
+test("normalizes reusable named templates with stable IDs and one subject", () => {
   const templates = normalizeEmailTemplates([
     { id: "operator", name: "Operator", subject: "Hi {{firstName}}", body: "About {{shortRole}}" },
     { id: "operator", name: "Follow up", subject: "Following up", body: "Hi again" },
     { id: "incomplete", name: "Incomplete", subject: "", body: "Missing subject" },
   ]);
-  assert.deepEqual(templates.map((template) => template.id), ["operator", "operator-2"]);
+  assert.deepEqual(templates.map((template) => template.id), ["operator", "operator-2", "incomplete"]);
+  assert.deepEqual(templates.map((template) => template.subject), [OUTREACH_SUBJECT, OUTREACH_SUBJECT, OUTREACH_SUBJECT]);
   assert.equal(emailTemplates({ emailTemplates: templates })[1].name, "Follow up");
 });
 

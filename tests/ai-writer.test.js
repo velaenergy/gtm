@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildWriterRequest, fullDraftQualityIssues, mergeEnrichedProfile, normalizeWorkNote, normalizeWriterResponse, openerQualityIssues, writerGenerationMode } from "../lib/ai-writer.js";
+import { OUTREACH_SUBJECT } from "../lib/message.js";
 import { buildOpenAIRequest, responseOutputText, writeOutreach } from "../server/openai-writer.mjs";
 
 test("builds a bounded writer payload from visible profile data", () => {
@@ -28,6 +29,7 @@ test("grounds the writer in richer ContactOut profile context", () => {
   const merged = mergeEnrichedProfile(
     { name: "Alex Morgan", headline: "Operator", experiences: [{ title: "Old role", company: "Old Co" }] },
     { emailSource: "ContactOut verified contact", profile: {
+      linkedinUrl: "https://www.linkedin.com/in/alex-morgan",
       headline: "VP, Critical Operations",
       about: "Runs mission-critical infrastructure.",
       experiences: [{ title: "VP", company: "Grid Works", details: "Leads critical facilities." }],
@@ -39,6 +41,7 @@ test("grounds the writer in richer ContactOut profile context", () => {
   );
   const request = buildWriterRequest(merged, { senderName: "Tarun" });
   assert.equal(request.profile.headline, "VP, Critical Operations");
+  assert.equal(merged.linkedinUrl, "https://www.linkedin.com/in/alex-morgan");
   assert.equal(request.profile.experiences[0].details, "Leads critical facilities.");
   assert.equal(request.profile.company.name, "Grid Works");
   assert.deepEqual(request.profile.skills, ["Power", "Critical Facilities"]);
@@ -58,6 +61,14 @@ test("keeps richer LinkedIn role descriptions when provider experience is thinne
   );
   assert.equal(merged.about, "I build reliable infrastructure.");
   assert.equal(merged.experiences[0].details, "Owns grid strategy and utility partnerships.");
+});
+
+test("[V47] enrichment preserves the actual LinkedIn profile URL", () => {
+  const merged = mergeEnrichedProfile(
+    { name: "Alex Morgan", experiences: [] },
+    { profile: { linkedinUrl: "https://www.linkedin.com/in/alex-morgan", experiences: [] } },
+  );
+  assert.equal(merged.linkedinUrl, "https://www.linkedin.com/in/alex-morgan");
 });
 
 test("V27 an explicit rewrite sends the template as a guide and requests a complete email", () => {
@@ -91,9 +102,9 @@ test("V27 an explicit rewrite sends the template as a guide and requests a compl
     id: "quick-intro",
     name: "Quick intro",
     purpose: "Founder introduction",
-    subjectPattern: "Template subject {{firstName}}",
+    subjectPattern: OUTREACH_SUBJECT,
     bodyBlueprint: "Template body {{workNote}}",
-    renderedSubject: "Template subject Ben",
+    renderedSubject: OUTREACH_SUBJECT,
     renderedBody: "Template body You lead cybersecurity across DWS.",
   });
 });
@@ -105,7 +116,8 @@ test("uses gpt-5.4-mini and strict structured output without storing the respons
   assert.equal(request.text.format.type, "json_schema");
   assert.equal(request.text.format.strict, true);
   assert.match(request.instructions, /complete, natural first-touch outreach email/i);
-  assert.match(request.instructions, /Vary the subject, transitions, wording, paragraph count/i);
+  assert.match(request.instructions, /fixed subject "Quick intro \+ would love to pick your brain"/i);
+  assert.equal(Object.hasOwn(request.text.format.schema.properties, "subject"), false);
   assert.match(request.instructions, /Do not hard-wrap lines inside a paragraph/i);
   assert.match(request.instructions, /Do not default to praise/);
   assert.match(request.instructions, /When context is thin, be honest and specific/);
@@ -132,20 +144,19 @@ test("V27 validates natural complete drafts and required sender details", () => 
   const input = { sender: { name: "Tarun", calendarUrl: "https://cal.example/vela" } };
   assert.match(fullDraftQualityIssues({ subject: "Hi", body: "Too short", workNote: "Grid operations" }, input).join(" "), /too short/i);
   assert.match(fullDraftQualityIssues({
-    subject: "Power planning at Relay",
+    subject: OUTREACH_SUBJECT,
     body: "Hi Alex,\n\nThis paragraph has enough words to make the accidental fixed-width\nline break visible even though it should flow naturally in Gmail. It continues with Vela context and a clear request for a short conversation next week.\n\nWould you have 20 minutes? https://cal.example/vela\n\nBest,\nTarun",
     workNote: "Alex leads grid operations at Relay.",
   }, input).join(" "), /fixed-width line breaks/i);
   assert.deepEqual(fullDraftQualityIssues({
-    subject: "Power planning at Relay",
+    subject: OUTREACH_SUBJECT,
     body: "Hi Alex,\n\nYou lead grid operations at Relay, where interconnection timing shapes which projects can move. I wanted to compare notes on the places large loads lose the most time.\n\nI’m Tarun, building Vela to help energy-intensive teams navigate utilities and power procurement. Would you be open to a 20-minute conversation next week? https://cal.example/vela\n\nBest,\nTarun",
     workNote: "Alex leads grid operations at Relay.",
   }, input), []);
 });
 
-test("V27 uses model-written subject and variable paragraph structure", async () => {
+test("uses the canonical subject while keeping model-written body structure", async () => {
   const generated = {
-    subject: "Interconnection timing at Relay",
     body: "Hi Alex,\n\nYou lead grid operations at Relay, where interconnection timing can shape which large-load projects move forward. I wanted to ask where your team sees the biggest avoidable delays today.\n\nI’m Tarun, CEO of Vela Energy. We’re building AI agents that help energy-intensive teams navigate utilities, interconnection, and power procurement so projects get energized faster.\n\nWould you be open to a 20-minute conversation next week? https://cal.com/team/velaenergy\n\nBest,\nTarun",
     workNote: "Alex leads grid operations at Relay and works through interconnection delays for large energy users.",
   };
@@ -168,7 +179,7 @@ test("V27 uses model-written subject and variable paragraph structure", async ()
       },
     },
   );
-  assert.deepEqual(result, generated);
+  assert.deepEqual(result, { ...generated, subject: OUTREACH_SUBJECT });
   assert.equal(responseOutputText({ output_text: "direct" }), "direct");
   assert.deepEqual(normalizeWriterResponse({ data: result, model: "gpt-5.4-mini" }), {
     ...result,

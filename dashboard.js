@@ -7,10 +7,12 @@ import {
 } from "./lib/spreadsheet-import.js";
 import {
   DEFAULT_SETTINGS,
+  OUTREACH_SUBJECT,
   applyTemplate,
   buildWorkNote,
   initialsFor,
   isEmail,
+  emailTemplates,
   normalizeEnrichmentResponse,
   outreachTemplate,
   resolveTheme,
@@ -19,6 +21,7 @@ import {
 import {
   QUEUE_STATUS,
   QUEUE_STORAGE_KEY,
+  normalizeLinkedInUrl,
   parseBulkProspects,
   queueStats,
   upsertProspects,
@@ -43,8 +46,11 @@ import {
   providerLabel,
 } from "./lib/provider-priority.js";
 import {
+  SCHEDULED_SEND_KIND,
   SCHEDULED_SENDS_STORAGE_KEY,
   normalizeScheduledSends,
+  scheduledSendKind,
+  scheduledSendMatches,
 } from "./lib/schedule.js";
 import {
   DELIVERY_LOG_STORAGE_KEY,
@@ -82,8 +88,32 @@ import {
   PROVIDER_ACTION,
   RUNTIME_CAPABILITIES_MESSAGE,
   RUNTIME_RELOAD_MESSAGE,
+  WORKSPACE_ACTION,
+  WORKSPACE_RELOAD_MESSAGE,
+  runtimeHasWorkspaceActions,
   runtimeMismatchMessage,
 } from "./lib/runtime-protocol.js";
+import { gmailMessagesAsDeliveryRecords } from "./lib/gmail-gtm-sync.js";
+import {
+  RESEARCH_AUTOMATION_DUE_STORAGE_KEY,
+  RESEARCH_AUTOMATIONS_STORAGE_KEY,
+  DEFAULT_RESEARCH_PROMPTS,
+  RESEARCH_MESSAGES_STORAGE_KEY,
+  RESEARCH_RUNS_STORAGE_KEY,
+  RESEARCH_THREADS_STORAGE_KEY,
+  formatRunDuration,
+  isNextResearchBatchRequest,
+  nextAutomationRun,
+  normalizeLocalResearchMessages,
+  normalizeResearchAutomation,
+  normalizeResearchMessage,
+  normalizeResearchThread,
+  researchApprovalStack,
+  researchFunnel,
+  researchBatchPagination,
+  researchRunMetrics,
+  researchThreadTitle,
+} from "./lib/research-workspace.js";
 
 const isExtension = Boolean(globalThis.chrome?.runtime?.id);
 const pageParams = new URLSearchParams(location.search);
@@ -93,25 +123,30 @@ const requestedCampaignId = pageParams.get("campaign") || "";
 const requestedView = pageParams.get("view") || "";
 const WORKSPACE_STATE_STORAGE_KEY = "velaGtmWorkspaceState";
 const elements = Object.fromEntries([
-  "settingsButton", "searchForm", "searchBrief", "planSearchButton", "researchMessages", "researchRunCard", "researchRunStatus", "researchRunProgress", "researchRunCounts", "researchRunBar",
+  "settingsButton", "searchForm", "searchBrief", "planSearchButton", "researchResultLimit", "researchMessages", "researchRunCard", "researchRunStatus", "researchRunProgress", "researchRunCounts", "researchRunBar",
+  "researchThreadSelect", "researchLiveTimer", "newResearchChatButton", "clearResearchChatButton", "openResearchAutomationButton", "researchHistoryCount", "researchHistoryList",
+  "researchAutomationDialog", "researchAutomationName", "researchAutomationPrompt", "researchAutomationCadence", "researchAutomationLimit", "researchAutomationMode", "researchAutomationSendCap", "researchAutomationSender", "researchAutomationTemplate", "researchAutomationContactOut", "researchAutomationActive", "saveResearchAutomationButton",
   "openImportButton", "openImportButtonTop", "importDialog", "bulkInput", "importButton", "importHint",
   "spreadsheetImportPanel", "linkedinImportPanel", "importFileInput", "dropZone", "importFileName", "mappingStage", "mappingGrid", "mappingSummary", "mappingIssues", "replaceImportFile",
-  "processButton", "sendAllButton", "queueBody", "emptyState", "totalStat", "readyStat", "draftedStat",
+  "processButton", "sendAllButton", "clearProspectsButton", "queueBody", "emptyState", "totalStat", "readyStat", "draftedStat",
   "sentStat", "attentionStat", "totalDelta", "progressBar", "progressText", "toast", "navResearch", "navReview", "navTracking",
-  "navScheduled", "heroEyebrow", "pageTitle", "pageSubtitle", "workspaceCrumb", "agentPanel", "metricsPanel", "analyticsPanel", "overviewPanel", "overviewReviewCount", "overviewResponseCount", "overviewScheduledCount", "overviewSentTodayCount", "overviewScheduleList", "overviewActivityList", "overviewReviewList", "overviewResponseList", "refreshResponsesButton", "pipelineBar",
-  "engagementReplies", "engagementRateDetail", "analyticsSentToday", "analyticsSentTodayDetail", "analyticsSendRate", "analyticsSendRateDetail", "analyticsProspectsContacted", "analyticsProspectsDetail", "analyticsActiveSequences", "analyticsActiveSequencesDetail", "analyticsFollowUpsSent", "analyticsFollowUpsDetail", "analyticsReplyRate", "sequenceInitialCount", "sequenceStepOneCount", "sequenceStepTwoCount", "sequenceStepThreeCount", "sequenceReplyCount",
-  "mailboxCapacityTotal", "mailboxCapacityList", "dailySendChart", "analyticsWeekSent", "analyticsDailyAverage", "analyticsBestDay", "analyticsPeriodReplyRate", "analyticsRange", "analyticsMemberFilter", "analyticsScopeTitle", "analyticsScopeDetail", "analyticsActiveSenders", "analyticsLeaderboard", "analyticsTeamBody", "analyticsTeamDescription", "analyticsActivityList",
-  "overviewTeamPulse", "overviewTeamPulseMeta", "operationsPanel", "operationsKicker", "operationsTitle", "operationsDescription", "operationsPrimaryAction", "deliveryList", "historyWorkspace", "historyTotal", "historyPeople", "historyTeammates", "historyDelivered", "historySearch", "historySenderFilter", "historyResultCount", "historyBody", "historyEmpty", "historyPagination", "queueSection",
+  "navScheduled", "heroEyebrow", "pageTitle", "pageSubtitle", "workspaceCrumb", "agentPanel", "metricsPanel", "analyticsPanel", "overviewPanel", "pipelineBar",
+  "engagementReplies", "analyticsSentToday", "analyticsDelivered", "analyticsBounced", "analyticsHealthScore", "analyticsHealthLabel", "analyticsHealthSummary", "analyticsRiskCount", "analyticsPolicyBlocks", "analyticsHardBounces", "analyticsSoftBounces", "analyticsSendFailures", "analyticsSuppressed", "analyticsInboxSyncButton", "analyticsInboxState",
+  "mailboxCapacityTotal", "mailboxCapacityList", "analyticsRange", "analyticsMemberFilter", "analyticsScopeTitle", "analyticsScopeDetail", "analyticsActiveSenders", "analyticsTeamBody", "analyticsTeamDescription", "analyticsActivityList",
+  "dashboardMailboxCapacityTotal", "dashboardMailboxCapacityList", "dashboardSentToday", "dashboardSentTodayDetail", "dashboardReplies", "dashboardSendRate", "dashboardSendRateDetail", "dashboardProspectsContacted", "dashboardSendChart", "dashboardSenderList", "dashboardMessageList",
+  "operationsPanel", "operationsKicker", "operationsTitle", "operationsDescription", "operationsPrimaryAction", "scheduledWorkspace", "scheduledSearch", "scheduledKindFilter", "scheduledAllCount", "scheduledInitialCount", "scheduledFollowUpCount", "deliveryList", "historyWorkspace", "historyTotal", "historyPeople", "historyTeammates", "historyDelivered", "historySearch", "historySenderFilter", "historyResultCount", "historyBody", "historyEmpty", "historyPagination", "queueSection",
   "contactsPanel", "contactsSearch", "contactsStatusFilter", "contactsImportButton", "contactsBody", "contactsEmpty", "contactsCount", "contactsPagination", "navContacts", "contactsTotalMetric", "contactsReachedMetric", "contactsRepliedMetric", "contactsBouncedMetric", "contactsInboxSyncButton", "contactsInboxState",
   "queueHeading", "queueDescription", "tableSearch", "statusFilterButton", "resultCount", "nextResearchBatchButton", "selectAll", "bulkBar",
   "selectedCount", "bulkResearchButton", "bulkApproveButton", "bulkSendButton", "clearSelectionButton",
   "collapseSidebar", "drawerBackdrop", "reviewDrawer", "closeDrawerButton", "drawerAvatar", "drawerName", "drawerHeadline",
-  "drawerLocation", "drawerLinkedIn", "drawerWorkNote", "drawerEmail", "drawerSubject", "drawerBody", "saveReviewButton", "approveDraftButton",
-  "drawerEmailChoices", "drawerEmailSource", "drawerEmailStatus", "copyDrawerEmail", "retryDrawerLookup", "drawerExperienceCount", "drawerExperienceList", "drawerActivity", "markSentButton",
+  "drawerLocation", "drawerLinkedIn", "drawerWorkNote", "drawerEmail", "drawerSubject", "drawerBody", "saveReviewButton", "approveDraftButton", "previousReviewButton", "nextReviewButton", "drawerPosition",
+  "drawerEmailSection", "drawerProfileSection",
+  "drawerEmailChoices", "drawerEmailSource", "drawerEmailStatus", "copyDrawerEmail", "retryDrawerLookup", "drawerExperienceCount", "drawerExperienceList", "drawerActivity", "markSentButton", "skipReviewButton", "drawerReviewContext", "drawerRecipient", "drawerSender",
   "agentActivity", "agentActivityTitle", "agentActivityDetail", "campaignNav", "newCampaignButton", "newCampaignButtonTop",
   "campaignActions", "campaignActionsButton", "campaignActionsMenu", "editCampaignButton", "duplicateCampaignButton", "deleteCampaignButton",
   "campaignDialog", "campaignForm", "campaignName", "campaignDescription", "campaignDialogKicker", "campaignDialogTitle", "campaignDialogDescription", "campaignSubmitButton", "closeCampaignDialog", "cancelCampaignButton",
   "deleteCampaignDialog", "deleteCampaignDescription", "confirmDeleteCampaignButton", "authGate", "authSignInButton", "authGateStatus",
+  "currentUserBadge", "currentUserAvatarImage", "currentUserAvatarInitials", "currentUserName", "currentUserEmail",
   "drawerFitReason", "drawerFitBadge", "drawerFitEvidence", "sendDialog", "sendDialogCount", "sendDialogDescription", "confirmBulkSendButton",
 ].map((id) => [id, document.getElementById(id)]));
 
@@ -138,6 +173,8 @@ const DEMO_SCHEDULED_SENDS = [
     recipients: ["omar@vectorgrid.com"],
     subject: "Site selection, power, and a quick introduction",
     prospectId: DEMO_QUEUE[2].url,
+    kind: SCHEDULED_SEND_KIND.INITIAL,
+    followUps: [{ templateId: "tarun-follow-up-1", body: "Following up." }, { templateId: "tarun-follow-up-2", body: "One more thought." }, { templateId: "tarun-follow-up-3", body: "Closing the loop." }],
     scheduledAt: new Date(Date.now() + 72 * 60_000).toISOString(),
     status: DELIVERY_STATUS.SCHEDULED,
     createdAt: new Date(Date.now() - 18 * 60_000).toISOString(),
@@ -150,11 +187,28 @@ const DEMO_SCHEDULED_SENDS = [
     recipients: ["joshua@northstarinfra.com"],
     subject: "Your work in critical operations + a quick Vela intro",
     prospectId: DEMO_QUEUE[0].url,
+    kind: SCHEDULED_SEND_KIND.INITIAL,
     scheduledAt: new Date(Date.now() + 26 * 60 * 60_000).toISOString(),
     status: DELIVERY_STATUS.SCHEDULED,
     createdAt: new Date(Date.now() - 42 * 60_000).toISOString(),
     completedAt: "",
   },
+  ...[1, 2, 3].map((sequenceStep) => ({
+    id: `demo-follow-up-${sequenceStep}`,
+    accountId: "preview",
+    senderEmail: "tarun@velaenergy.ai",
+    recipients: ["maya@aperturecompute.com"],
+    subject: "Re: Power strategy at Aperture Compute",
+    prospectId: DEMO_QUEUE[1].url,
+    kind: SCHEDULED_SEND_KIND.FOLLOW_UP,
+    sequenceId: "demo-delivery-1",
+    sequenceStep,
+    threadId: "demo-thread-1",
+    scheduledAt: new Date(Date.now() + (sequenceStep * 3 + 1) * 24 * 60 * 60_000).toISOString(),
+    status: DELIVERY_STATUS.SCHEDULED,
+    createdAt: new Date(Date.now() - 48 * 60_000).toISOString(),
+    completedAt: "",
+  })),
 ];
 
 const DEMO_DELIVERY_LOG = normalizeDeliveryLog([
@@ -197,7 +251,7 @@ const DEMO_TEAM_MEMBERS = [
   { id: "preview-tony", email: "tony@velaenergy.ai", full_name: "Tony Li", created_at: "2026-06-21T16:00:00.000Z" },
 ];
 
-const state = { queue: [], campaigns: [], scheduledJobs: [], deliveryLog: [], googleAccounts: [], approvedSenders: [], selectedGoogleAccountId: "", teamMembers: [], currentTeamUser: null, teamActivity: [], backendStatus: "signed-out", activeCampaignId: "", editingCampaignId: "", settings: { ...DEFAULT_SETTINGS }, searchPlan: null, pendingResearchPlan: null, researchConversation: [], researchRun: null, busy: false, searching: false, toastTimer: null, workspacePersistTimer: null, teamSyncTimer: null, view: "overview", analyticsDays: 7, analyticsMember: "all", historyQuery: "", historySender: "all", historyPage: 1, query: "", contactQuery: "", contactStatus: "all", contactPage: 1, contactsInboxChecking: false, selected: new Set(), activeProspectId: null, keyboardProspectId: null, drawerReturnFocus: null, attentionOnly: false, sidebarCollapsed: false, importSource: "spreadsheet", importData: null, pendingSendIds: [] };
+const state = { queue: [], campaigns: [], scheduledJobs: [], deliveryLog: [], googleAccounts: [], approvedSenders: [], selectedGoogleAccountId: "", teamMembers: [], currentTeamUser: null, teamActivity: [], gtmMessages: [], mailboxSyncStates: [], backendStatus: "signed-out", activeCampaignId: "", editingCampaignId: "", settings: { ...DEFAULT_SETTINGS }, searchPlan: null, pendingResearchPlan: null, researchConversation: [], researchThread: null, researchThreads: [], researchMessagesByThread: {}, researchRun: null, researchRunHistory: [], researchAutomations: [], activeResearchAutomationId: "", researchTimer: null, busy: false, searching: false, toastTimer: null, workspacePersistTimer: null, teamSyncTimer: null, view: "overview", analyticsDays: 7, analyticsMember: "all", historyQuery: "", historySender: "all", historyPage: 1, scheduledQuery: "", scheduledKind: "all", query: "", contactQuery: "", contactStatus: "all", contactPage: 1, contactsInboxChecking: false, selected: new Set(), activeProspectId: null, keyboardProspectId: null, drawerReturnFocus: null, reviewRunId: "", attentionOnly: false, sidebarCollapsed: false, importSource: "spreadsheet", importData: null, pendingSendIds: [] };
 
 const storage = {
   async get(keys) {
@@ -227,6 +281,8 @@ function workspaceStateSnapshot() {
     sidebarCollapsed: state.sidebarCollapsed,
     analyticsDays: state.analyticsDays,
     analyticsMember: state.analyticsMember,
+    scheduledQuery: state.scheduledQuery,
+    scheduledKind: state.scheduledKind,
     searchPlan: state.searchPlan,
   };
 }
@@ -240,6 +296,16 @@ async function workspaceAuthReady() {
   try {
     const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_AUTH_STATUS" });
     const signedIn = Boolean(response?.ok && response.data?.signedIn);
+    const sessionUser = response?.data?.user || null;
+    const membership = response?.data?.membership || null;
+    state.currentTeamUser = signedIn ? {
+      ...sessionUser,
+      ...membership,
+      id: membership?.id || sessionUser?.id || "",
+      email: membership?.email || sessionUser?.email || "",
+      full_name: membership?.full_name || sessionUser?.user_metadata?.full_name || sessionUser?.user_metadata?.name || "",
+      avatar_url: membership?.avatar_url || sessionUser?.user_metadata?.avatar_url || sessionUser?.user_metadata?.picture || "",
+    } : null;
     elements.authGate.hidden = signedIn;
     document.body.classList.remove("auth-pending");
     return signedIn;
@@ -320,6 +386,7 @@ async function persistQueue() {
 
 async function persistCampaigns() {
   await storage.set({ [CAMPAIGNS_STORAGE_KEY]: state.campaigns });
+  if (isExtension) chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_RESEARCH_LISTS_SYNC", lists: state.campaigns }).catch(() => {});
 }
 
 function statusLabel(status) {
@@ -346,21 +413,43 @@ function currentOperator() {
   return {
     id: state.currentTeamUser?.id || "preview-user",
     email: state.currentTeamUser?.email || "preview@velaenergy.ai",
-    name: profile?.full_name || profile?.email || state.currentTeamUser?.email || "You",
+    name: profile?.full_name || state.currentTeamUser?.full_name || profile?.email || state.currentTeamUser?.email || "You",
+    avatarUrl: profile?.avatar_url || state.currentTeamUser?.avatar_url || "",
   };
 }
 
+function renderCurrentUser() {
+  const user = state.currentTeamUser;
+  const profile = state.teamMembers.find((member) => member.id === user?.id || member.email === user?.email);
+  const email = String(profile?.email || user?.email || "").trim().toLowerCase();
+  const name = String(profile?.full_name || user?.full_name || email.split("@")[0] || "Vela teammate").trim();
+  const avatarUrl = String(profile?.avatar_url || user?.avatar_url || "").trim();
+  elements.currentUserBadge.hidden = !email;
+  if (!email) return;
+  elements.currentUserName.textContent = name;
+  elements.currentUserEmail.textContent = email;
+  elements.currentUserAvatarInitials.textContent = initialsFor(name || email);
+  elements.currentUserAvatarImage.hidden = !avatarUrl;
+  elements.currentUserAvatarInitials.hidden = Boolean(avatarUrl);
+  if (avatarUrl) elements.currentUserAvatarImage.src = avatarUrl;
+  else elements.currentUserAvatarImage.removeAttribute("src");
+  elements.currentUserBadge.setAttribute("aria-label", `Signed in as ${name}, ${email}. Open workspace settings.`);
+  elements.currentUserBadge.title = "Open workspace settings";
+}
+
 function deliveryOperator(record = {}) {
+  const hasOperator = Boolean(record.operatorId || record.operatorEmail || record.operatorName);
+  const senderEmail = String(record.senderEmail || record.accountEmail || "").trim().toLowerCase();
   const member = state.teamMembers.find((candidate) =>
     candidate.id === record.operatorId
     || String(candidate.email || "").toLowerCase() === String(record.operatorEmail || "").toLowerCase()
-    || (record.operatorName && candidate.full_name === record.operatorName));
-  const localOperator = record.source === "supabase" ? null : currentOperator();
+    || (record.operatorName && candidate.full_name === record.operatorName)
+    || String(candidate.email || "").toLowerCase() === senderEmail) || null;
   return {
-    id: record.operatorId || member?.id || localOperator?.id || "",
-    name: record.operatorName || member?.full_name || member?.email || localOperator?.name || "Local activity",
-    email: record.operatorEmail || member?.email || localOperator?.email || "",
-    avatarUrl: record.operatorAvatarUrl || member?.avatar_url || "",
+    id: record.operatorId || member?.id || (senderEmail ? `mailbox:${senderEmail}` : ""),
+    name: record.operatorName || member?.full_name || record.operatorEmail || member?.email || senderEmail || "Unknown",
+    email: record.operatorEmail || member?.email || senderEmail,
+    avatarUrl: hasOperator ? record.operatorAvatarUrl || member?.avatar_url || "" : member?.avatar_url || "",
   };
 }
 
@@ -426,10 +515,7 @@ function renderResearchRun() {
       : run.status === "auditing" && pulled ? `${pulled.toLocaleString()} pulled${totalMatches ? ` from ${formattedTotal} matches` : ""} · preparing results`
       : totalMatches ? `Preparing review batch ${Math.max(1, Number(run.page) || 1)} from ${formattedTotal} matches`
         : "Counting matches…";
-  const counts = [
-    [totalMatches ? formattedTotal : "—", "Matches"],
-    [pulled.toLocaleString(), "Pulled"],
-  ];
+  const counts = researchFunnel(run).map((item) => [item.key === "matched" && !item.value ? "—" : item.value.toLocaleString(), item.label]);
   const fragment = document.createDocumentFragment();
   for (const [value, label] of counts) {
     const item = document.createElement("span");
@@ -440,6 +526,7 @@ function renderResearchRun() {
   elements.researchRunCounts.replaceChildren(fragment);
   const denominator = Math.max(1, run.foundCount || run.requestedCount || 100);
   elements.researchRunBar.style.width = `${Math.min(100, Math.round(((run.auditedCount || 0) / denominator) * 100))}%`;
+  updateResearchTimer();
 }
 
 function appendText(parent, tag, text, className = "") {
@@ -490,7 +577,206 @@ function scrollResearchToLatest() {
   requestAnimationFrame(() => elements.researchMessages?.scrollTo({ top: elements.researchMessages.scrollHeight, behavior: "smooth" }));
 }
 
-function appendResearchMessage(role, text, detail = "", { record = true } = {}) {
+function renderResearchWorkspaceChrome() {
+  const threadFragment = document.createDocumentFragment();
+  threadFragment.append(new Option("New research chat", ""));
+  for (const thread of state.researchThreads) threadFragment.append(new Option(thread.title, thread.id));
+  elements.researchThreadSelect.replaceChildren(threadFragment);
+  elements.researchThreadSelect.value = state.researchThread?.id || "";
+  elements.researchHistoryCount.textContent = String(state.researchRunHistory.length);
+  const history = document.createDocumentFragment();
+  for (const run of state.researchRunHistory.slice(0, 9)) {
+    const metrics = researchRunMetrics(run);
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "research-history-item";
+    item.title = run.brief;
+    appendText(item, "strong", run.brief || "Research run");
+    appendText(item, "span", `${run.foundCount || 0} pulled · ${run.readyCount || 0} ready · ${formatRunDuration(metrics.durationMs)}`);
+    item.addEventListener("click", () => openResearchRunReview(run.id, item));
+    history.append(item);
+  }
+  if (!state.researchRunHistory.length) appendText(history, "p", "No saved runs yet.", "analytics-empty-copy");
+  elements.researchHistoryList.replaceChildren(history);
+}
+
+function renderResearchWelcome() {
+  elements.researchMessages.replaceChildren();
+  const content = appendResearchMessage("assistant", "What are you working on?", "Chat normally, refine an audience, or ask me to find people. Apollo search stays free; fit verification happens once at the end of the pulled batch.", { record: false, persist: false });
+  const tools = document.createElement("div");
+  tools.className = "agent-tools";
+  tools.setAttribute("aria-label", "Example research prompts");
+  for (const { label, prompt } of DEFAULT_RESEARCH_PROMPTS) {
+    const button = appendText(tools, "button", label);
+    button.type = "button";
+    button.dataset.prompt = prompt;
+    button.addEventListener("click", () => { elements.searchBrief.value = prompt; elements.searchBrief.focus(); });
+  }
+  content.append(tools);
+}
+
+async function persistLocalResearchWorkspace() {
+  await storage.set({
+    [RESEARCH_THREADS_STORAGE_KEY]: state.researchThreads.slice(0, 50),
+    [RESEARCH_MESSAGES_STORAGE_KEY]: state.researchMessagesByThread,
+    [RESEARCH_RUNS_STORAGE_KEY]: state.researchRunHistory.slice(0, 50),
+    [RESEARCH_AUTOMATIONS_STORAGE_KEY]: state.researchAutomations.slice(0, 50),
+  });
+}
+
+async function ensureResearchThread(firstMessage = "") {
+  if (state.researchThread) return state.researchThread;
+  const now = new Date().toISOString();
+  state.researchThread = normalizeResearchThread({ id: crypto.randomUUID(), title: researchThreadTitle(firstMessage), context: {}, createdAt: now, updatedAt: now });
+  state.researchThreads = [state.researchThread, ...state.researchThreads.filter((item) => item.id !== state.researchThread.id)];
+  state.researchMessagesByThread[state.researchThread.id] = [];
+  await persistLocalResearchWorkspace();
+  renderResearchWorkspaceChrome();
+  return state.researchThread;
+}
+
+async function persistResearchMessage(message = {}) {
+  if (!state.researchThread?.id || !message.content) return;
+  const savedMessage = normalizeResearchMessage({ ...message, id: crypto.randomUUID(), threadId: state.researchThread.id, createdAt: new Date().toISOString() });
+  const existing = state.researchMessagesByThread[state.researchThread.id] || [];
+  state.researchMessagesByThread[state.researchThread.id] = [...existing, savedMessage].slice(-200);
+  const updatedAt = savedMessage.createdAt;
+  state.researchThread = { ...state.researchThread, updatedAt };
+  state.researchThreads = [state.researchThread, ...state.researchThreads.filter((item) => item.id !== state.researchThread.id)];
+  await persistLocalResearchWorkspace();
+}
+
+async function loadResearchThread(threadId = "") {
+  const thread = state.researchThreads.find((item) => item.id === threadId) || null;
+  state.researchThread = thread;
+  state.researchConversation = [];
+  state.pendingResearchPlan = null;
+  state.searchPlan = null;
+  renderResearchWelcome();
+  if (thread) {
+    const messages = state.researchMessagesByThread[threadId] || [];
+    if (messages.length) {
+      elements.researchMessages.replaceChildren();
+      for (const message of messages) appendResearchMessage(message.role, message.content, message.detail, { record: true, persist: false });
+    }
+  }
+  renderResearchWorkspaceChrome();
+}
+
+async function clearResearchChat() {
+  if (!state.researchThread?.id) { renderResearchWelcome(); return; }
+  if (!globalThis.confirm("Clear every message in this research chat? Saved runs and prospect lists stay intact.")) return;
+  state.researchMessagesByThread[state.researchThread.id] = [];
+  state.researchConversation = [];
+  await persistLocalResearchWorkspace();
+  renderResearchWelcome();
+  showToast("Local research chat cleared. Saved runs and shared lists were kept.");
+}
+
+function updateResearchTimer() {
+  const run = state.researchRun;
+  const active = run && ["planning", "searching", "auditing"].includes(run.status);
+  elements.researchLiveTimer.classList.toggle("is-running", Boolean(active));
+  elements.researchLiveTimer.textContent = active ? formatRunDuration(researchRunMetrics(run).durationMs) : run?.durationMs ? formatRunDuration(run.durationMs) : "Idle";
+}
+
+async function refreshResearchWorkspace({ quiet = true } = {}) {
+  const local = await storage.get([RESEARCH_THREADS_STORAGE_KEY, RESEARCH_MESSAGES_STORAGE_KEY, RESEARCH_RUNS_STORAGE_KEY, RESEARCH_AUTOMATIONS_STORAGE_KEY]);
+  state.researchThreads = (Array.isArray(local[RESEARCH_THREADS_STORAGE_KEY]) ? local[RESEARCH_THREADS_STORAGE_KEY] : []).map(normalizeResearchThread).filter((thread) => thread.id).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  state.researchMessagesByThread = normalizeLocalResearchMessages(local[RESEARCH_MESSAGES_STORAGE_KEY]);
+  state.researchRunHistory = Array.isArray(local[RESEARCH_RUNS_STORAGE_KEY]) ? local[RESEARCH_RUNS_STORAGE_KEY].slice(0, 50) : [];
+  state.researchAutomations = (Array.isArray(local[RESEARCH_AUTOMATIONS_STORAGE_KEY]) ? local[RESEARCH_AUTOMATIONS_STORAGE_KEY] : []).map(normalizeResearchAutomation);
+  let lists = null;
+  if (isExtension) lists = await chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_RESEARCH_LISTS_READ" }).catch(() => null);
+  if (lists?.ok && Array.isArray(lists.data)) {
+    if (lists.data.length || !state.campaigns.length) {
+      state.campaigns = normalizeCampaigns(lists.data);
+      await storage.set({ [CAMPAIGNS_STORAGE_KEY]: state.campaigns });
+    } else chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_RESEARCH_LISTS_SYNC", lists: state.campaigns }).catch(() => {});
+  }
+  if (!quiet && isExtension && !lists?.ok) showToast("Your research chat is saved locally; the shared final lists are still syncing.");
+  renderResearchWorkspaceChrome();
+}
+
+function openResearchAutomation() {
+  const active = state.researchAutomations.find((item) => item.threadId === state.researchThread?.id) || null;
+  state.activeResearchAutomationId = active?.id || "";
+  elements.researchAutomationName.value = active?.name || state.researchThread?.title || "Daily research";
+  elements.researchAutomationPrompt.value = active?.prompt || state.researchRun?.brief || elements.searchBrief.value.trim();
+  elements.researchAutomationCadence.value = String(active?.cadenceMinutes || 1440);
+  elements.researchAutomationLimit.value = active?.maxResults || 300;
+  elements.researchAutomationMode.value = active?.mode || "review";
+  elements.researchAutomationSendCap.value = active?.dailySendCap || 25;
+  elements.researchAutomationContactOut.checked = active?.contactOutDefault !== false;
+  elements.researchAutomationActive.checked = Boolean(active?.isActive);
+  const senderOptions = [new Option("Selected Gmail sender", ""), ...state.googleAccounts.map((account) => new Option(account.email, account.email))];
+  elements.researchAutomationSender.replaceChildren(...senderOptions);
+  elements.researchAutomationSender.value = active?.senderEmail || "";
+  const templates = emailTemplates(state.settings);
+  elements.researchAutomationTemplate.replaceChildren(...templates.map((template) => new Option(`${template.name} · ${template.senderEmail || template.senderName}`, template.id)));
+  elements.researchAutomationTemplate.value = active?.templateId || templates[0]?.id || "";
+  elements.researchAutomationDialog.showModal();
+}
+
+async function saveResearchAutomation() {
+  const prompt = elements.researchAutomationPrompt.value.trim();
+  if (!prompt) { showToast("Add the research brief first."); return; }
+  await ensureResearchThread(prompt);
+  const existing = state.researchAutomations.find((item) => item.id === state.activeResearchAutomationId) || {};
+  const cadenceMinutes = Number(elements.researchAutomationCadence.value) || 1440;
+  const automation = normalizeResearchAutomation({
+    ...existing,
+    id: existing.id || crypto.randomUUID(),
+    name: elements.researchAutomationName.value.trim() || researchThreadTitle(prompt),
+    threadId: state.researchThread.id,
+    prompt,
+    plan: state.searchPlan || existing.plan || {},
+    cadenceMinutes,
+    mode: elements.researchAutomationMode.value,
+    contactOutDefault: elements.researchAutomationContactOut.checked,
+    maxResults: elements.researchAutomationLimit.value,
+    dailySendCap: elements.researchAutomationSendCap.value,
+    senderEmail: elements.researchAutomationSender.value,
+    templateId: elements.researchAutomationTemplate.value,
+    isActive: elements.researchAutomationActive.checked,
+    nextRunAt: elements.researchAutomationActive.checked ? nextAutomationRun(cadenceMinutes) : "",
+  });
+  state.researchAutomations = [automation, ...state.researchAutomations.filter((item) => item.id !== automation.id)];
+  await persistLocalResearchWorkspace();
+  if (isExtension) {
+    const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_RESEARCH_AUTOMATION_SYNC", automation });
+    if (!response?.ok) throw new Error(response?.error || "The automation was saved locally, but Chrome could not schedule it.");
+  }
+  elements.researchAutomationDialog.close();
+  showToast(automation.isActive ? `${automation.mode === "yolo" ? "YOLO" : "Review"} automation scheduled.` : "Automation saved but paused.");
+}
+
+async function runDueResearchAutomations() {
+  if (!isExtension) return;
+  const saved = await storage.get(RESEARCH_AUTOMATION_DUE_STORAGE_KEY);
+  const due = Array.isArray(saved[RESEARCH_AUTOMATION_DUE_STORAGE_KEY]) ? saved[RESEARCH_AUTOMATION_DUE_STORAGE_KEY] : [];
+  if (!due.length) return;
+  await storage.set({ [RESEARCH_AUTOMATION_DUE_STORAGE_KEY]: [] });
+  for (const id of due) {
+    const automation = state.researchAutomations.find((item) => item.id === id && item.isActive);
+    if (!automation || state.busy) continue;
+    if (automation.threadId) await loadResearchThread(automation.threadId).catch(() => {});
+    setView("research");
+    appendResearchMessage("assistant", `Automation “${automation.name}” is due.`, automation.mode === "yolo" ? `YOLO mode is active with a ${automation.dailySendCap}/day cap.` : "This run will stop in Approvals.");
+    let plan = automation.plan && automation.plan.searches?.length ? automation.plan : null;
+    if (!plan) {
+      const turn = await researchAgentTurn(automation.prompt);
+      plan = turn?.plan || null;
+    }
+    if (!plan) {
+      appendResearchMessage("assistant", "The automation needs a search plan before it can run.", "Open Automate, refine the brief, and save again.");
+      continue;
+    }
+    await executeResearchPlan(plan, automation.prompt, { automation });
+  }
+}
+
+function appendResearchMessage(role, text, detail = "", { record = true, persist = true } = {}) {
   const message = document.createElement("article");
   message.className = `research-message research-message-${role}`;
   if (role === "assistant") {
@@ -513,6 +799,7 @@ function appendResearchMessage(role, text, detail = "", { record = true } = {}) 
     state.researchConversation.push({ role, content: String(text).trim() });
     state.researchConversation = state.researchConversation.slice(-16);
   }
+  if (persist && ["user", "assistant"].includes(role)) persistResearchMessage({ role, content: String(text || "").trim(), detail: String(detail || "").trim() });
   scrollResearchToLatest();
   return content;
 }
@@ -635,15 +922,12 @@ function belongsToResearch(prospect) {
   return Boolean(prospect.researchRunId);
 }
 
-function belongsToCurrentResearchBatch(prospect) {
-  return belongsToResearch(prospect) && (!state.researchRun?.id || prospect.researchRunId === state.researchRun.id);
-}
-
 function prospectMatchesView(prospect) {
   const campaign = activeCampaign();
   if (campaign && !campaign.prospectIds.includes(prospect.id)) return false;
-  if (state.view === "research" && prospect.researchRunId !== state.researchRun?.id && ![QUEUE_STATUS.NEW, QUEUE_STATUS.PROCESSING, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(prospect.status)) return false;
-  if (state.view === "review" && (!belongsToCurrentResearchBatch(prospect) || ![QUEUE_STATUS.READY, QUEUE_STATUS.DRAFTED].includes(prospect.status))) return false;
+  if (state.view === "research" && prospect.researchRunId !== state.researchRun?.id) return false;
+  if (state.view === "research" && prospect.targetFit?.verdict && prospect.targetFit.verdict !== "strong") return false;
+  if (state.view === "review" && (!belongsToResearch(prospect) || ![QUEUE_STATUS.READY, QUEUE_STATUS.DRAFTED].includes(prospect.status))) return false;
   if (state.attentionOnly && ![QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(prospect.status)) return false;
   if (!state.query) return true;
   const details = companyAndRole(prospect);
@@ -652,6 +936,13 @@ function prospectMatchesView(prospect) {
 
 function visibleProspects() {
   const visible = state.queue.filter(prospectMatchesView);
+  if (state.view === "review") return visible.sort((a, b) => {
+    const aActive = a.researchRunId === state.researchRun?.id ? 1 : 0;
+    const bActive = b.researchRunId === state.researchRun?.id ? 1 : 0;
+    const aReady = a.status === QUEUE_STATUS.READY ? 1 : 0;
+    const bReady = b.status === QUEUE_STATUS.READY ? 1 : 0;
+    return bActive - aActive || bReady - aReady || String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+  });
   if (state.view !== "research") return visible;
   return visible.sort((a, b) => {
     const aActive = a.researchRunId === state.researchRun?.id ? 1 : 0;
@@ -684,7 +975,17 @@ function renderCampaignNav() {
 }
 
 function unifiedDeliveryLog() {
-  return mergeDeliveryRecords(state.teamActivity, state.deliveryLog);
+  const canonical = gmailMessagesAsDeliveryRecords(state.gtmMessages);
+  return mergeDeliveryRecords(canonical, state.teamActivity, state.deliveryLog).map((record) => {
+    const operator = deliveryOperator(record);
+    return {
+      ...record,
+      operatorId: record.operatorId || operator.id,
+      operatorName: record.operatorName || (operator.name === "Unknown" ? "" : operator.name),
+      operatorEmail: record.operatorEmail || operator.email,
+      operatorAvatarUrl: record.operatorAvatarUrl || operator.avatarUrl,
+    };
+  });
 }
 
 function formatContactDate(value = "") {
@@ -745,10 +1046,12 @@ function renderContacts() {
     if (contact.bounceDiagnostic) deliveryCopy.title = contact.bounceDiagnostic;
     const lastContact = appendText(document.createDocumentFragment(), "td", formatContactDate(contact.lastActivityAt), "contact-last");
     const ownerCell = document.createElement("td");
-    const ownerName = contact.operators[0] || "Unassigned";
+    const ownerName = contact.ownerName || "Unknown";
     const owner = appendText(ownerCell, "div", "", "contact-owner");
     appendText(owner, "span", contactInitials(ownerName), "contact-owner-avatar");
-    appendText(owner, "span", contact.operators.length > 1 ? `${ownerName} +${contact.operators.length - 1}` : ownerName);
+    const ownerCopy = appendText(owner, "div", "", "contact-owner-copy");
+    appendText(ownerCopy, "span", contact.operators.length > 1 ? `${ownerName} +${contact.operators.length - 1}` : ownerName);
+    appendText(ownerCopy, "small", contact.ownerSource || "No recorded sender");
     const actionCell = document.createElement("td");
     actionCell.className = "contact-open-cell";
     const action = document.createElement("button");
@@ -779,32 +1082,56 @@ function renderContacts() {
   });
 }
 
-async function syncInboxBounces({ interactive = false, quiet = false } = {}) {
+async function syncInboxBounces({ interactive = false, quiet = false, fullHistory = false } = {}) {
   if (!isExtension || state.contactsInboxChecking) return;
   state.contactsInboxChecking = true;
-  elements.contactsInboxSyncButton.disabled = true;
-  elements.contactsInboxSyncButton.classList.add("is-loading");
-  elements.contactsInboxState.textContent = "Checking connected Gmail inboxes…";
+  const inboxButtons = [elements.contactsInboxSyncButton, elements.analyticsInboxSyncButton].filter(Boolean);
+  for (const button of inboxButtons) {
+    button.disabled = true;
+    button.classList.add("is-loading");
+  }
+  elements.contactsInboxState.textContent = fullHistory ? "Scanning every sent Gmail thread…" : "Checking connected Gmail inboxes…";
+  if (elements.analyticsInboxState) elements.analyticsInboxState.textContent = fullHistory ? "Scanning every sent message and matching every reply…" : "Syncing Gmail replies and delivery notices…";
   try {
-    const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_GMAIL_BOUNCES_SYNC", interactive });
-    if (!response?.ok) throw new Error(response?.error || "Could not check Gmail delivery health.");
+    let capabilities;
+    try {
+      capabilities = await chrome.runtime.sendMessage({ type: RUNTIME_CAPABILITIES_MESSAGE });
+    } catch {
+      throw new Error(WORKSPACE_RELOAD_MESSAGE);
+    }
+    if (!capabilities?.ok || !runtimeHasWorkspaceActions(capabilities.data, [
+      WORKSPACE_ACTION.GMAIL_HISTORY_SYNC,
+      WORKSPACE_ACTION.GMAIL_BOUNCES_SYNC,
+    ])) {
+      throw new Error(WORKSPACE_RELOAD_MESSAGE);
+    }
+    const historyResponse = await chrome.runtime.sendMessage({ type: WORKSPACE_ACTION.GMAIL_HISTORY_SYNC, interactive, full: fullHistory });
+    if (!historyResponse?.ok) throw new Error(historyResponse?.error || WORKSPACE_RELOAD_MESSAGE);
+    const response = await chrome.runtime.sendMessage({ type: WORKSPACE_ACTION.GMAIL_BOUNCES_SYNC, interactive });
+    if (!response?.ok) throw new Error(response?.error || WORKSPACE_RELOAD_MESSAGE);
     await Promise.all([refreshSharedActivity({ quiet: true }), refreshTeamProspects({ quiet: true })]);
+    const history = historyResponse.data || {};
     const result = response.data || {};
-    const checkedAt = result.checkedAt ? new Date(result.checkedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "just now";
+    const checkedAt = history.checkedAt ? new Date(history.checkedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "just now";
     elements.contactsInboxState.textContent = result.errors?.length
       ? `Checked ${result.checkedAccounts} inboxes at ${checkedAt}; ${result.errors.length} needs reconnection.`
       : `Checked ${result.checkedAccounts} inbox${result.checkedAccounts === 1 ? "" : "es"} at ${checkedAt}.`;
-    if (!quiet) showToast(result.newBounces
-      ? `${result.newBounces} new bounce${result.newBounces === 1 ? "" : "s"} found${result.followUpsStopped ? ` · ${result.followUpsStopped} follow-up${result.followUpsStopped === 1 ? "" : "s"} stopped` : ""}.`
-      : "Inbox checked — no new bounces found.");
+    if (elements.analyticsInboxState) elements.analyticsInboxState.textContent = history.errors?.length
+      ? `Stored ${history.gtmMessagesFound || 0} mailbox messages; ${history.errors.length} mailbox${history.errors.length === 1 ? "" : "es"} needs reconnection.`
+      : `Synced at ${checkedAt} · ${history.sentMessagesFound || 0} sent · ${history.repliesFound || 0} replies · ${history.bouncesFound || 0} bounces.`;
+    if (!quiet) showToast(`Gmail synced — ${history.repliesFound || 0} replies and ${history.bouncesFound || 0} bounces found${result.followUpsStopped ? ` · ${result.followUpsStopped} follow-up${result.followUpsStopped === 1 ? "" : "s"} stopped` : ""}.`);
   } catch (error) {
     elements.contactsInboxState.textContent = error instanceof Error ? error.message : "Gmail delivery health is unavailable.";
+    if (elements.analyticsInboxState) elements.analyticsInboxState.textContent = elements.contactsInboxState.textContent;
     if (!quiet) showToast(elements.contactsInboxState.textContent);
   } finally {
     state.contactsInboxChecking = false;
-    elements.contactsInboxSyncButton.disabled = false;
-    elements.contactsInboxSyncButton.classList.remove("is-loading");
+    for (const button of inboxButtons) {
+      button.disabled = false;
+      button.classList.remove("is-loading");
+    }
     renderContacts();
+    renderAnalytics();
   }
 }
 
@@ -814,6 +1141,8 @@ async function refreshSharedActivity({ quiet = false } = {}) {
     const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_ACTIVITY_READ" });
     if (!response?.ok) throw new Error(response?.error || "Could not read the Vela team activity log.");
     state.teamActivity = (response.data?.records || []).filter((record) => record.source === "supabase");
+    state.gtmMessages = Array.isArray(response.data?.gtmMessages) ? response.data.gtmMessages : [];
+    state.mailboxSyncStates = Array.isArray(response.data?.mailboxSyncStates) ? response.data.mailboxSyncStates : [];
     state.backendStatus = response.data?.backendStatus || "signed-out";
     renderQueue();
     if (!quiet && state.backendStatus === "synced") showToast("Sent history refreshed from the Vela team workspace.");
@@ -840,27 +1169,12 @@ async function refreshTeamProspects({ quiet = false } = {}) {
   }
 }
 
-async function refreshResearchRuns({ quiet = false } = {}) {
-  if (!isExtension) return;
-  try {
-    const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_RESEARCH_RUNS_READ" });
-    if (!response?.ok) throw new Error(response?.error || "Could not read shared research runs.");
-    const latest = Array.isArray(response.data) ? response.data[0] : null;
-    if (latest && (!state.busy || latest.id !== state.researchRun?.id)) {
-      state.researchRun = latest;
-      renderResearchRun();
-    }
-  } catch (error) {
-    if (!quiet) showToast(error instanceof Error ? error.message : "Could not refresh research activity.");
-  }
-}
-
 async function refreshTeamWorkspace() {
   if (!isExtension || document.hidden || state.busy) return;
   await Promise.all([
     refreshSharedActivity({ quiet: true }),
     refreshTeamProspects({ quiet: true }),
-    refreshResearchRuns({ quiet: true }),
+    refreshResearchWorkspace({ quiet: true }),
   ]);
 }
 
@@ -918,41 +1232,65 @@ function deliveryStatusLabel(status = "") {
   })[status] || "Delivery";
 }
 
-async function cancelScheduledDelivery(id, button) {
-  if (!id) return;
-  button.disabled = true;
+async function cancelScheduledDeliveries(ids = [], button, { sequence = false } = {}) {
+  const queuedIds = [...new Set(ids.filter(Boolean))];
+  if (!queuedIds.length) return;
+  const idleLabel = button?.textContent || (sequence ? "Stop sequence" : "Cancel");
+  if (button) {
+    button.disabled = true;
+    button.textContent = sequence ? "Stopping…" : "Cancelling…";
+  }
   try {
     if (isExtension) {
-      const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_EMAIL_SCHEDULE_CANCEL", id });
-      if (!response?.ok) throw new Error(response?.error || "Could not cancel this scheduled send.");
+      for (const id of queuedIds) {
+        const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_EMAIL_SCHEDULE_CANCEL", id });
+        if (!response?.ok) throw new Error(response?.error || "Could not cancel this scheduled send.");
+      }
       const saved = await storage.get([SCHEDULED_SENDS_STORAGE_KEY, DELIVERY_LOG_STORAGE_KEY]);
       state.scheduledJobs = normalizeScheduledSends(saved[SCHEDULED_SENDS_STORAGE_KEY]);
       state.deliveryLog = normalizeDeliveryLog(saved[DELIVERY_LOG_STORAGE_KEY]);
     } else {
       const completedAt = new Date().toISOString();
-      const job = state.scheduledJobs.find((item) => item.id === id);
-      state.scheduledJobs = state.scheduledJobs.map((item) => item.id === id ? { ...item, status: DELIVERY_STATUS.CANCELLED, completedAt } : item);
-      state.deliveryLog = normalizeDeliveryLog(state.deliveryLog.map((item) => item.id === id ? { ...item, ...job, status: DELIVERY_STATUS.CANCELLED, completedAt, updatedAt: completedAt } : item));
+      const idSet = new Set(queuedIds);
+      const jobs = new Map(state.scheduledJobs.filter((item) => idSet.has(item.id)).map((item) => [item.id, item]));
+      state.scheduledJobs = state.scheduledJobs.map((item) => idSet.has(item.id) ? { ...item, status: DELIVERY_STATUS.CANCELLED, completedAt } : item);
+      state.deliveryLog = normalizeDeliveryLog(state.deliveryLog.map((item) => idSet.has(item.id) ? { ...item, ...jobs.get(item.id), status: DELIVERY_STATUS.CANCELLED, completedAt, updatedAt: completedAt } : item));
     }
     renderQueue();
-    showToast("Scheduled send cancelled. Nothing was delivered.");
+    showToast(sequence ? `${queuedIds.length} automatic follow-up${queuedIds.length === 1 ? "" : "s"} stopped. Nothing was delivered.` : "Scheduled send cancelled. Nothing was delivered.");
   } catch (error) {
-    button.disabled = false;
+    if (button?.isConnected) {
+      button.disabled = false;
+      button.textContent = idleLabel;
+    }
     showToast(error instanceof Error ? error.message : "Could not cancel this scheduled send.");
   }
 }
 
-function createDeliveryRow(record = {}, { compact = false, cancellable = false } = {}) {
+async function cancelScheduledDelivery(id, button) {
+  return cancelScheduledDeliveries([id], button);
+}
+
+function createDeliveryRow(record = {}, { compact = false, cancellable = false, sequenceSize = 0 } = {}) {
   const prospect = deliveryProspect(record);
+  const kind = scheduledSendKind(record);
   const row = document.createElement("article");
-  row.className = `delivery-row${compact ? " is-compact" : ""}`;
+  row.className = `delivery-row${compact ? " is-compact" : ""}${kind === SCHEDULED_SEND_KIND.FOLLOW_UP ? " delivery-row-follow-up" : ""}`;
   const mark = appendText(row, "span", initialsFor(prospect?.name || record.recipients?.[0]), "delivery-avatar");
   mark.setAttribute("aria-hidden", "true");
   const copy = document.createElement("div");
   copy.className = "delivery-copy";
   appendText(copy, "strong", prospect?.name || record.recipients?.join(", ") || "Email delivery");
   appendText(copy, "span", record.subject || "Untitled message", "delivery-subject");
-  if (!compact) appendText(copy, "small", [record.recipients?.join(", "), record.senderEmail ? `from ${record.senderEmail}` : ""].filter(Boolean).join(" · ") || "Recipient unavailable", "delivery-meta");
+  if (!compact) {
+    const sequenceLabel = kind === SCHEDULED_SEND_KIND.FOLLOW_UP
+      ? `Follow-up ${record.sequenceStep || ""}${sequenceSize ? ` of ${sequenceSize}` : ""} · Automatic`
+      : record.followUps?.length
+        ? `Initial email · Starts ${record.followUps.length} automatic follow-up${record.followUps.length === 1 ? "" : "s"}`
+        : "Initial email · One-time";
+    appendText(copy, "small", sequenceLabel, `delivery-meta${kind === SCHEDULED_SEND_KIND.FOLLOW_UP || record.followUps?.length ? " delivery-sequence-meta" : ""}`);
+    appendText(copy, "small", [record.recipients?.join(", "), record.senderEmail ? `from ${record.senderEmail}` : ""].filter(Boolean).join(" · ") || "Recipient unavailable", "delivery-meta");
+  }
   row.append(copy);
   const timing = document.createElement("div");
   timing.className = "delivery-timing";
@@ -988,10 +1326,13 @@ function prospectReply(prospect) {
   };
 }
 
-function renderMailboxCapacity(usage) {
+function renderMailboxCapacity(usage, {
+  totalElement = elements.mailboxCapacityTotal,
+  listElement = elements.mailboxCapacityList,
+} = {}) {
   const sent = usage.reduce((sum, mailbox) => sum + mailbox.sent, 0);
   const capacity = usage.reduce((sum, mailbox) => sum + mailbox.capacity, 0);
-  elements.mailboxCapacityTotal.textContent = `${sent.toLocaleString()} / ${capacity.toLocaleString()} sent`;
+  totalElement.textContent = `${sent.toLocaleString()} / ${capacity.toLocaleString()} sent`;
 
   const capacityFragment = document.createDocumentFragment();
   for (const mailbox of usage) {
@@ -1024,7 +1365,7 @@ function renderMailboxCapacity(usage) {
     empty.textContent = "Connect a Gmail sender in Settings to track daily mailbox capacity.";
     capacityFragment.append(empty);
   }
-  elements.mailboxCapacityList.replaceChildren(capacityFragment);
+  listElement.replaceChildren(capacityFragment);
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -1035,7 +1376,7 @@ function analyticsSvgNode(name, attributes = {}, text = "") {
   return node;
 }
 
-function renderDailyChart(sentSeries, replySeries) {
+function renderDailyChart(sentSeries, replySeries, target = elements.dailySendChart) {
   const width = 900;
   const height = 280;
   const frame = { left: 42, right: 18, top: 22, bottom: 36 };
@@ -1049,8 +1390,13 @@ function renderDailyChart(sentSeries, replySeries) {
   const sentPoints = sentSeries.map((day, index) => point(day.count, index));
   const replyPoints = replySeries.map((day, index) => point(day.count, index));
   const pathFor = (points) => points.map(({ x, y }, index) => `${index ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
-  const sentPath = pathFor(sentPoints);
-  const svg = analyticsSvgNode("svg", { viewBox: `0 0 ${width} ${height}`, "aria-hidden": "true", focusable: "false" });
+  const svg = analyticsSvgNode("svg", {
+    viewBox: `0 0 ${width} ${height}`,
+    class: "chart-plot",
+    role: "img",
+    tabindex: "0",
+    focusable: "true",
+  });
   svg.append(analyticsSvgNode("title", {}, `Daily sends and replies over the last ${sentSeries.length} days`));
 
   for (let index = 0; index <= 4; index += 1) {
@@ -1067,58 +1413,101 @@ function renderDailyChart(sentSeries, replySeries) {
   });
 
   if (sentPoints.length) {
-    const baseline = frame.top + plotHeight;
-    svg.append(analyticsSvgNode("path", { d: `${sentPath} L${sentPoints.at(-1).x.toFixed(1)} ${baseline} L${sentPoints[0].x.toFixed(1)} ${baseline} Z`, class: "chart-area-sent" }));
-    svg.append(analyticsSvgNode("path", { d: sentPath, class: "chart-line chart-line-sent" }));
+    svg.append(analyticsSvgNode("path", { d: pathFor(sentPoints), class: "chart-line chart-line-sent" }));
     svg.append(analyticsSvgNode("path", { d: pathFor(replyPoints), class: "chart-line chart-line-replies" }));
   }
 
+  const cursor = analyticsSvgNode("line", {
+    x1: frame.left,
+    x2: frame.left,
+    y1: frame.top,
+    y2: frame.top + plotHeight,
+    class: "chart-cursor",
+    hidden: "",
+  });
+  const sentDot = analyticsSvgNode("circle", { r: 4, class: "chart-active-dot chart-active-dot-sent", hidden: "" });
+  const replyDot = analyticsSvgNode("circle", { r: 4, class: "chart-active-dot chart-active-dot-replies", hidden: "" });
+  svg.append(cursor, sentDot, replyDot);
+
+  const tooltip = document.createElement("div");
+  tooltip.className = "chart-tooltip";
+  tooltip.dataset.slot = "chart-tooltip-content";
+  tooltip.setAttribute("role", "status");
+  tooltip.setAttribute("aria-live", "polite");
+  tooltip.hidden = true;
+  const tooltipLabel = appendText(tooltip, "p", "", "chart-tooltip-label");
+  const tooltipSent = appendText(tooltip, "div", "", "chart-tooltip-item");
+  appendText(tooltipSent, "i", "", "chart-tooltip-indicator is-sent");
+  appendText(tooltipSent, "span", "Sent");
+  const tooltipSentValue = appendText(tooltipSent, "strong", "0");
+  const tooltipReplies = appendText(tooltip, "div", "", "chart-tooltip-item");
+  appendText(tooltipReplies, "i", "", "chart-tooltip-indicator is-replies");
+  appendText(tooltipReplies, "span", "Replies");
+  const tooltipRepliesValue = appendText(tooltipReplies, "strong", "0");
+
+  let activeIndex = sentSeries.length - 1;
+  const showTooltip = (index) => {
+    if (!sentSeries.length) return;
+    activeIndex = Math.max(0, Math.min(sentSeries.length - 1, index));
+    const day = sentSeries[activeIndex];
+    const reply = replySeries[activeIndex] || { count: 0 };
+    const sentPoint = sentPoints[activeIndex];
+    const replyPoint = replyPoints[activeIndex] || sentPoint;
+    const xPercent = (sentPoint.x / width) * 100;
+    const yPercent = (Math.min(sentPoint.y, replyPoint.y) / height) * 100;
+
+    cursor.setAttribute("x1", sentPoint.x);
+    cursor.setAttribute("x2", sentPoint.x);
+    sentDot.setAttribute("cx", sentPoint.x);
+    sentDot.setAttribute("cy", sentPoint.y);
+    replyDot.setAttribute("cx", replyPoint.x);
+    replyDot.setAttribute("cy", replyPoint.y);
+    cursor.removeAttribute("hidden");
+    sentDot.removeAttribute("hidden");
+    replyDot.removeAttribute("hidden");
+    tooltip.hidden = false;
+    tooltip.style.left = `${xPercent}%`;
+    tooltip.style.top = `${yPercent}%`;
+    tooltip.classList.toggle("is-left-edge", xPercent < 22);
+    tooltip.classList.toggle("is-right-edge", xPercent > 78);
+    tooltip.classList.toggle("is-below", yPercent < 34);
+    tooltipLabel.textContent = day.shortDate;
+    tooltipSentValue.textContent = day.count.toLocaleString();
+    tooltipRepliesValue.textContent = reply.count.toLocaleString();
+    svg.setAttribute("aria-label", `${day.shortDate}: ${day.count} sent and ${reply.count} replies. Use the left and right arrow keys to inspect other dates.`);
+  };
+  const hideTooltip = () => {
+    cursor.setAttribute("hidden", "");
+    sentDot.setAttribute("hidden", "");
+    replyDot.setAttribute("hidden", "");
+    tooltip.hidden = true;
+  };
+
+  const hitWidth = plotWidth / Math.max(1, sentSeries.length - 1);
   sentSeries.forEach((day, index) => {
-    const hit = analyticsSvgNode("circle", { cx: sentPoints[index].x, cy: sentPoints[index].y, r: 10, class: "chart-hit" });
-    hit.append(analyticsSvgNode("title", {}, `${day.shortDate}: ${day.count} sent, ${replySeries[index]?.count || 0} replied`));
+    const x = sentPoints[index].x;
+    const hit = analyticsSvgNode("rect", {
+      x: Math.max(frame.left, x - hitWidth / 2),
+      y: frame.top,
+      width: index === 0 || index === sentSeries.length - 1 ? hitWidth / 2 : hitWidth,
+      height: plotHeight,
+      class: "chart-hit",
+    });
+    hit.addEventListener("pointerenter", () => showTooltip(index));
+    hit.addEventListener("pointermove", () => showTooltip(index));
     svg.append(hit);
   });
-  elements.dailySendChart.replaceChildren(svg);
-}
-
-function renderTeamPulse(events = collectSentEvents({ deliveryLog: unifiedDeliveryLog(), queue: state.queue })) {
-  const cutoff = Date.now() - 7 * 86_400_000;
-  const rows = teamPerformance(events.filter((event) => Date.parse(event.at) >= cutoff));
-  const total = rows.reduce((sum, member) => sum + member.sent, 0);
-  elements.overviewTeamPulseMeta.textContent = total
-    ? `${total.toLocaleString()} message${total === 1 ? "" : "s"} sent by ${rows.length} teammate${rows.length === 1 ? "" : "s"} in the last 7 days.`
-    : "Who is moving outreach forward this week.";
-  const fragment = document.createDocumentFragment();
-  if (rows.length) {
-    const rail = document.createElement("div");
-    rail.className = "team-pulse-rail";
-    rail.setAttribute("aria-label", `${total} team sends in the last 7 days`);
-    for (const member of rows) {
-      const share = total ? (member.sent / total) * 100 : 0;
-      const segment = document.createElement("i");
-      segment.style.setProperty("--team-share", `${share}%`);
-      addTooltip(segment, `${member.name}: ${member.sent} sent to ${member.recipients} people`);
-      rail.append(segment);
-    }
-    fragment.append(rail);
-  }
-  const list = document.createElement("div");
-  list.className = "team-pulse-list";
-  for (const member of rows.slice(0, 5)) {
-    const item = document.createElement("article");
-    item.className = "team-pulse-member";
-    const avatar = appendText(item, "span", initialsFor(member.name), "settings-member-avatar");
-    avatar.setAttribute("aria-hidden", "true");
-    const copy = appendText(item, "div", "", "team-pulse-copy");
-    appendText(copy, "strong", member.name);
-    appendText(copy, "small", `${member.recipients} people · ${member.senders.length || (member.senderEmail ? 1 : 0)} mailbox${(member.senders.length || (member.senderEmail ? 1 : 0)) === 1 ? "" : "es"}`);
-    appendText(item, "b", member.sent.toLocaleString());
-    addTooltip(item, `${member.name} sent ${member.sent} message${member.sent === 1 ? "" : "s"} in the last 7 days${member.senders.length ? ` through ${member.senders.join(", ")}` : ""}.`);
-    list.append(item);
-  }
-  if (!rows.length) appendText(list, "p", "Team sends will appear here as soon as a reviewed email is delivered.", "overview-empty");
-  fragment.append(list);
-  elements.overviewTeamPulse.replaceChildren(fragment);
+  svg.addEventListener("pointerleave", hideTooltip);
+  svg.addEventListener("focus", () => showTooltip(activeIndex));
+  svg.addEventListener("blur", hideTooltip);
+  svg.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    if (event.key === "Home") showTooltip(0);
+    else if (event.key === "End") showTooltip(sentSeries.length - 1);
+    else showTooltip(activeIndex + (event.key === "ArrowRight" ? 1 : -1));
+  });
+  target.replaceChildren(svg, tooltip);
 }
 
 function renderAnalytics() {
@@ -1164,6 +1553,15 @@ function renderAnalytics() {
   if (state.analyticsMember !== "all" && !teamRows.some((member) => member.key === state.analyticsMember)) state.analyticsMember = "all";
   const selectedMember = teamRows.find((member) => member.key === state.analyticsMember) || null;
   const visibleEvents = selectedMember ? rangedEvents.filter((event) => teamMemberKey(event) === selectedMember.key) : rangedEvents;
+  const hasCanonicalArchive = state.mailboxSyncStates.some((mailbox) => mailbox.sync_status === "complete");
+  const canonicalInPeriod = state.gtmMessages.filter((message) => Date.parse(message.occurredAt) >= cutoff.getTime());
+  const canonicalInScope = canonicalInPeriod.filter((message) => {
+    if (!selectedMember) return true;
+    const mailbox = String(message.accountEmail || (message.direction === "outgoing" ? message.senderEmail : "")).toLowerCase();
+    return selectedMember.senders.map((sender) => String(sender).toLowerCase()).includes(mailbox);
+  });
+  const canonicalSent = canonicalInScope.filter((message) => message.direction === "outgoing" && ["initial", "follow_up"].includes(message.messageKind));
+  const canonicalReplies = canonicalInScope.filter((message) => message.messageKind === "reply");
   const latestSendByRecipient = new Map();
   for (const event of events) {
     const recipient = String(event.recipient || "").toLowerCase();
@@ -1172,22 +1570,72 @@ function renderAnalytics() {
   const rangedReplies = replyEvents.filter((event) => Date.parse(event.at) >= cutoff.getTime() && (!selectedMember || teamMemberKey(latestSendByRecipient.get(event.recipient) || {}) === selectedMember.key));
   const scopeName = selectedMember?.name || "All team";
   const usage = mailboxCapacityUsage({ deliveryLog, accounts: state.googleAccounts });
-  const contacted = new Set(visibleEvents.map((event) => event.recipient || event.identity).filter(Boolean)).size;
-  const cohortReplies = selectedMember ? selectedMember.replies : teamByActivity.reduce((sum, member) => sum + member.replies, 0);
-  const replyRate = contacted ? Math.round((cohortReplies / contacted) * 100) : 0;
+  const recordAt = (record) => record.completedAt || record.updatedAt || record.scheduledAt || record.createdAt || "";
+  const recordOwnerKey = (record) => {
+    if (record.operatorId || record.operatorEmail || record.operatorName) return teamMemberKey(record);
+    const mailbox = String(record.accountEmail || "").toLowerCase();
+    const mailboxOwner = teamRows.find((member) => member.senders.map((sender) => String(sender).toLowerCase()).includes(mailbox));
+    if (mailboxOwner) return mailboxOwner.key;
+    const recipient = String(record.recipients?.[0] || "").toLowerCase();
+    return teamMemberKey(latestSendByRecipient.get(recipient) || {});
+  };
+  const inPeriod = (record) => Date.parse(recordAt(record)) >= cutoff.getTime();
+  const inScope = (record) => !selectedMember || recordOwnerKey(record) === selectedMember.key;
+  const ledgerBounceRecords = deliveryLog.filter((record) => record.status === DELIVERY_STATUS.BOUNCED && inPeriod(record));
+  const canonicalBounceRecords = canonicalInPeriod.filter((message) => message.messageKind === "bounce").map((message) => ({
+    id: message.gmailMessageId,
+    status: DELIVERY_STATUS.BOUNCED,
+    accountEmail: message.accountEmail,
+    senderEmail: message.accountEmail,
+    recipients: message.recipientEmails,
+    subject: message.subject,
+    bounceReason: message.bounceReason,
+    bounceType: message.bounceType,
+    error: message.snippet,
+    completedAt: message.occurredAt,
+  }));
+  const bounceRecords = hasCanonicalArchive ? canonicalBounceRecords : ledgerBounceRecords;
+  const visibleBounces = bounceRecords.filter(inScope);
+  const failedRecords = deliveryLog.filter((record) => record.status === DELIVERY_STATUS.FAILED && inPeriod(record) && inScope(record));
+  const bouncedRecipients = new Set(visibleBounces.flatMap((record) => record.recipients || []).map((recipient) => String(recipient).toLowerCase()).filter(Boolean));
+  const sentCount = hasCanonicalArchive ? canonicalSent.length : visibleEvents.length;
+  const replyCount = hasCanonicalArchive ? canonicalReplies.length : rangedReplies.length;
+  const delivered = Math.max(0, sentCount - bouncedRecipients.size);
+  const bounceRate = sentCount ? Math.round((bouncedRecipients.size / sentCount) * 1000) / 10 : 0;
+  const deliveryRate = sentCount ? Math.max(0, Math.round((delivered / sentCount) * 1000) / 10) : null;
+  const policyBlocks = visibleBounces.filter((record) => record.bounceReason === "policy_blocked").length;
+  const hardBounces = visibleBounces.filter((record) => record.bounceType === "hard").length;
+  const softBounces = visibleBounces.filter((record) => record.bounceType === "soft").length;
 
-  elements.analyticsScopeTitle.textContent = selectedMember ? `${selectedMember.name}’s output` : "All team output";
+  elements.analyticsScopeTitle.textContent = scopeName;
   elements.analyticsScopeDetail.textContent = `${scopeName} · last ${state.analyticsDays} days`;
-  elements.analyticsSentToday.textContent = visibleEvents.length.toLocaleString();
-  elements.analyticsSentTodayDetail.textContent = selectedMember ? `Sent by ${selectedMember.name}` : `Across ${teamByActivity.filter((member) => member.sent).length} active teammate${teamByActivity.filter((member) => member.sent).length === 1 ? "" : "s"}`;
-  elements.engagementReplies.textContent = rangedReplies.length.toLocaleString();
-  elements.engagementRateDetail.textContent = rangedReplies.length ? "Human replies received in this period" : "No replies received in this period";
-  elements.analyticsSendRate.textContent = `${replyRate}%`;
-  elements.analyticsSendRateDetail.textContent = contacted ? `${cohortReplies} replied of ${contacted} people reached` : "No delivered outreach in this period";
-  elements.analyticsProspectsContacted.textContent = contacted.toLocaleString();
-  elements.analyticsProspectsDetail.textContent = `Unique recipients in the last ${state.analyticsDays} days`;
-  elements.analyticsPeriodReplyRate.textContent = `${replyRate}%`;
+  elements.analyticsSentToday.textContent = sentCount.toLocaleString();
+  elements.analyticsDelivered.textContent = delivered.toLocaleString();
+  elements.analyticsBounced.textContent = bouncedRecipients.size.toLocaleString();
+  elements.engagementReplies.textContent = replyCount.toLocaleString();
+  elements.analyticsHealthScore.textContent = deliveryRate === null ? "—" : `${deliveryRate}%`;
+  elements.analyticsPolicyBlocks.textContent = policyBlocks.toLocaleString();
+  elements.analyticsHardBounces.textContent = hardBounces.toLocaleString();
+  elements.analyticsSoftBounces.textContent = softBounces.toLocaleString();
+  elements.analyticsSendFailures.textContent = failedRecords.length.toLocaleString();
+  elements.analyticsSuppressed.textContent = bouncedRecipients.size.toLocaleString();
+  const riskSignals = visibleBounces.length + failedRecords.length;
+  elements.analyticsRiskCount.textContent = `${riskSignals.toLocaleString()} signal${riskSignals === 1 ? "" : "s"}`;
   elements.analyticsActiveSenders.textContent = `${teamByActivity.filter((member) => member.sent).length} active`;
+  const healthTone = !sentCount ? "neutral" : policyBlocks || bounceRate > 5 ? "danger" : bounceRate > 2 ? "watch" : "healthy";
+  const healthLabel = healthTone === "danger" ? "Needs attention" : healthTone === "watch" ? "Watch closely" : healthTone === "healthy" ? "Healthy" : "No baseline";
+  elements.analyticsPanel.dataset.health = healthTone;
+  elements.analyticsHealthLabel.textContent = healthLabel;
+  elements.analyticsHealthLabel.className = `analytics-health-state is-${healthTone}`;
+  elements.analyticsHealthSummary.textContent = !sentCount
+    ? "No accepted sends in this window. Send activity will establish the baseline."
+    : policyBlocks
+      ? `${policyBlocks} recipient policy block${policyBlocks === 1 ? "" : "s"} detected. Review content and sender reputation before increasing volume.`
+      : bounceRate > 2
+        ? `${bounceRate}% of accepted sends bounced, above the 2% deliverability watch line.`
+        : bouncedRecipients.size
+          ? `${delivered.toLocaleString()} delivered with a ${bounceRate}% bounce rate—inside the watch line.`
+          : `No bounces detected across ${sentCount.toLocaleString()} accepted send${sentCount === 1 ? "" : "s"}.`;
 
   for (const button of elements.analyticsRange.querySelectorAll("[data-days]")) {
     const active = Number(button.dataset.days) === state.analyticsDays;
@@ -1212,42 +1660,11 @@ function renderAnalytics() {
     });
     filterFragment.append(button);
   };
-  addFilter("all", "All team", rangedEvents.length);
+  addFilter("all", "All team", hasCanonicalArchive ? canonicalInPeriod.filter((message) => message.direction === "outgoing").length : rangedEvents.length);
   for (const member of teamRows) addFilter(member.key, member.name, member.sent, initialsFor(member.name));
   elements.analyticsMemberFilter.replaceChildren(filterFragment);
 
-  const series = buildDailySendSeries(visibleEvents, { days: state.analyticsDays });
-  const replySeries = buildDailySendSeries(rangedReplies, { days: state.analyticsDays });
-  const summary = summarizeDailySends(series);
-  renderDailyChart(series, replySeries);
-  elements.dailySendChart.setAttribute("aria-label", `${scopeName} sent ${summary.total} emails and received ${rangedReplies.length} replies in the last ${state.analyticsDays} days.`);
-  elements.analyticsWeekSent.textContent = summary.total.toLocaleString();
-  elements.analyticsDailyAverage.textContent = summary.average ? summary.average.toFixed(1) : "0";
-  elements.analyticsBestDay.textContent = summary.best ? `${summary.best.shortDate} · ${summary.best.count}` : "—";
-
-  const leaderboard = document.createDocumentFragment();
-  const teamSentTotal = teamRows.reduce((sum, member) => sum + member.sent, 0);
-  for (const [index, member] of teamRows.slice(0, 6).entries()) {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = `analytics-leader${member.key === state.analyticsMember ? " is-selected" : ""}`;
-    item.addEventListener("click", () => {
-      state.analyticsMember = member.key;
-      renderAnalytics();
-      persistWorkspaceStateSoon();
-    });
-    appendText(item, "b", String(index + 1).padStart(2, "0"), "analytics-leader-rank");
-    appendText(item, "span", initialsFor(member.name), "settings-member-avatar");
-    const copy = appendText(item, "span", "", "analytics-leader-copy");
-    appendText(copy, "strong", member.name);
-    appendText(copy, "small", member.sent ? `${member.recipients} people · ${member.replyRate}% reply rate` : "No sends in this period");
-    appendText(item, "em", member.sent.toLocaleString());
-    leaderboard.append(item);
-  }
-  if (!teamRows.length) appendText(leaderboard, "p", "Team performance appears after the first delivery.", "analytics-empty-copy");
-  elements.analyticsLeaderboard.replaceChildren(leaderboard);
-
-  elements.analyticsTeamDescription.textContent = `Sent volume and reply outcomes for the last ${state.analyticsDays} days.`;
+  elements.analyticsTeamDescription.textContent = `Operators, mailboxes, and delivery outcomes from the last ${state.analyticsDays} days.`;
   const teamFragment = document.createDocumentFragment();
   for (const member of teamRows) {
     const row = document.createElement("tr");
@@ -1267,22 +1684,21 @@ function renderAnalytics() {
     appendText(identity, "span", initialsFor(member.name), "settings-member-avatar");
     const personCopy = appendText(identity, "div", "", "analytics-member-copy");
     appendText(personCopy, "strong", member.name);
-    appendText(personCopy, "small", member.senders.length ? member.senders.join(", ") : member.operatorEmail || "No mailbox activity");
+    appendText(personCopy, "small", member.operatorEmail || `${member.recipients.toLocaleString()} unique recipient${member.recipients === 1 ? "" : "s"}`);
     row.append(person);
+    const mailboxCell = document.createElement("td");
+    const mailboxList = appendText(mailboxCell, "div", "", "analytics-mailbox-list");
+    if (member.senders.length) {
+      for (const sender of member.senders.slice(0, 2)) appendText(mailboxList, "span", sender);
+      if (member.senders.length > 2) appendText(mailboxList, "small", `+${member.senders.length - 2} more`);
+    } else appendText(mailboxList, "span", "No sending mailbox", "is-empty");
+    row.append(mailboxCell);
     appendText(row, "td", member.sent.toLocaleString(), "analytics-number-cell");
-    appendText(row, "td", member.recipients.toLocaleString());
-    appendText(row, "td", member.replies.toLocaleString());
+    const memberBounced = new Set(bounceRecords.filter((record) => recordOwnerKey(record) === member.key).flatMap((record) => record.recipients || []).map((recipient) => String(recipient).toLowerCase())).size;
+    appendText(row, "td", Math.max(0, member.sent - memberBounced).toLocaleString(), "analytics-delivered-cell");
+    appendText(row, "td", memberBounced.toLocaleString(), memberBounced ? "analytics-bounce-cell has-bounces" : "analytics-bounce-cell");
     const rateCell = appendText(row, "td", `${member.replyRate}%`, `analytics-rate-cell${member.replyRate ? " has-replies" : ""}`);
     rateCell.dataset.rate = String(member.replyRate);
-    const shareCell = document.createElement("td");
-    const share = teamSentTotal ? Math.round((member.sent / teamSentTotal) * 100) : 0;
-    const shareCopy = appendText(shareCell, "div", "", "team-share-cell");
-    const shareTrack = appendText(shareCopy, "span", "", "team-share-track");
-    const shareIndicator = document.createElement("i");
-    shareIndicator.style.setProperty("--team-share", `${share}%`);
-    shareTrack.append(shareIndicator);
-    appendText(shareCopy, "strong", `${share}%`);
-    row.append(shareCell);
     appendText(row, "td", member.lastSentAt ? relativeTime(member.lastSentAt) : "—");
     teamFragment.append(row);
   }
@@ -1294,132 +1710,126 @@ function renderAnalytics() {
   }
   elements.analyticsTeamBody.replaceChildren(teamFragment);
 
-  const inScopeRecord = (record) => !selectedMember || teamMemberKey(record) === selectedMember.key;
-  const followUpRecords = deliveryLog.filter((record) => record.kind === "follow-up" && inScopeRecord(record));
-  const sentFollowUps = followUpRecords.filter((record) => [DELIVERY_STATUS.SENT, DELIVERY_STATUS.PARTIAL].includes(record.status));
-  const activeSequenceIds = new Set(state.scheduledJobs.filter((job) => job.status === DELIVERY_STATUS.SCHEDULED && job.kind === "follow-up" && inScopeRecord(job)).map((job) => job.sequenceId).filter(Boolean));
-  elements.analyticsActiveSequences.textContent = activeSequenceIds.size.toLocaleString();
-  elements.analyticsActiveSequencesDetail.textContent = activeSequenceIds.size ? "Waiting" : "None waiting";
-  elements.analyticsFollowUpsSent.textContent = sentFollowUps.length.toLocaleString();
-  elements.analyticsFollowUpsDetail.textContent = "Sent automatically";
-  elements.analyticsReplyRate.textContent = `${replyRate}% reply rate`;
-  elements.sequenceInitialCount.textContent = deliveryLog.filter((record) => record.kind !== "follow-up" && [DELIVERY_STATUS.SENT, DELIVERY_STATUS.PARTIAL].includes(record.status) && inScopeRecord(record)).length.toLocaleString();
-  elements.sequenceStepOneCount.textContent = sentFollowUps.filter((record) => record.sequenceStep === 1).length.toLocaleString();
-  elements.sequenceStepTwoCount.textContent = sentFollowUps.filter((record) => record.sequenceStep === 2).length.toLocaleString();
-  elements.sequenceStepThreeCount.textContent = sentFollowUps.filter((record) => record.sequenceStep === 3).length.toLocaleString();
-  elements.sequenceReplyCount.textContent = rangedReplies.length.toLocaleString();
-  renderMailboxCapacity(usage);
+  const scopedUsage = selectedMember?.senders?.length ? usage.filter((mailbox) => selectedMember.senders.includes(mailbox.email)) : selectedMember ? [] : usage;
+  renderMailboxCapacity(scopedUsage);
 
   const activityFragment = document.createDocumentFragment();
-  for (const event of visibleEvents.filter((item) => item.senderEmail || item.recipient).slice(0, 7)) {
+  const canonicalActivity = canonicalInScope
+    .filter((message) => ["initial", "follow_up", "reply", "bounce"].includes(message.messageKind))
+    .map((message) => ({
+      ...message,
+      kind: message.messageKind === "bounce" ? "bounced" : message.messageKind === "reply" ? "reply" : "sent",
+      activityAt: message.occurredAt,
+      recipient: message.messageKind === "reply" ? message.senderEmail : message.recipientEmails?.[0] || "",
+      senderEmail: message.accountEmail || message.senderEmail,
+      error: message.messageKind === "bounce" ? message.bounceReason?.replaceAll("_", " ") : "",
+    }));
+  const activity = [
+    ...(hasCanonicalArchive ? canonicalActivity : [
+      ...visibleEvents.filter((item) => item.senderEmail || item.recipient).map((event) => ({ ...event, kind: "sent", activityAt: event.at })),
+      ...visibleBounces.map((record) => ({ ...record, kind: "bounced", activityAt: recordAt(record), recipient: record.recipients?.[0] || "" })),
+    ]),
+    ...failedRecords.map((record) => ({ ...record, kind: "failed", activityAt: recordAt(record), recipient: record.recipients?.[0] || "" })),
+  ].sort((a, b) => String(b.activityAt).localeCompare(String(a.activityAt))).slice(0, 10);
+  for (const event of activity) {
     const row = document.createElement("article");
-    row.className = "analytics-activity-row";
-    row.title = [event.subject || "No subject", event.recipient ? `To ${event.recipient}` : "", event.senderEmail ? `From ${event.senderEmail}` : ""].filter(Boolean).join(" · ");
-    appendText(row, "span", initialsFor(event.operatorName || event.senderEmail), "settings-member-avatar");
+    row.className = `analytics-activity-row is-${event.kind}`;
+    row.title = [event.error || event.subject || "No subject", event.recipient ? `To ${event.recipient}` : "", event.senderEmail ? `From ${event.senderEmail}` : ""].filter(Boolean).join(" · ");
+    appendText(row, "span", event.kind === "sent" ? initialsFor(event.operatorName || event.senderEmail) : event.kind === "reply" ? "↩" : "!", "analytics-activity-marker");
     const copy = appendText(row, "div", "", "analytics-activity-copy");
-    appendText(copy, "strong", event.operatorName || event.senderEmail || "Vela teammate");
-    appendText(copy, "span", event.subject || event.recipient || "Outreach email");
+    appendText(copy, "strong", event.kind === "bounced" ? "Delivery bounced" : event.kind === "failed" ? "Send failed" : event.kind === "reply" ? "Reply received" : event.operatorName || event.senderEmail || "Vela teammate");
+    appendText(copy, "span", ["sent", "reply"].includes(event.kind) ? event.subject || (event.kind === "reply" ? "GTM conversation reply" : "Outreach email") : event.error || event.bounceReason?.replaceAll("_", " ") || "Gmail could not complete delivery");
     const meta = appendText(row, "div", "", "analytics-activity-meta");
     appendText(meta, "strong", event.recipient || "—");
-    appendText(meta, "time", relativeTime(event.at));
+    appendText(meta, "span", event.kind === "bounced" ? event.bounceReason === "policy_blocked" ? "Policy block" : `${event.bounceType || "hard"} bounce` : event.kind === "failed" ? "Failed" : event.kind === "reply" ? "Replied" : "Sent", "analytics-activity-state");
+    appendText(meta, "time", relativeTime(event.activityAt));
     activityFragment.append(row);
   }
-  if (!activityFragment.childNodes.length) appendText(activityFragment, "p", "No sends in this period.", "analytics-empty-copy");
+  if (!activityFragment.childNodes.length) appendText(activityFragment, "p", "No delivery activity in this period.", "analytics-empty-copy");
   elements.analyticsActivityList.replaceChildren(activityFragment);
 }
 
-function renderResponseQueue() {
-  const waiting = state.queue
-    .map((prospect) => ({ prospect, reply: prospectReply(prospect) }))
-    .filter((item) => item.reply)
-    .sort((a, b) => String(b.reply.at).localeCompare(String(a.reply.at)));
-  elements.overviewResponseCount.textContent = waiting.length;
-  const fragment = document.createDocumentFragment();
-  for (const { prospect, reply } of waiting.slice(0, 6)) {
-    const row = document.createElement("article");
-    row.className = "response-row";
-    appendText(row, "span", initialsFor(prospect.name), "person-avatar");
-    const copy = document.createElement("div");
-    copy.className = "response-copy";
-    const title = document.createElement("span");
-    appendText(title, "strong", prospect.name || prospect.email || "Prospect");
-    appendText(title, "b", "Reply");
-    copy.append(title);
-    appendText(copy, "small", reply.detail);
-    row.append(copy);
-    const actions = document.createElement("div");
-    actions.className = "response-actions";
-    appendText(actions, "time", relativeTime(reply.at));
-    const respond = appendText(actions, "button", "Respond", "row-button");
-    respond.type = "button";
-    respond.addEventListener("click", () => {
-      const query = encodeURIComponent(`from:${prospect.email || ""}`);
-      window.open(`https://mail.google.com/mail/u/0/#search/${query}`, "_blank", "noopener,noreferrer");
-    });
-    row.append(actions);
-    fragment.append(row);
-  }
-  if (!waiting.length) {
-    const empty = document.createElement("div");
-    empty.className = "response-empty";
-    appendText(empty, "strong", "You’re caught up");
-    appendText(empty, "p", "Replies you mark from a prospect’s action menu will collect here so you can jump straight into the conversations that need you.");
-    const settings = appendText(empty, "button", "Review Gmail setup", "button button-ghost");
-    settings.type = "button";
-    settings.addEventListener("click", () => isExtension ? chrome.runtime.openOptionsPage() : window.open("options.html", "_blank"));
-    fragment.append(empty);
-  }
-  elements.overviewResponseList.replaceChildren(fragment);
-}
-
 function renderOverview() {
-  const scheduled = state.scheduledJobs
-    .filter((job) => job.status === DELIVERY_STATUS.SCHEDULED)
-    .sort((a, b) => String(a.scheduledAt).localeCompare(String(b.scheduledAt)));
-  const today = new Date();
-  const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-  const nextDay = Date.now() + 24 * 60 * 60_000;
   const deliveryLog = unifiedDeliveryLog();
-  const deliveredToday = deliveryLog.filter((record) => [DELIVERY_STATUS.SENT, DELIVERY_STATUS.PARTIAL].includes(record.status) && Date.parse(record.completedAt || record.updatedAt) >= startOfDay);
-  elements.overviewReviewCount.textContent = state.queue.filter((item) => belongsToResearch(item) && item.status === QUEUE_STATUS.READY).length;
-  elements.overviewScheduledCount.textContent = scheduled.filter((job) => Date.parse(job.scheduledAt) <= nextDay).length;
-  elements.overviewSentTodayCount.textContent = deliveredToday.length;
-  renderTeamPulse();
-  renderResponseQueue();
+  const events = collectSentEvents({ deliveryLog, queue: state.queue });
+  const reportableEvents = events.filter((event) => event.operatorId || event.operatorEmail || event.senderEmail);
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const thirtyDayCutoff = startOfToday - 29 * 86_400_000;
+  const sentToday = reportableEvents.filter((event) => Date.parse(event.at) >= startOfToday);
+  const recentEvents = reportableEvents.filter((event) => Date.parse(event.at) >= thirtyDayCutoff);
+  const replyEvents = state.queue.map((prospect) => {
+    const activity = latestProspectEvent(prospect, REPLY_ACTIVITY_TYPES);
+    return {
+      at: prospect.replyReceivedAt || activity?.at || "",
+      recipient: String(prospect.email || "").toLowerCase(),
+    };
+  }).filter((event) => event.at && Date.parse(event.at) >= thirtyDayCutoff);
+  const contacted = new Set(reportableEvents.map((event) => String(event.recipient || event.identity || "").toLowerCase()).filter(Boolean));
+  const elapsedHours = Math.max(1, (Date.now() - startOfToday) / 3_600_000);
+  const hourlyRate = sentToday.length / elapsedHours;
+  const formattedRate = hourlyRate >= 10 ? Math.round(hourlyRate).toLocaleString() : hourlyRate.toFixed(1).replace(/\.0$/, "");
 
-  const scheduleFragment = document.createDocumentFragment();
-  for (const record of scheduled.slice(0, 3)) scheduleFragment.append(createDeliveryRow(record, { compact: true }));
-  if (!scheduled.length) appendText(scheduleFragment, "p", "No sends are queued. Review a verified draft in the side panel to schedule one.", "overview-empty");
-  elements.overviewScheduleList.replaceChildren(scheduleFragment);
+  elements.dashboardSentToday.textContent = sentToday.length.toLocaleString();
+  elements.dashboardSentTodayDetail.textContent = `${recentEvents.length.toLocaleString()} in the last 30 days`;
+  elements.dashboardReplies.textContent = replyEvents.length.toLocaleString();
+  elements.dashboardSendRate.textContent = `${formattedRate}/hr`;
+  elements.dashboardSendRateDetail.textContent = sentToday.length ? `Average across ${elapsedHours.toFixed(1)} active hours today` : "No sends yet today";
+  elements.dashboardProspectsContacted.textContent = contacted.size.toLocaleString();
 
-  const activityFragment = document.createDocumentFragment();
-  const recent = deliveryLog.filter((record) => record.status !== DELIVERY_STATUS.SCHEDULED).slice(0, 3);
-  for (const record of recent) activityFragment.append(createDeliveryRow(record, { compact: true }));
-  if (!recent.length) appendText(activityFragment, "p", "Delivered, failed, and cancelled sends will build a permanent local log here.", "overview-empty");
-  elements.overviewActivityList.replaceChildren(activityFragment);
+  renderMailboxCapacity(mailboxCapacityUsage({ deliveryLog, accounts: state.googleAccounts }), {
+    totalElement: elements.dashboardMailboxCapacityTotal,
+    listElement: elements.dashboardMailboxCapacityList,
+  });
 
-  const readyProspects = state.queue
-    .filter((item) => belongsToResearch(item) && item.status === QUEUE_STATUS.READY)
-    .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
-    .slice(0, 5);
-  const reviewFragment = document.createDocumentFragment();
-  for (const prospect of readyProspects) {
+  const sentSeries = buildDailySendSeries(recentEvents, { days: 30 });
+  const replySeries = buildDailySendSeries(replyEvents, { days: 30 });
+  renderDailyChart(sentSeries, replySeries, elements.dashboardSendChart);
+  elements.dashboardSendChart.setAttribute("aria-label", `${recentEvents.length} emails sent and ${replyEvents.length} replies received over the last 30 days.`);
+
+  const senderRows = teamPerformance(sentToday);
+  const senderMax = Math.max(1, ...senderRows.map((member) => member.sent));
+  const senderFragment = document.createDocumentFragment();
+  for (const member of senderRows) {
     const row = document.createElement("article");
-    row.className = "review-row";
-    appendText(row, "span", initialsFor(prospect.name), "person-avatar");
-    const copy = document.createElement("div");
-    copy.className = "review-row-copy";
-    appendText(copy, "strong", prospect.name || "LinkedIn prospect");
-    appendText(copy, "span", prospect.subject || companyAndRole(prospect).role, "review-row-subject");
-    row.append(copy);
-    appendText(row, "time", relativeTime(prospect.updatedAt || prospect.createdAt));
-    const open = appendText(row, "button", "Review", "row-button");
-    open.type = "button";
-    open.addEventListener("click", (event) => openReviewDrawer(prospect.id, event.currentTarget));
-    reviewFragment.append(row);
+    row.className = "dashboard-sender-row";
+    const heading = document.createElement("div");
+    const identity = appendText(heading, "span", "", "dashboard-sender-identity");
+    appendText(identity, "span", initialsFor(member.name), "settings-member-avatar");
+    const copy = appendText(identity, "span", "", "dashboard-sender-copy");
+    appendText(copy, "strong", member.name);
+    appendText(copy, "small", member.senders.join(", ") || member.operatorEmail || "Sending mailbox unavailable");
+    appendText(heading, "b", member.sent.toLocaleString());
+    const track = appendText(row, "div", "", "dashboard-sender-track");
+    const indicator = document.createElement("i");
+    indicator.style.setProperty("--sender-width", `${Math.max(4, (member.sent / senderMax) * 100)}%`);
+    track.append(indicator);
+    row.prepend(heading);
+    senderFragment.append(row);
   }
-  if (!readyProspects.length) appendText(reviewFragment, "p", "No drafts are waiting. Research a prospect and its draft lands here for approval.", "overview-empty");
-  elements.overviewReviewList.replaceChildren(reviewFragment);
+  if (!senderRows.length) appendText(senderFragment, "p", "No teammate has sent outreach yet today.", "dashboard-empty");
+  elements.dashboardSenderList.replaceChildren(senderFragment);
+
+  const messageFragment = document.createDocumentFragment();
+  for (const event of reportableEvents.slice(0, 10)) {
+    const recipient = state.queue.find((prospect) => String(prospect.email || "").toLowerCase() === String(event.recipient || "").toLowerCase());
+    const senderName = event.operatorName || event.operatorEmail || event.senderEmail || "Unattributed teammate";
+    const row = document.createElement("article");
+    row.className = "dashboard-message-row";
+    appendText(row, "span", initialsFor(senderName), "settings-member-avatar");
+    const sender = appendText(row, "div", "", "dashboard-message-sender");
+    appendText(sender, "strong", senderName);
+    appendText(sender, "small", event.operatorEmail || event.senderEmail || "Team delivery");
+    const message = appendText(row, "div", "", "dashboard-message-copy");
+    appendText(message, "strong", event.subject || "Untitled message");
+    appendText(message, "small", `To ${recipient?.name || event.recipient || "recipient unavailable"}${recipient?.name && event.recipient ? ` · ${event.recipient}` : ""}`);
+    const mailbox = appendText(row, "div", "", "dashboard-message-mailbox");
+    appendText(mailbox, "span", event.senderEmail || "Mailbox unavailable");
+    appendText(mailbox, "time", relativeTime(event.at));
+    messageFragment.append(row);
+  }
+  if (!reportableEvents.length) appendText(messageFragment, "p", "Recent team deliveries will appear here with sender and message details.", "dashboard-empty");
+  elements.dashboardMessageList.replaceChildren(messageFragment);
 }
 
 function historySenderKey(operator = {}) {
@@ -1528,6 +1938,67 @@ function renderHistoryWorkspace(records = []) {
   });
 }
 
+function scheduledDeliveryGroups(records = []) {
+  const groups = [];
+  const initial = records.filter((record) => scheduledSendKind(record) === SCHEDULED_SEND_KIND.INITIAL);
+  if (initial.length) groups.push({ id: "initial", kind: SCHEDULED_SEND_KIND.INITIAL, records: initial });
+  const sequences = new Map();
+  for (const record of records.filter((item) => scheduledSendKind(item) === SCHEDULED_SEND_KIND.FOLLOW_UP)) {
+    const id = record.sequenceId || record.prospectId || record.id;
+    if (!sequences.has(id)) sequences.set(id, []);
+    sequences.get(id).push(record);
+  }
+  for (const [id, sequenceRecords] of sequences) groups.push({ id, kind: SCHEDULED_SEND_KIND.FOLLOW_UP, records: sequenceRecords });
+  return groups.sort((a, b) => String(a.records[0]?.scheduledAt || "").localeCompare(String(b.records[0]?.scheduledAt || "")));
+}
+
+function deliveryGroupIcon(kind) {
+  const mark = document.createElement("span");
+  mark.className = "delivery-group-icon";
+  mark.setAttribute("aria-hidden", "true");
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon.setAttribute("viewBox", "0 0 20 20");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", kind === SCHEDULED_SEND_KIND.FOLLOW_UP ? "M5 5.5h7.5a3 3 0 0 1 3 3v.5M5 5.5l2.8-2.8M5 5.5l2.8 2.8M15 14.5H7.5a3 3 0 0 1-3-3V11M15 14.5l-2.8-2.8M15 14.5l-2.8 2.8" : "M3.5 5.5h13v9h-13zM3.5 6l6.5 5 6.5-5");
+  icon.append(path);
+  mark.append(icon);
+  return mark;
+}
+
+function createDeliveryGroup(group) {
+  const followUp = group.kind === SCHEDULED_SEND_KIND.FOLLOW_UP;
+  const section = document.createElement("section");
+  section.className = `delivery-group${followUp ? " delivery-group-follow-up" : ""}`;
+  const header = document.createElement("header");
+  header.className = "delivery-group-head";
+  header.append(deliveryGroupIcon(group.kind));
+  const copy = document.createElement("div");
+  copy.className = "delivery-group-copy";
+  const first = group.records[0];
+  const prospect = deliveryProspect(first);
+  if (followUp) {
+    appendText(copy, "strong", `${prospect?.name || first.recipients?.[0] || "Recipient"} follow-ups`);
+    const allSequenceJobs = state.scheduledJobs.filter((job) => job.status === DELIVERY_STATUS.SCHEDULED && scheduledSendKind(job) === SCHEDULED_SEND_KIND.FOLLOW_UP && (job.sequenceId || job.prospectId || job.id) === group.id);
+    appendText(copy, "span", `${allSequenceJobs.length} step${allSequenceJobs.length === 1 ? "" : "s"} remaining · Next ${deliveryDate(allSequenceJobs[0]?.scheduledAt || first.scheduledAt, { relative: true })} · Stops automatically on reply`);
+    header.append(copy);
+    appendText(header, "span", "Automatic", "delivery-group-badge");
+    const stop = appendText(header, "button", "Stop sequence", "delivery-stop-sequence");
+    stop.type = "button";
+    stop.addEventListener("click", () => cancelScheduledDeliveries(allSequenceJobs.map((job) => job.id), stop, { sequence: true }));
+  } else {
+    appendText(copy, "strong", "Scheduled messages");
+    appendText(copy, "span", `${group.records.length} initial ${group.records.length === 1 ? "message" : "messages"} waiting for Gmail`);
+    header.append(copy);
+    appendText(header, "span", "Initial", "delivery-group-badge");
+  }
+  section.append(header);
+  const sequenceSize = followUp
+    ? Math.max(...state.scheduledJobs.filter((job) => (job.sequenceId || job.prospectId || job.id) === group.id).map((job) => Number(job.sequenceStep) || 0), group.records.length)
+    : 0;
+  for (const record of group.records) section.append(createDeliveryRow(record, { cancellable: true, sequenceSize }));
+  return section;
+}
+
 function renderDeliveryOperations() {
   if (!["scheduled", "history"].includes(state.view)) return;
   const scheduledView = state.view === "scheduled";
@@ -1537,24 +2008,38 @@ function renderDeliveryOperations() {
   elements.operationsKicker.textContent = scheduledView ? "Delivery queue" : "Delivery ledger";
   elements.operationsTitle.textContent = scheduledView ? "Scheduled sends" : "Every delivery, in one place";
   elements.operationsDescription.textContent = scheduledView
-    ? "These reviewed messages are persisted in Chrome and will run through Gmail at the listed time."
+    ? "Reviewed Gmail sends, grouped into initial messages and reply-aware automatic follow-up sequences."
     : state.backendStatus === "synced"
       ? "Vela team activity plus this browser's local ledger, deduplicated into one sent history."
       : "Local sent history is active. Sign in to the Vela workspace in Settings for team-wide activity.";
   elements.operationsPrimaryAction.textContent = scheduledView ? "Review more drafts" : "Open review queue";
-  elements.deliveryList.hidden = !scheduledView;
+  elements.scheduledWorkspace.hidden = !scheduledView;
   elements.historyWorkspace.hidden = scheduledView;
   if (!scheduledView) {
     renderHistoryWorkspace(records);
     return;
   }
+  const initialCount = records.filter((record) => scheduledSendKind(record) === SCHEDULED_SEND_KIND.INITIAL).length;
+  const followUpCount = records.length - initialCount;
+  elements.scheduledAllCount.textContent = records.length;
+  elements.scheduledInitialCount.textContent = initialCount;
+  elements.scheduledFollowUpCount.textContent = followUpCount;
+  for (const button of elements.scheduledKindFilter.querySelectorAll("[data-scheduled-kind]")) {
+    const active = button.dataset.scheduledKind === state.scheduledKind;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+  const visible = records.filter((record) => {
+    const prospect = deliveryProspect(record);
+    return (state.scheduledKind === "all" || scheduledSendKind(record) === state.scheduledKind) && scheduledSendMatches(record, state.scheduledQuery, prospect);
+  });
   const fragment = document.createDocumentFragment();
-  for (const record of records) fragment.append(createDeliveryRow(record, { cancellable: scheduledView }));
-  if (!records.length) {
+  for (const group of scheduledDeliveryGroups(visible)) fragment.append(createDeliveryGroup(group));
+  if (!visible.length) {
     const empty = document.createElement("div");
     empty.className = "delivery-empty";
-    appendText(empty, "h3", scheduledView ? "No sends are scheduled" : "No delivery history yet");
-    appendText(empty, "p", scheduledView ? "Choose Schedule sends in the side panel, review the message, and click Schedule send." : "Once a reviewed email sends, its recipient, subject, sender, and result will appear here.");
+    appendText(empty, "h3", records.length ? "No scheduled sends match" : "No sends are scheduled");
+    appendText(empty, "p", records.length ? "Try another search or switch the message type filter." : "Choose Schedule sends in the side panel, review the message, and click Schedule send. Automatic follow-ups will appear here after the initial message is delivered.");
     fragment.append(empty);
   }
   elements.deliveryList.replaceChildren(fragment);
@@ -1652,6 +2137,7 @@ function openProspectMenu(anchor, prospect, campaign) {
 
 function renderQueue() {
   closeProspectMenu();
+  renderCurrentUser();
   const scope = scopedQueue();
   const stats = queueStats(scope);
   const campaign = activeCampaign();
@@ -1671,13 +2157,13 @@ function renderQueue() {
   }
   elements.totalDelta.textContent = campaign ? `In ${campaign.name}` : "Across your workspace";
   elements.campaignActions.hidden = !campaign;
-  elements.navResearch.textContent = state.queue.filter((item) => belongsToResearch(item) && [QUEUE_STATUS.NEW, QUEUE_STATUS.PROCESSING, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(item.status)).length;
-  elements.navReview.textContent = state.queue.filter((item) => belongsToResearch(item) && item.status === QUEUE_STATUS.READY).length;
+  elements.navResearch.textContent = state.queue.filter((item) => belongsToResearch(item) && item.targetFit?.verdict === "strong" && [QUEUE_STATUS.NEW, QUEUE_STATUS.PROCESSING, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(item.status)).length;
+  elements.navReview.textContent = researchApprovalStack(state.queue).total;
   elements.navScheduled.textContent = scheduledCount;
   elements.navTracking.textContent = deliveredCount;
   elements.agentPanel.hidden = state.view !== "research";
   renderResearchRun();
-  elements.metricsPanel.hidden = state.view !== "overview";
+  elements.metricsPanel.hidden = true;
   elements.analyticsPanel.hidden = state.view !== "analytics";
   elements.overviewPanel.hidden = state.view !== "overview";
   elements.contactsPanel.hidden = state.view !== "contacts";
@@ -1688,9 +2174,14 @@ function renderQueue() {
   renderDeliveryOperations();
   renderContacts();
   const visible = visibleProspects();
+  const approvalStack = researchApprovalStack(visible);
   elements.emptyState.hidden = state.searching || visible.length > 0;
   elements.queueBody.hidden = !state.searching && visible.length === 0;
-  elements.resultCount.textContent = state.searching ? "Researching…" : state.view === "review" ? `${visible.length} in this approval batch` : `${visible.length} ${visible.length === 1 ? "person" : "people"}`;
+  elements.resultCount.textContent = state.searching
+    ? "Researching…"
+    : state.view === "review"
+      ? `${approvalStack.ready} ready · ${approvalStack.approved} approved · ${approvalStack.total} stacked across ${approvalStack.runs} ${approvalStack.runs === 1 ? "run" : "runs"}`
+      : `${visible.length} ${visible.length === 1 ? "person" : "people"}`;
   elements.selectAll.checked = visible.length > 0 && visible.every((item) => state.selected.has(item.id));
   elements.selectAll.indeterminate = visible.some((item) => state.selected.has(item.id)) && !elements.selectAll.checked;
   elements.selectedCount.textContent = state.selected.size;
@@ -1699,22 +2190,22 @@ function renderQueue() {
   elements.openImportButtonTop.hidden = state.view === "review";
   elements.statusFilterButton.hidden = state.view === "review";
   elements.newCampaignButtonTop.hidden = state.view === "review";
+  elements.clearProspectsButton.hidden = state.view !== "review" || !state.queue.length;
   const readyToApprove = visible.filter((item) => item.status === QUEUE_STATUS.READY && isEmail(item.email) && item.subject && item.body);
   const approvedToRun = visible.filter((item) => item.status === QUEUE_STATUS.DRAFTED && isEmail(item.email) && item.subject && item.body);
-  elements.sendAllButton.textContent = state.view === "review" ? "Run approved" : "Send approved";
+  elements.sendAllButton.textContent = state.view === "review" ? `Run approved${approvedToRun.length ? ` ${approvedToRun.length}` : ""}` : "Send approved";
   elements.sendAllButton.disabled = approvedToRun.length === 0;
   const qualifiedCount = visible.filter((item) => item.targetFit?.verdict === "strong" && [QUEUE_STATUS.NEW, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(item.status)).length;
   elements.processButton.textContent = state.view === "review" ? `Approve & run${readyToApprove.length ? ` ${readyToApprove.length}` : ""}` : qualifiedCount ? `Draft ${qualifiedCount} qualified` : "Draft qualified";
   elements.processButton.disabled = state.busy || (state.view === "review" ? readyToApprove.length === 0 : qualifiedCount === 0);
-  const completedBatchSize = Math.max(0, Number(state.researchRun?.foundCount) || 0);
-  const batchPage = Math.max(1, Number(state.researchRun?.page) || 1);
-  const totalMatches = Math.max(0, Number(state.researchRun?.totalFound) || 0);
-  elements.nextResearchBatchButton.hidden = state.view !== "review" || state.busy || !state.searchPlan || completedBatchSize === 0 || batchPage * (state.researchRun?.requestedCount || 100) >= totalMatches;
-  if (!elements.nextResearchBatchButton.hidden) elements.nextResearchBatchButton.firstChild.textContent = `Research next batch (${batchPage + 1}) `;
+  const activePlan = state.searchPlan || state.researchRun?.plan;
+  const batchPagination = researchBatchPagination(state.researchRun);
+  elements.nextResearchBatchButton.hidden = state.view !== "review" || state.busy || !activePlan || !batchPagination.hasNext;
+  if (!elements.nextResearchBatchButton.hidden) elements.nextResearchBatchButton.firstChild.textContent = `Research next batch (${batchPagination.nextPage}) `;
   const emptyTitle = elements.emptyState.querySelector("h3");
   const emptyDescription = elements.emptyState.querySelector("p");
   emptyTitle.textContent = campaign ? `No prospects in ${campaign.name}` : state.view === "review" ? "No drafts are waiting" : "No prospects in this view";
-  emptyDescription.textContent = campaign ? "Add Apollo people or import a list while this campaign is selected." : state.view === "review" ? "Research a new audience with Vela. Qualified people and personalized drafts will arrive here for approval." : "Start a Research conversation to build a new audience.";
+  emptyDescription.textContent = campaign ? "Add Apollo people or import a list while this campaign is selected." : state.view === "review" ? "Research another audience with Vela. Each completed batch stacks here until you approve or run it." : "Start a Research conversation to build a new audience.";
 
   const fragment = document.createDocumentFragment();
   if (state.searching) {
@@ -1750,12 +2241,19 @@ function renderQueue() {
     appendText(person, "span", initialsFor(prospect.name), "person-avatar");
     const copy = document.createElement("div");
     copy.className = "person-copy";
-    appendText(copy, "strong", prospect.name || "LinkedIn prospect");
-    const linkedIn = appendText(copy, prospect.url ? "a" : "span", prospect.location || (prospect.url ? "View LinkedIn" : "Spreadsheet import"));
+    const personName = appendText(copy, prospect.url ? "a" : "strong", prospect.name || "LinkedIn prospect", prospect.url ? "person-name-link" : "");
     if (prospect.url) {
+      personName.href = prospect.url;
+      personName.target = "_blank";
+      personName.rel = "noreferrer";
+    }
+    appendText(copy, "span", prospect.location || (prospect.url ? "LinkedIn profile" : "Spreadsheet import"));
+    if (prospect.url) {
+      const linkedIn = appendText(copy, "a", "View on LinkedIn ↗", "person-linkedin-button");
       linkedIn.href = prospect.url;
       linkedIn.target = "_blank";
       linkedIn.rel = "noreferrer";
+      linkedIn.setAttribute("aria-label", `View ${prospect.name || "prospect"} on LinkedIn`);
     }
     person.append(copy);
     personCell.append(person);
@@ -1956,23 +2454,25 @@ function renderSearchPlan(plan) {
 }
 
 async function syncCurrentResearchRun({ quiet = true } = {}) {
-  if (!state.researchRun || !isExtension) return state.researchRun;
-  const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_RESEARCH_RUN_SYNC", run: state.researchRun });
-  if (!response?.ok) {
-    if (!quiet) showToast(response?.error || "The research run is local while team sync reconnects.");
-    return state.researchRun;
-  }
-  state.researchRun = { ...state.researchRun, ...response.data, operatorName: state.researchRun.operatorName };
+  if (!state.researchRun) return state.researchRun;
+  state.researchRunHistory = [state.researchRun, ...state.researchRunHistory.filter((item) => item.id !== state.researchRun.id)].slice(0, 50);
+  await persistLocalResearchWorkspace().catch((error) => {
+    if (!quiet) showToast(error instanceof Error ? error.message : "Could not save the local research run.");
+  });
+  renderResearchWorkspaceChrome();
   renderResearchRun();
   return state.researchRun;
 }
 
-function newResearchRun(brief, { page = 1 } = {}) {
+function newResearchRun(brief, { page = 1, requestedCount = 300 } = {}) {
   const operator = currentOperator();
+  const startedAt = new Date().toISOString();
   state.researchRun = {
-    id: crypto.randomUUID(), brief, status: "planning", requestedCount: 100, page: Math.max(1, Number(page) || 1),
+    id: crypto.randomUUID(), brief, status: "planning", requestedCount: Math.min(300, Math.max(1, Number(requestedCount) || 300)), page: Math.max(1, Number(page) || 1),
     totalFound: 0, foundCount: 0, auditedCount: 0, strongCount: 0, reviewCount: 0, skipCount: 0,
-    createdBy: operator.id, operatorName: operator.name, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), error: "",
+    readyCount: 0, needsAttentionCount: 0, enrichedCount: 0, contactOutChecks: 0, durationMs: 0,
+    threadId: state.researchThread?.id || "", plan: state.searchPlan || {}, sourceProvider: "apollo", startedAt,
+    createdBy: operator.id, operatorName: operator.name, createdAt: startedAt, updatedAt: startedAt, error: "",
   };
   renderResearchRun();
   return state.researchRun;
@@ -2017,7 +2517,7 @@ async function auditDiscoveredProspects(run) {
   const auditedById = new Map(audited.map((prospect) => [prospect.id, prospect]));
   state.queue = state.queue.map((item) => auditedById.get(item.id) || item);
   const counts = researchRunCounts(audited);
-  state.researchRun = { ...state.researchRun, ...counts, status: "complete", completedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  state.researchRun = { ...state.researchRun, ...counts, status: "auditing", updatedAt: new Date().toISOString() };
   await persistQueue();
   await syncCurrentResearchRun({ quiet: false });
   updateAgentActivity("draft", "Results ready", `${counts.foundCount} people pulled`);
@@ -2050,27 +2550,34 @@ async function runDiscoveryPlan(plan, run) {
     await syncCurrentResearchRun();
     state.searching = true;
     renderQueue();
+    const pagesPerBatch = Math.ceil(run.requestedCount / 100);
+    const firstPage = ((run.page || 1) - 1) * pagesPerBatch + 1;
     for (const [index, search] of (plan.searches || []).entries()) {
-      const remaining = 100 - found.size;
-      if (remaining <= 0) break;
-      updateAgentActivity("source", `Searching Apollo · ${index + 1}/${plan.searches.length}`, search.label || search.query);
-      const recovery = await searchApolloPeopleWithRecovery({ ...search.filters, page: run.page || 1, limit: remaining }, {
-        search: async (filters) => {
-          const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_PROVIDER_PEOPLE_SEARCH", filters });
-          if (!response?.ok) throw new Error(response?.error || "Apollo People Search failed.");
-          return response.data || { prospects: [], total: 0 };
-        },
-        onRetry: () => updateAgentActivity("source", "Broadening within your brief", "Allowing similar titles and removing optional keyword and industry filters"),
-      });
-      broadened ||= recovery.broadened;
-      totalFound = Math.max(totalFound, Math.max(0, Number(recovery.data?.total) || 0));
-      state.researchRun = { ...state.researchRun, totalFound, status: "searching", updatedAt: new Date().toISOString() };
-      renderResearchRun();
-      for (const person of recovery.data?.prospects || []) {
-        const key = person.providerId || person.url || person.email;
-        if (key && !found.has(key)) found.set(key, person);
-        if (found.size >= 100) break;
+      for (let pageOffset = 0; pageOffset < pagesPerBatch; pageOffset += 1) {
+        const remaining = run.requestedCount - found.size;
+        if (remaining <= 0) break;
+        const sourcePage = firstPage + pageOffset;
+        updateAgentActivity("source", `Searching Apollo · ${index + 1}/${plan.searches.length}`, `${search.label || search.query} · page ${sourcePage}`);
+        const recovery = await searchApolloPeopleWithRecovery({ ...search.filters, page: sourcePage, limit: Math.min(100, remaining) }, {
+          search: async (filters) => {
+            const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_PROVIDER_PEOPLE_SEARCH", filters });
+            if (!response?.ok) throw new Error(response?.error || "Apollo People Search failed.");
+            return response.data || { prospects: [], total: 0 };
+          },
+          onRetry: () => updateAgentActivity("source", "Broadening within your brief", "Allowing similar titles and removing optional keyword and industry filters"),
+        });
+        broadened ||= recovery.broadened;
+        totalFound = Math.max(totalFound, Math.max(0, Number(recovery.data?.total) || 0));
+        state.researchRun = { ...state.researchRun, totalFound, status: "searching", updatedAt: new Date().toISOString() };
+        renderResearchRun();
+        for (const person of recovery.data?.prospects || []) {
+          const key = person.providerId || person.url || person.email;
+          if (key && !found.has(key)) found.set(key, person);
+          if (found.size >= run.requestedCount) break;
+        }
+        if ((recovery.data?.prospects || []).length < Math.min(100, remaining)) break;
       }
+      if (found.size >= run.requestedCount) break;
     }
     state.searching = false;
     if (!found.size) {
@@ -2145,14 +2652,14 @@ async function researchAgentTurn(message) {
   return payload.data;
 }
 
-async function executeResearchPlan(plan, brief, { page = 1 } = {}) {
+async function executeResearchPlan(plan, brief, { page = 1, automation = null } = {}) {
   if (state.busy || state.searching) return;
   state.searchPlan = plan;
   state.pendingResearchPlan = null;
   persistWorkspaceStateSoon();
   for (const button of elements.researchMessages.querySelectorAll(".research-plan-run")) button.disabled = true;
   appendResearchMessage("assistant", page > 1 ? `I’m researching batch ${page} now.` : "I’m starting the research now.", "I’ll evaluate the people, prepare qualified drafts, and move the finished batch into Approvals.");
-  const run = newResearchRun(brief, { page });
+  const run = newResearchRun(brief, { page, requestedCount: automation?.maxResults || Number(elements.researchResultLimit?.value) || 300 });
   setResearchComposerBusy(true);
   try {
     await syncCurrentResearchRun();
@@ -2161,17 +2668,32 @@ async function executeResearchPlan(plan, brief, { page = 1 } = {}) {
     const strongIds = state.queue
       .filter((prospect) => prospect.researchRunId === run.id && prospect.targetFit?.verdict === "strong" && [QUEUE_STATUS.NEW, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(prospect.status))
       .map((prospect) => prospect.id);
-    if (strongIds.length) await processQueue(strongIds);
+    if (strongIds.length) await processQueue(strongIds, { contactOutDefault: automation?.contactOutDefault !== false, templateId: automation?.templateId || "" });
     const ready = state.queue.filter((prospect) => prospect.researchRunId === run.id && prospect.status === QUEUE_STATUS.READY);
     const needsAttention = state.queue.filter((prospect) => prospect.researchRunId === run.id && [QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(prospect.status));
-    state.researchRun = { ...state.researchRun, readyCount: ready.length, needsAttentionCount: needsAttention.length, updatedAt: new Date().toISOString() };
+    const completedAt = new Date().toISOString();
+    const durationMs = Math.max(0, Date.parse(completedAt) - Date.parse(state.researchRun.startedAt || state.researchRun.createdAt));
+    const contactOutConfigured = Boolean(state.settings.contactOutSessionEnabled || state.settings.contactOutApiKey);
+    state.researchRun = { ...state.researchRun, status: "complete", readyCount: ready.length, needsAttentionCount: needsAttention.length, enrichedCount: strongIds.length, contactOutChecks: automation?.contactOutDefault === false || !contactOutConfigured ? 0 : strongIds.length, durationMs, completedAt, updatedAt: completedAt, metrics: researchRunMetrics({ ...state.researchRun, readyCount: ready.length, durationMs, completedAt }) };
     await syncCurrentResearchRun();
     renderResearchRun();
-    if (ready.length) {
-      appendResearchMessage("assistant", `${ready.length} ${ready.length === 1 ? "person is" : "people are"} ready in Approvals.`, needsAttention.length ? `${needsAttention.length} more need contact or research attention and were kept out of the approval batch.` : "Review the audience and drafts, then use Approve & run when you’re ready.");
+    const batchPagination = researchBatchPagination(state.researchRun);
+    const nextBatchDetail = batchPagination.hasNext
+      ? ` Use Research next batch (${batchPagination.nextPage}) to pull Apollo results ${(batchPagination.page * batchPagination.perPage + 1).toLocaleString()}–${Math.min(batchPagination.total, batchPagination.nextPage * batchPagination.perPage).toLocaleString()}.`
+      : "";
+    if (ready.length && automation?.mode === "yolo") {
+      const capped = ready.slice(0, Math.max(1, Number(automation.dailySendCap) || 25));
+      if (automation.templateId || automation.senderEmail) {
+        state.queue = state.queue.map((item) => capped.some((readyItem) => readyItem.id === item.id) ? { ...item, templateId: automation.templateId || item.templateId, senderEmail: automation.senderEmail || item.senderEmail } : item);
+      }
+      await approveProspects(capped.map((item) => item.id));
+      await sendApproved(capped.map((item) => item.id));
+      appendResearchMessage("assistant", `YOLO run sent ${capped.length} approved message${capped.length === 1 ? "" : "s"}.`, `${ready.length - capped.length} stayed in Approvals because of the ${automation.dailySendCap || 25}/day cap.`);
+    } else if (ready.length) {
+      appendResearchMessage("assistant", `${ready.length} ${ready.length === 1 ? "person is" : "people are"} ready in Approvals.`, `${needsAttention.length ? `${needsAttention.length} more need contact or research attention and were kept out of the approval batch.` : "Review the audience and drafts, then use Approve & run when you’re ready."}${nextBatchDetail}`);
       setView("review");
     } else {
-      appendResearchMessage("assistant", "The research finished, but nothing is ready for approval yet.", needsAttention.length ? `${needsAttention.length} people need contact or research attention. Refine the audience or check the connected providers and try again.` : "Try broadening the audience or removing one of the filters.");
+      appendResearchMessage("assistant", "The research finished, but nothing is ready for approval yet.", `${needsAttention.length ? `${needsAttention.length} people need contact or research attention. Refine the audience or check the connected providers and try again.` : "Try broadening the audience or removing one of the filters."}${nextBatchDetail}`);
     }
   } catch (error) {
     state.researchRun = { ...state.researchRun, status: "error", error: error instanceof Error ? error.message : "Research failed.", updatedAt: new Date().toISOString() };
@@ -2185,13 +2707,18 @@ async function executeResearchPlan(plan, brief, { page = 1 } = {}) {
   }
 }
 
-async function runNextResearchBatch() {
-  if (!state.searchPlan || !state.researchRun || state.busy) return;
-  const nextPage = Math.max(1, Number(state.researchRun.page) || 1) + 1;
+async function runNextResearchBatch({ recordRequest = true } = {}) {
+  const plan = state.searchPlan || state.researchRun?.plan;
+  const pagination = researchBatchPagination(state.researchRun);
+  if (!plan || !state.researchRun || state.busy || !pagination.hasNext) {
+    showToast("There isn’t another Apollo batch available for this research run.");
+    return;
+  }
   const brief = state.researchRun.brief;
+  state.searchPlan = plan;
   setView("research");
-  appendResearchMessage("user", "Research the next batch.");
-  await executeResearchPlan(state.searchPlan, brief, { page: nextPage });
+  if (recordRequest) appendResearchMessage("user", `Research the next batch (${pagination.nextPage}).`);
+  await executeResearchPlan(plan, brief, { page: pagination.nextPage });
 }
 
 async function sendLinkedInMessage(tabId, message) {
@@ -2243,10 +2770,32 @@ async function ensureOriginPermission(endpointUrl) {
   return chrome.permissions.request({ origins });
 }
 
-async function callEnrichment(profile, { approveSessionReveal = false } = {}) {
-  const providers = configuredEnrichmentProviders(state.settings);
+function mergeEnrichmentResults(primary = {}, secondary = {}) {
+  const unique = (...values) => [...new Set(values.flatMap((value) => Array.isArray(value) ? value : []).filter(Boolean))];
+  const emailSources = { ...(primary.emailSources || {}), ...(secondary.emailSources || {}) };
+  for (const email of secondary.emails || []) emailSources[email] = [...new Set([...(Array.isArray(emailSources[email]) ? emailSources[email] : [emailSources[email]].filter(Boolean)), secondary.emailSource || secondary.source || "ContactOut"])];
+  return {
+    ...secondary,
+    ...primary,
+    email: primary.email || secondary.email || "",
+    emailSource: [primary.emailSource, secondary.emailSource].filter(Boolean).join(" + "),
+    emails: unique(primary.emails, secondary.emails),
+    workEmails: unique(primary.workEmails, secondary.workEmails),
+    personalEmails: unique(primary.personalEmails, secondary.personalEmails),
+    unverifiedEmails: unique(primary.unverifiedEmails, secondary.unverifiedEmails),
+    phones: unique(primary.phones, secondary.phones),
+    emailStatuses: { ...(secondary.emailStatuses || {}), ...(primary.emailStatuses || {}) },
+    emailSources,
+    profile: primary.profile || secondary.profile || null,
+  };
+}
+
+async function callEnrichment(profile, { approveSessionReveal = false, contactOutDefault = true, contactOutOnly = false, initialApolloResult = null } = {}) {
+  const providers = configuredEnrichmentProviders(state.settings).filter((provider) => (contactOutOnly || initialApolloResult) ? provider !== PROVIDER.APOLLO : contactOutDefault || provider === PROVIDER.APOLLO);
+  if (!providers.length && initialApolloResult) return initialApolloResult;
   if (providers.length) {
     let lastError;
+    let apolloResult = initialApolloResult;
     for (const provider of providers) {
       try {
         const response = await chrome.runtime.sendMessage({ type: `VELA_GTM_PROVIDER_${provider}`, profile });
@@ -2260,12 +2809,16 @@ async function callEnrichment(profile, { approveSessionReveal = false } = {}) {
         }
         const result = normalizeEnrichmentResponse({ ...providerData, emailSource: providerData.source });
         const status = String(result.emailStatuses?.[result.email] || result.emailStatus || "").toLowerCase();
-        if (result.email && ["verified", "valid"].includes(status)) return result;
+        if (result.email && ["verified", "valid"].includes(status)) {
+          if (provider === PROVIDER.APOLLO && contactOutDefault && providers.some((candidate) => candidate !== PROVIDER.APOLLO)) { apolloResult = result; continue; }
+          return apolloResult ? mergeEnrichmentResults(apolloResult, result) : result;
+        }
         lastError = new Error(`${providerLabel(provider)} did not return an explicitly verified email.`);
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(`${provider} lookup failed.`);
       }
     }
+    if (apolloResult) return apolloResult;
     throw lastError || new Error("No configured provider returned a verified email.");
   }
   if (!state.settings.endpointUrl) return {};
@@ -2278,13 +2831,15 @@ async function callEnrichment(profile, { approveSessionReveal = false } = {}) {
   return normalizeEnrichmentResponse(await response.json());
 }
 
-function templateDraft(profile, workNote) {
-  const template = outreachTemplate(state.settings);
+function selectedOutreachTemplate(templateId = "") {
+  return emailTemplates(state.settings).find((template) => template.id === templateId) || outreachTemplate(state.settings);
+}
+
+function templateDraft(profile, workNote, template = outreachTemplate(state.settings)) {
   return applyTemplate(template, templateVariables(profile, state.settings, workNote, template));
 }
 
-async function callWriter(profile, workNote, draft) {
-  const template = outreachTemplate(state.settings);
+async function callWriter(profile, workNote, draft, template = outreachTemplate(state.settings)) {
   const templateSettings = {
     ...state.settings,
     senderName: template.senderName || state.settings.senderName,
@@ -2321,7 +2876,7 @@ async function callTargetFit(profile) {
   return normalizeTargetFit({ data: response.data, model: state.settings.openAIModel || "gpt-5.4-mini" });
 }
 
-async function researchProspect(prospect, { approveSessionReveal = false } = {}) {
+async function researchProspect(prospect, { approveSessionReveal = false, contactOutDefault = true, templateId = "", apolloEnrichment = null } = {}) {
   let tab;
   try {
     const providerSourced = /^(ContactOut|Apollo) People Search$/i.test(prospect.source || "") && prospect.profile;
@@ -2354,7 +2909,7 @@ async function researchProspect(prospect, { approveSessionReveal = false } = {})
     let workNote = prospect.background || buildWorkNote(profile);
     if (state.settings.contactOutSessionEnabled || state.settings.contactOutApiKey || state.settings.apolloApiKey || state.settings.endpointUrl) {
       try {
-        const enriched = await callEnrichment(profile, { approveSessionReveal });
+        const enriched = await callEnrichment(profile, { approveSessionReveal, contactOutDefault, initialApolloResult: apolloEnrichment });
         if (enriched.email) { email = enriched.email; emailSource = enriched.emailSource || "Enrichment service"; }
         contactDetails = {
           emails: enriched.emails || [], workEmails: enriched.workEmails || [], personalEmails: enriched.personalEmails || [],
@@ -2380,14 +2935,21 @@ async function researchProspect(prospect, { approveSessionReveal = false } = {})
       }
     }
 
-    updateAgentActivity("research", `Verifying ${profile.name || prospect.name || "target"}`, "Checking operating responsibility against Vela’s target context");
-    const targetFit = await callTargetFit(profile);
-    const fallback = templateDraft(profile, workNote);
-    const written = await callWriter(profile, workNote, fallback);
+    const linkedInUrl = [profile.linkedinUrl, profile.linkedin_url, profile.url, prospect.url]
+      .map((value) => normalizeLinkedInUrl(value))
+      .find(Boolean) || "";
+    profile = { ...profile, url: linkedInUrl, linkedinUrl: linkedInUrl };
+
+    updateAgentActivity("research", `Drafting for ${profile.name || prospect.name || "target"}`, prospect.targetFit ? "Using the completed end-of-batch Vela fit check" : "Checking fit once before drafting this manually added person");
+    const targetFit = prospect.targetFit || await callTargetFit(profile);
+    const template = selectedOutreachTemplate(templateId || prospect.templateId);
+    const fallback = templateDraft(profile, workNote, template);
+    const written = await callWriter(profile, workNote, fallback, template);
 
     const researchedAt = new Date().toISOString();
     return {
       ...prospect,
+      url: linkedInUrl,
       profile,
       name: profile.name || prospect.name,
       headline: profile.headline || prospect.headline,
@@ -2396,13 +2958,17 @@ async function researchProspect(prospect, { approveSessionReveal = false } = {})
       emailSource,
       contactDetails,
       targetFit,
+      templateId: template.id,
+      senderEmail: template.senderEmail || "",
       workNote: written.workNote || workNote,
       subject: written.subject,
       body: written.body,
-      status: isEmail(email) ? QUEUE_STATUS.READY : QUEUE_STATUS.NEEDS_EMAIL,
-      error: isEmail(email) ? "" : contactOutError || (providerSourced
-        ? "No verified email was returned by the configured contact-data providers."
-        : "No email was available in LinkedIn Contact Info or the configured enrichment service."),
+      status: !linkedInUrl ? QUEUE_STATUS.ERROR : isEmail(email) ? QUEUE_STATUS.READY : QUEUE_STATUS.NEEDS_EMAIL,
+      error: !linkedInUrl
+        ? "Apollo did not return an actual LinkedIn profile URL for this person. Vela kept the draft out of Approvals."
+        : isEmail(email) ? "" : contactOutError || (providerSourced
+          ? "No verified email was returned by the configured contact-data providers."
+          : "No email was available in LinkedIn Contact Info or the configured enrichment service."),
       researchedAt,
       activity: [...(prospect.activity || []), { type: "target_verified", detail: `Vela fit: ${targetFit.verdict} (${targetFit.score})`, at: researchedAt }, { type: "researched", detail: "Apollo profile enriched and complete email drafted", at: researchedAt }].slice(-80),
       updatedAt: researchedAt,
@@ -2412,7 +2978,7 @@ async function researchProspect(prospect, { approveSessionReveal = false } = {})
   }
 }
 
-async function processQueue(ids = null) {
+async function processQueue(ids = null, { contactOutDefault = true, templateId = "" } = {}) {
   if (state.busy) return;
   if (!isExtension) {
     const targets = new Set(ids || scopedQueue().filter((item) => [QUEUE_STATUS.NEW, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(item.status) && item.targetFit?.verdict === "strong").map((item) => item.id));
@@ -2442,13 +3008,31 @@ async function processQueue(ids = null) {
   }
   try {
     let approveSessionReveal = false;
-    if (state.settings.contactOutSessionEnabled) {
-      approveSessionReveal = globalThis.confirm(`ContactOut will preview ${candidates.length} profile${candidates.length === 1 ? "" : "s"} and may use up to ${candidates.length} email credit${candidates.length === 1 ? "" : "s"} if contacts are found. Continue?`);
+    if (contactOutDefault && state.settings.contactOutSessionEnabled) {
+      const run = state.researchRun;
+      const pulled = Math.max(0, Number(run?.foundCount) || 0);
+      const audited = Math.max(0, Number(run?.auditedCount) || 0);
+      const strong = Math.max(0, Number(run?.strongCount) || 0);
+      const isStrongResearchSubset = Boolean(run?.id && pulled > candidates.length && strong === candidates.length && candidates.every((item) => item.researchRunId === run.id));
+      const fitSummary = isStrongResearchSubset
+        ? `Apollo pulled ${pulled} profiles and Vela completed fit checks for ${audited}. ${candidates.length} were marked strong fits, so ContactOut will preview only those ${candidates.length}; the other ${pulled - candidates.length} will not use email credits.\n\n`
+        : "";
+      approveSessionReveal = globalThis.confirm(`${fitSummary}ContactOut may use up to ${candidates.length} email credit${candidates.length === 1 ? "" : "s"} if contacts are found. Continue?`);
       if (!approveSessionReveal) { showToast("ContactOut reveal cancelled. No credits were used."); return; }
     }
     if (!state.settings.contactOutApiKey && !state.settings.apolloApiKey && state.settings.endpointUrl && !(await ensureOriginPermission(state.settings.endpointUrl))) throw new Error("Email enrichment access was declined.");
     if (!state.settings.openAIApiKey && state.settings.writerEndpointUrl && !(await ensureOriginPermission(state.settings.writerEndpointUrl))) throw new Error("AI writer access was declined.");
     setBusy(true);
+    const apolloEnrichments = new Map();
+    if (state.settings.apolloApiKey) {
+      for (let offset = 0; offset < candidates.length; offset += 10) {
+        const batch = candidates.slice(offset, offset + 10);
+        updateAgentActivity("source", "Enriching qualified people with Apollo", `${Math.min(candidates.length, offset + batch.length)} of ${candidates.length} · batches of 10`);
+        const response = await chrome.runtime.sendMessage({ type: PROVIDER_ACTION.APOLLO_BULK, profiles: batch.map((item) => ({ ...(item.profile || {}), providerId: item.providerId, url: item.url, name: item.name, company: item.company })) });
+        if (!response?.ok) continue;
+        for (const [batchIndex, enrichment] of (response.data || []).entries()) apolloEnrichments.set(batch[batchIndex].id, enrichment);
+      }
+    }
     for (let index = 0; index < candidates.length; index += 1) {
       const current = candidates[index];
       elements.progressText.textContent = `Researching ${index + 1} of ${candidates.length}`;
@@ -2459,7 +3043,7 @@ async function processQueue(ids = null) {
       state.queue = state.queue.map((item) => item.id === current.id ? { ...item, status: QUEUE_STATUS.PROCESSING, error: "" } : item);
       renderQueue();
       try {
-        const result = await researchProspect(current, { approveSessionReveal });
+        const result = await researchProspect(current, { approveSessionReveal, contactOutDefault, templateId, apolloEnrichment: apolloEnrichments.get(current.id) || null });
         state.queue = state.queue.map((item) => item.id === current.id ? result : item);
       } catch (error) {
         state.queue = state.queue.map((item) => item.id === current.id ? {
@@ -2479,11 +3063,11 @@ async function processQueue(ids = null) {
 }
 
 const VIEW_COPY = {
-  overview: { eyebrow: "Overview", title: "Overview", description: "What needs a decision, what is scheduled, and what already went out.", queueTitle: "People", queueDescription: "People in the active workflow." },
+  overview: { eyebrow: "Dashboard", title: "Dashboard", description: "How your team’s outreach is landing.", queueTitle: "People", queueDescription: "People in the active workflow." },
   research: { eyebrow: "AI people research", title: "Research", description: "Tell Vela who you need, refine the audience together, and run the research when the plan is right.", queueTitle: "Research", queueDescription: "Conversational people research." },
-  review: { eyebrow: "Research approval", title: "Approvals", description: "Review the current AI research batch, then approve and run personalized outreach.", queueTitle: "Research approvals", queueDescription: "Qualified people and drafts prepared by the Research agent." },
-  analytics: { eyebrow: "Analytics", title: "Analytics", description: "See exactly who sent what, who replied, and how every mailbox is performing.", queueTitle: "Analytics", queueDescription: "Shared outreach performance." },
-  scheduled: { eyebrow: "Scheduled sends", title: "Scheduled sends", description: "Queued Gmail sends in delivery order. Cancel any of them until delivery starts.", queueTitle: "Scheduled sends", queueDescription: "Queued Gmail delivery." },
+  review: { eyebrow: "Research approval", title: "Approvals", description: "Stack completed research batches here, then approve and run personalized outreach when you’re ready.", queueTitle: "Research approvals", queueDescription: "Qualified people and drafts stacked across your Research runs." },
+  analytics: { eyebrow: "Analytics", title: "Delivery health", description: "See who is sending, which mailbox they use, and every signal that can hurt deliverability.", queueTitle: "Analytics", queueDescription: "Outbound delivery health." },
+  scheduled: { eyebrow: "Scheduled sends", title: "Scheduled sends", description: "Initial sends and automatic follow-up sequences, grouped and searchable.", queueTitle: "Scheduled sends", queueDescription: "Queued Gmail delivery." },
   history: { eyebrow: "Sent history", title: "Sent history", description: "Every shared team and local delivery with its recipient, subject, sender, and result.", queueTitle: "Delivery history", queueDescription: "Unified delivery activity." },
   contacts: { eyebrow: "Team records", title: "Contacts", description: "Search, review, and manage every person your team has worked with.", queueTitle: "Contacts", queueDescription: "Team contacts." },
 };
@@ -2607,6 +3191,40 @@ function renderEmailChoices(prospect) {
   elements.drawerEmailStatus.title = prospect.contactDetails?.error || "";
 }
 
+async function checkContactOutForProspect(id = "") {
+  const prospect = state.queue.find((item) => item.id === id);
+  if (!prospect) return;
+  if (!state.settings.contactOutSessionEnabled && !state.settings.contactOutApiKey) throw new Error("Connect ContactOut in Settings first.");
+  elements.retryDrawerLookup.disabled = true;
+  elements.retryDrawerLookup.textContent = "Checking…";
+  try {
+    const approveSessionReveal = !state.settings.contactOutSessionEnabled || globalThis.confirm("Check this qualified person with ContactOut? A successful reveal may use one ContactOut credit.");
+    if (!approveSessionReveal) return;
+    const profile = { ...(prospect.profile || {}), url: prospect.url, name: prospect.name, headline: prospect.headline, providerId: prospect.providerId };
+    const verified = await callEnrichment(profile, { approveSessionReveal, contactOutDefault: true, contactOutOnly: true });
+    const existing = prospect.contactDetails || {};
+    const merged = mergeEnrichmentResults(existing, verified);
+    const email = verified.email || prospect.email;
+    const updatedAt = new Date().toISOString();
+    state.queue = state.queue.map((item) => item.id === id ? {
+      ...withActivity(item, "contactout_verified", "ContactOut verification checked", updatedAt),
+      email,
+      emailSource: [prospect.emailSource, verified.emailSource || verified.source].filter(Boolean).join(" + "),
+      contactDetails: merged,
+      updatedAt,
+    } : item);
+    await persistQueue();
+    const updated = state.queue.find((item) => item.id === id);
+    elements.drawerEmail.value = updated.email || "";
+    renderEmailChoices(updated);
+    renderQueue();
+    showToast("ContactOut verification added to this draft.");
+  } finally {
+    elements.retryDrawerLookup.disabled = false;
+    elements.retryDrawerLookup.textContent = "Check ContactOut";
+  }
+}
+
 function renderExperience(prospect) {
   const experiences = prospect.profile?.experiences || [];
   elements.drawerExperienceCount.textContent = `${experiences.length} found`;
@@ -2640,6 +3258,66 @@ function renderDrawerActivity(prospect) {
   elements.drawerActivity.replaceChildren(fragment);
 }
 
+function reviewableRunProspects(runId = state.reviewRunId) {
+  return state.queue.filter((prospect) => prospect.researchRunId === runId && prospect.status !== QUEUE_STATUS.SENT && isEmail(prospect.email) && prospect.subject && prospect.body);
+}
+
+function drawerProspects() {
+  if (state.reviewRunId) return reviewableRunProspects();
+  return visibleProspects().filter((prospect) => [QUEUE_STATUS.READY, QUEUE_STATUS.DRAFTED].includes(prospect.status) && isEmail(prospect.email) && prospect.subject && prospect.body);
+}
+
+function updateDrawerPosition() {
+  const people = drawerProspects();
+  const index = people.findIndex((person) => person.id === state.activeProspectId);
+  elements.drawerPosition.textContent = people.length ? `${Math.max(0, index) + 1} of ${people.length}` : "0 of 0";
+  elements.previousReviewButton.disabled = people.length < 2;
+  elements.nextReviewButton.disabled = people.length < 2;
+}
+
+function openResearchRunReview(runId, trigger = document.activeElement) {
+  const run = state.researchRunHistory.find((item) => item.id === runId);
+  const people = reviewableRunProspects(runId);
+  if (!people.length) { showToast("This run has no complete emails left to review."); return; }
+  state.reviewRunId = runId;
+  openReviewDrawer(people[0].id, trigger);
+  elements.drawerReviewContext.textContent = `${run?.brief || "Saved run"} · 1 of ${people.length}`;
+}
+
+function openNextRunProspect({ skipped = false } = {}) {
+  const people = drawerProspects();
+  if (!people.length) { closeReviewDrawer(); showToast(skipped ? "No more complete emails in this run." : "Saved run complete."); return; }
+  const currentIndex = people.findIndex((person) => person.id === state.activeProspectId);
+  const next = currentIndex === -1 ? people[0] : people[(currentIndex + 1) % people.length];
+  if (!next || (people.length === 1 && next.id === state.activeProspectId)) { closeReviewDrawer(); showToast(skipped ? "No other email to review in this run." : "Saved run complete."); return; }
+  openReviewDrawer(next.id, elements.closeDrawerButton);
+  const run = state.researchRunHistory.find((item) => item.id === state.reviewRunId);
+  elements.drawerReviewContext.textContent = `${run?.brief || "Saved run"} · ${Math.max(1, people.indexOf(next) + 1)} of ${people.length}`;
+}
+
+function openAdjacentReviewProspect(direction = 1) {
+  const people = drawerProspects();
+  if (people.length < 2) { showToast("There is no other approved draft to review."); return; }
+  const currentIndex = people.findIndex((person) => person.id === state.activeProspectId);
+  const next = people[(currentIndex + direction + people.length) % people.length];
+  openReviewDrawer(next.id, elements.closeDrawerButton);
+}
+
+async function sendCurrentReview() {
+  const id = state.activeProspectId;
+  if (!id || state.busy) return;
+  if (!(await saveReview())) return;
+  const prospect = state.queue.find((item) => item.id === id);
+  if (!prospect) return;
+  if (prospect.status === QUEUE_STATUS.READY) {
+    const approved = await approveProspects([id]);
+    if (!approved) return;
+  }
+  await sendApproved([id]);
+  if (state.reviewRunId) openNextRunProspect();
+  else closeReviewDrawer();
+}
+
 function openReviewDrawer(id, trigger = document.activeElement) {
   const prospect = state.queue.find((item) => item.id === id);
   if (!prospect) return;
@@ -2647,10 +3325,18 @@ function openReviewDrawer(id, trigger = document.activeElement) {
   state.drawerReturnFocus = trigger instanceof HTMLElement ? trigger : null;
   elements.drawerAvatar.textContent = initialsFor(prospect.name);
   elements.drawerName.textContent = prospect.name || "LinkedIn prospect";
+  elements.drawerName.href = prospect.url || "#";
   elements.drawerHeadline.textContent = prospect.headline || companyAndRole(prospect).role;
   elements.drawerLocation.textContent = prospect.location || "";
   elements.drawerLinkedIn.href = prospect.url;
   elements.drawerLinkedIn.hidden = !prospect.url;
+  elements.drawerName.classList.toggle("is-disabled", !prospect.url);
+  for (const section of elements.reviewDrawer.querySelectorAll("details.drawer-collapsible")) section.open = section.id === "drawerProfileSection";
+  const workNote = prospect.workNote || prospect.background || "";
+  const experiences = prospect.profile?.experiences || [];
+  const activity = prospect.activity || [];
+  elements.drawerEmailSection.hidden = true;
+  elements.drawerProfileSection.hidden = !experiences.length && !activity.length;
   const fit = fitLabel(prospect.targetFit);
   elements.drawerFitBadge.textContent = fit.label;
   elements.drawerFitBadge.className = `fit-pill ${fit.className}`;
@@ -2658,17 +3344,22 @@ function openReviewDrawer(id, trigger = document.activeElement) {
   const evidence = document.createDocumentFragment();
   for (const item of prospect.targetFit?.evidence || []) appendText(evidence, "span", item);
   elements.drawerFitEvidence.replaceChildren(evidence);
-  elements.drawerWorkNote.value = prospect.workNote || prospect.background || "";
+  elements.drawerWorkNote.value = workNote;
   elements.drawerEmail.value = prospect.email || "";
+  elements.drawerRecipient.textContent = prospect.email || "No recipient selected";
+  elements.drawerSender.textContent = prospect.senderEmail ? `From ${prospect.senderEmail}` : "From selected Gmail sender";
   renderEmailChoices(prospect);
   renderExperience(prospect);
   renderDrawerActivity(prospect);
-  elements.drawerSubject.value = prospect.subject || "";
+  elements.drawerSubject.value = prospect.status === QUEUE_STATUS.SENT ? prospect.subject || "" : OUTREACH_SUBJECT;
   elements.drawerBody.value = prospect.body || "";
   elements.approveDraftButton.disabled = false;
   elements.approveDraftButton.hidden = prospect.status === QUEUE_STATUS.SENT;
-  elements.approveDraftButton.textContent = prospect.status === QUEUE_STATUS.DRAFTED ? "Save approved draft" : "Approve draft";
+  elements.drawerReviewContext.textContent = state.reviewRunId ? elements.drawerReviewContext.textContent : "Draft review";
+  elements.approveDraftButton.textContent = state.reviewRunId ? "Send" : prospect.status === QUEUE_STATUS.DRAFTED ? "Save approved draft" : "Approve draft";
+  elements.skipReviewButton.hidden = !state.reviewRunId;
   elements.markSentButton.textContent = prospect.status === QUEUE_STATUS.SENT || prospect.emailSentAt ? "Mark as not sent" : "Mark email sent";
+  updateDrawerPosition();
   elements.reviewDrawer.inert = false;
   elements.reviewDrawer.setAttribute("aria-hidden", "false");
   elements.drawerBackdrop.hidden = false;
@@ -2690,6 +3381,7 @@ function closeReviewDrawer() {
   elements.reviewDrawer.setAttribute("aria-hidden", "true");
   elements.drawerBackdrop.hidden = true;
   state.activeProspectId = null;
+  state.reviewRunId = "";
   state.drawerReturnFocus = null;
   if (focusTarget) requestAnimationFrame(() => focusTarget.focus({ preventScroll: true }));
 }
@@ -2698,7 +3390,8 @@ async function saveReview() {
   const id = state.activeProspectId;
   if (!id) return false;
   const email = elements.drawerEmail.value.trim();
-  const subject = elements.drawerSubject.value.trim();
+  const activeProspect = state.queue.find((item) => item.id === id);
+  const subject = activeProspect?.status === QUEUE_STATUS.SENT ? activeProspect.subject || "" : OUTREACH_SUBJECT;
   const body = elements.drawerBody.value.trim();
   if (!isEmail(email)) { showToast("Add a valid email before approving this draft."); elements.drawerEmail.focus(); return false; }
   if (!subject || !body) { showToast("The subject and message both need content."); return false; }
@@ -2717,13 +3410,25 @@ async function approveProspects(ids = []) {
   state.queue = state.queue.map((item) => {
     if (!selected.has(item.id) || item.status !== QUEUE_STATUS.READY || !isEmail(item.email) || !item.subject || !item.body) return item;
     approved += 1;
-    return { ...withActivity(item, "approved", "Draft approved for Gmail delivery", approvedAt), status: QUEUE_STATUS.DRAFTED, reviewedAt: approvedAt };
+    return { ...withActivity(item, "approved", "Draft approved for Gmail delivery", approvedAt), subject: OUTREACH_SUBJECT, status: QUEUE_STATUS.DRAFTED, reviewedAt: approvedAt };
   });
   if (!approved) { showToast("No complete drafts in this selection are ready to approve."); return 0; }
   await persistQueue();
   renderQueue();
   showToast(`${approved} draft${approved === 1 ? "" : "s"} approved.`);
   return approved;
+}
+
+async function approveAndRun(ids = []) {
+  const readyIds = state.queue
+    .filter((item) => ids.includes(item.id) && item.status === QUEUE_STATUS.READY && isEmail(item.email) && item.subject && item.body)
+    .map((item) => item.id);
+  if (!readyIds.length) {
+    showToast("No complete drafts in this approval stack are ready to run.");
+    return;
+  }
+  const approved = await approveProspects(readyIds);
+  if (approved) openBulkSend(readyIds);
 }
 
 function approvedForSend(ids = []) {
@@ -2736,7 +3441,8 @@ function openBulkSend(ids = []) {
   if (!eligible.length) { showToast("Approve at least one complete draft before sending."); return; }
   state.pendingSendIds = eligible.map((item) => item.id);
   elements.sendDialogCount.textContent = eligible.length;
-  elements.sendDialogDescription.textContent = `${eligible.length} approved, personalized message${eligible.length === 1 ? "" : "s"} will send through the selected Gmail account.`;
+  const pinned = new Set(eligible.map((item) => item.senderEmail).filter(Boolean));
+  elements.sendDialogDescription.textContent = `${eligible.length} approved, personalized message${eligible.length === 1 ? "" : "s"} will use ${pinned.size ? "each draft’s template sender" : "the selected Gmail account"}.`;
   elements.sendDialog.showModal();
 }
 
@@ -2753,16 +3459,22 @@ async function sendApproved(ids = []) {
     return;
   }
   const saved = await storage.get([GOOGLE_ACCOUNTS_STORAGE_KEY, GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY, GOOGLE_ACCOUNT_STORAGE_KEY]);
-  const account = selectedGoogleAccount(saved[GOOGLE_ACCOUNTS_STORAGE_KEY], saved[GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY], saved[GOOGLE_ACCOUNT_STORAGE_KEY]);
-  if (!account) throw new Error("Connect and choose a Gmail sender in Settings before sending.");
+  const accounts = normalizeGoogleAccounts(saved[GOOGLE_ACCOUNTS_STORAGE_KEY]);
+  const fallbackAccount = selectedGoogleAccount(accounts, saved[GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY], saved[GOOGLE_ACCOUNT_STORAGE_KEY]);
+  if (!fallbackAccount) throw new Error("Connect and choose a Gmail sender in Settings before sending.");
   let sent = 0;
   const failures = [];
   setBusy(true, `Sending 0 of ${eligible.length}`);
   for (const [index, person] of eligible.entries()) {
     elements.progressText.textContent = `Sending ${index + 1} of ${eligible.length}`;
+    const account = accounts.find((candidate) => String(candidate.email).toLowerCase() === String(person.senderEmail || "").toLowerCase()) || fallbackAccount;
+    if (person.senderEmail && account === fallbackAccount && String(fallbackAccount.email).toLowerCase() !== String(person.senderEmail).toLowerCase()) {
+      failures.push(`${person.name || person.email}: connect ${person.senderEmail} for the ${person.templateId || "selected"} template`);
+      continue;
+    }
     const response = await chrome.runtime.sendMessage({
       type: "VELA_GTM_EMAIL_SEND",
-      delivery: { accountId: account.id, senderEmail: account.email, recipients: [person.email], subject: person.subject, body: person.body, prospectId: person.id },
+      delivery: { accountId: account.id, senderEmail: account.email, recipients: [person.email], subject: OUTREACH_SUBJECT, body: person.body, prospectId: person.id },
     });
     if (response?.ok && response.data?.sent?.length) sent += 1;
     else failures.push(`${person.name || person.email}: ${response?.error || "send failed"}`);
@@ -2770,17 +3482,24 @@ async function sendApproved(ids = []) {
   setBusy(false);
   state.selected.clear();
   renderQueue();
-  showToast(failures.length ? `${sent} sent · ${failures.length} need attention` : `${sent} message${sent === 1 ? "" : "s"} sent through ${account.email}.`);
+  showToast(failures.length ? `${sent} sent · ${failures.length} need attention` : `${sent} message${sent === 1 ? "" : "s"} sent through the template sender${sent === 1 ? "" : "s"}.`);
 }
 
 function bindEvents() {
+  elements.currentUserBadge.addEventListener("click", openAdvancedSettings);
   elements.searchForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const message = elements.searchBrief.value.trim();
     if (!message) { showToast("Write a message first."); return; }
-    appendResearchMessage("user", message);
     try {
+      await ensureResearchThread(message);
+      appendResearchMessage("user", message);
       setResearchComposerBusy(true);
+      if (isNextResearchBatchRequest(message) && researchBatchPagination(state.researchRun).hasNext && (state.searchPlan || state.researchRun?.plan)) {
+        elements.searchBrief.value = "";
+        await runNextResearchBatch({ recordRequest: false });
+        return;
+      }
       const turn = await researchAgentTurn(message);
       elements.searchBrief.value = "";
       if (turn?.mode === "plan" && turn.plan) appendResearchPlan(message, turn.plan, turn.reply);
@@ -2797,6 +3516,11 @@ function bindEvents() {
       if (!state.busy) elements.agentActivity.hidden = true;
     }
   });
+  elements.newResearchChatButton.addEventListener("click", () => loadResearchThread(""));
+  elements.clearResearchChatButton.addEventListener("click", () => clearResearchChat().catch((error) => showToast(error.message)));
+  elements.researchThreadSelect.addEventListener("change", () => loadResearchThread(elements.researchThreadSelect.value).catch((error) => showToast(error.message)));
+  elements.openResearchAutomationButton.addEventListener("click", openResearchAutomation);
+  elements.saveResearchAutomationButton.addEventListener("click", () => saveResearchAutomation().catch((error) => showToast(error.message)));
   elements.searchBrief.addEventListener("keydown", (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") elements.searchForm.requestSubmit();
   });
@@ -2806,6 +3530,16 @@ function bindEvents() {
   });
   for (const navItem of document.querySelectorAll("[data-view]")) navItem.addEventListener("click", () => setView(navItem.dataset.view));
   for (const jump of document.querySelectorAll("[data-jump-view]")) jump.addEventListener("click", () => setView(jump.dataset.jumpView));
+  elements.scheduledSearch.addEventListener("input", () => {
+    state.scheduledQuery = elements.scheduledSearch.value;
+    renderDeliveryOperations();
+    persistWorkspaceStateSoon();
+  });
+  for (const button of elements.scheduledKindFilter.querySelectorAll("[data-scheduled-kind]")) button.addEventListener("click", () => {
+    state.scheduledKind = button.dataset.scheduledKind || "all";
+    renderDeliveryOperations();
+    persistWorkspaceStateSoon();
+  });
   for (const button of elements.analyticsRange.querySelectorAll("[data-days]")) button.addEventListener("click", () => {
     state.analyticsDays = Number(button.dataset.days) || 7;
     renderAnalytics();
@@ -2927,7 +3661,14 @@ function bindEvents() {
     }
     elements.importDialog.close();
   });
-  elements.processButton.addEventListener("click", () => processQueue());
+  elements.processButton.addEventListener("click", () => {
+    if (state.view === "review") {
+      approveAndRun(visibleProspects().map((item) => item.id)).catch((error) => showToast(error instanceof Error ? error.message : "Could not approve this run."));
+      return;
+    }
+    processQueue();
+  });
+  elements.nextResearchBatchButton.addEventListener("click", () => runNextResearchBatch());
   elements.sendAllButton.addEventListener("click", () => openBulkSend(visibleProspects().map((item) => item.id)));
   elements.tableSearch.addEventListener("input", () => {
     state.query = elements.tableSearch.value.trim();
@@ -2947,6 +3688,7 @@ function bindEvents() {
     persistWorkspaceStateSoon();
   });
   elements.contactsInboxSyncButton.addEventListener("click", () => syncInboxBounces({ interactive: true }));
+  elements.analyticsInboxSyncButton.addEventListener("click", () => syncInboxBounces({ interactive: true, fullHistory: true }));
   for (const button of document.querySelectorAll("[data-contact-filter]")) button.addEventListener("click", () => {
     state.contactStatus = button.dataset.contactFilter || "all";
     state.contactPage = 1;
@@ -2967,6 +3709,27 @@ function bindEvents() {
     renderQueue();
   });
   elements.clearSelectionButton.addEventListener("click", () => { state.selected.clear(); renderQueue(); });
+  elements.clearProspectsButton.addEventListener("click", async () => {
+    const count = state.queue.length;
+    if (!count || !globalThis.confirm(`Clear all ${count} saved prospects and drafts from the shared Vela workspace? Sent activity will stay in Analytics.`)) return;
+    elements.clearProspectsButton.disabled = true;
+    try {
+      if (isExtension) {
+        const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_PROSPECTS_CLEAR" });
+        if (!response?.ok) throw new Error(response?.error || "Could not clear shared prospects.");
+      }
+      state.queue = [];
+      state.selected.clear();
+      state.campaigns = state.campaigns.map((campaign) => ({ ...campaign, prospectIds: [] }));
+      await storage.set({ [QUEUE_STORAGE_KEY]: state.queue, [CAMPAIGNS_STORAGE_KEY]: state.campaigns });
+      renderQueue();
+      showToast("Prospects and drafts cleared. Sent activity remains intact.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not clear prospects.");
+    } finally {
+      elements.clearProspectsButton.disabled = false;
+    }
+  });
   elements.bulkResearchButton.addEventListener("click", () => processQueue([...state.selected]));
   elements.bulkApproveButton.addEventListener("click", () => approveProspects([...state.selected]));
   elements.bulkSendButton.addEventListener("click", () => openBulkSend([...state.selected]));
@@ -2979,13 +3742,13 @@ function bindEvents() {
     finally { elements.confirmBulkSendButton.disabled = false; state.pendingSendIds = []; setBusy(false); }
   });
   elements.collapseSidebar.addEventListener("click", () => setSidebarCollapsed(!document.querySelector(".sidebar").classList.contains("is-collapsed")));
-  elements.refreshResponsesButton.addEventListener("click", () => {
-    if (isExtension) chrome.runtime.openOptionsPage();
-    else window.open("options.html", "_blank");
-  });
   elements.closeDrawerButton.addEventListener("click", closeReviewDrawer);
   elements.drawerBackdrop.addEventListener("click", closeReviewDrawer);
+  elements.previousReviewButton.addEventListener("click", () => openAdjacentReviewProspect(-1));
+  elements.nextReviewButton.addEventListener("click", () => openAdjacentReviewProspect(1));
   elements.saveReviewButton.addEventListener("click", saveReview);
+  elements.skipReviewButton.addEventListener("click", () => openNextRunProspect({ skipped: true }));
+  elements.drawerEmail.addEventListener("input", () => { elements.drawerRecipient.textContent = elements.drawerEmail.value.trim() || "No recipient selected"; });
   elements.copyDrawerEmail.addEventListener("click", async () => {
     const email = elements.drawerEmail.value.trim();
     if (!isEmail(email)) { showToast("Select a valid email first."); return; }
@@ -2995,8 +3758,8 @@ function bindEvents() {
   elements.retryDrawerLookup.addEventListener("click", async () => {
     const id = state.activeProspectId;
     if (!id) return;
-    closeReviewDrawer();
-    await processQueue([id]);
+    try { await checkContactOutForProspect(id); }
+    catch (error) { showToast(error instanceof Error ? error.message : "ContactOut verification failed."); }
   });
   elements.markSentButton.addEventListener("click", async () => {
     const id = state.activeProspectId;
@@ -3023,6 +3786,11 @@ function bindEvents() {
     showToast(isSent ? "Email returned to the review workflow." : "Email marked sent and added to team activity.");
   });
   elements.approveDraftButton.addEventListener("click", async () => {
+    if (state.reviewRunId) {
+      try { await sendCurrentReview(); }
+      catch (error) { showToast(error instanceof Error ? error.message : "Could not send this email."); }
+      return;
+    }
     if (await saveReview()) {
       await approveProspects([state.activeProspectId]);
       closeReviewDrawer();
@@ -3034,8 +3802,15 @@ function bindEvents() {
     if (event.key === "Escape") { setCampaignMenu(false); closeProspectMenu(); }
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && state.activeProspectId) {
       event.preventDefault();
-      elements.approveDraftButton.click();
+      if (state.reviewRunId) sendCurrentReview().catch((error) => showToast(error instanceof Error ? error.message : "Could not send this email."));
+      else elements.approveDraftButton.click();
       return;
+    }
+    if (state.activeProspectId && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && !event.target.closest("input, textarea, select")) {
+      if (event.key.toLowerCase() === "j") { event.preventDefault(); openNextRunProspect(); return; }
+      if (event.key.toLowerCase() === "k") { event.preventDefault(); openNextRunProspect({ skipped: true }); return; }
+      if (event.key === "ArrowLeft") { event.preventDefault(); openAdjacentReviewProspect(-1); return; }
+      if (event.key === "ArrowRight") { event.preventDefault(); openAdjacentReviewProspect(1); return; }
     }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "e" && activeCampaign() && !elements.campaignDialog.open) { event.preventDefault(); openCampaignEditor(); }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); elements.tableSearch.focus(); }
@@ -3091,17 +3866,21 @@ async function initialize() {
   state.approvedSenders = [];
   state.selectedGoogleAccountId = saved[GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY] || state.googleAccounts[0]?.id || "";
   state.teamMembers = !isExtension ? DEMO_TEAM_MEMBERS : [];
-  state.currentTeamUser = !isExtension ? { id: "preview-tarun", email: "tarun@velaenergy.ai", role: "admin" } : null;
+  if (!isExtension) state.currentTeamUser = { id: "preview-tarun", email: "tarun@velaenergy.ai", full_name: "Tarun Batchu", role: "admin" };
   state.query = typeof savedWorkspace.query === "string" ? savedWorkspace.query : "";
   state.contactQuery = typeof savedWorkspace.contactQuery === "string" ? savedWorkspace.contactQuery : "";
   state.contactStatus = ["all", "bounced", "contacted", "replied", "scheduled", "imported", "ready", "researching"].includes(savedWorkspace.contactStatus) ? savedWorkspace.contactStatus : "all";
   state.attentionOnly = savedWorkspace.attentionOnly === true;
   state.analyticsDays = [7, 30, 90].includes(Number(savedWorkspace.analyticsDays)) ? Number(savedWorkspace.analyticsDays) : 7;
   state.analyticsMember = typeof savedWorkspace.analyticsMember === "string" ? savedWorkspace.analyticsMember : "all";
+  state.scheduledQuery = typeof savedWorkspace.scheduledQuery === "string" ? savedWorkspace.scheduledQuery : "";
+  state.scheduledKind = ["all", SCHEDULED_SEND_KIND.INITIAL, SCHEDULED_SEND_KIND.FOLLOW_UP].includes(savedWorkspace.scheduledKind) ? savedWorkspace.scheduledKind : "all";
   state.searchPlan = savedWorkspace.searchPlan && Array.isArray(savedWorkspace.searchPlan.searches) ? savedWorkspace.searchPlan : null;
   elements.tableSearch.value = state.query;
   elements.contactsSearch.value = state.contactQuery;
   elements.contactsStatusFilter.value = state.contactStatus;
+  elements.scheduledSearch.value = state.scheduledQuery;
+  renderCurrentUser();
   bindEvents();
   const hasRequestedCampaign = requestedCampaignId && state.campaigns.some((campaign) => campaign.id === requestedCampaignId);
   const hasSavedCampaign = savedWorkspace.campaignId && state.campaigns.some((campaign) => campaign.id === savedWorkspace.campaignId);
@@ -3109,7 +3888,9 @@ async function initialize() {
   else if (VIEW_COPY[requestedView]) setView(requestedView, { preserveFilters: true, persist: false });
   else if (hasSavedCampaign) setCampaignView(savedWorkspace.campaignId, { preserveFilters: true, persist: false });
   else setView(VIEW_COPY[savedWorkspace.view] ? savedWorkspace.view : "overview", { preserveFilters: true, persist: false });
-  if (isExtension) Promise.all([refreshSharedActivity({ quiet: true }), refreshTeamProspects({ quiet: true }), refreshResearchRuns({ quiet: true }), refreshTeamGmailAccounts()]).then(() => syncInboxBounces({ quiet: true })).catch(() => {});
+  await refreshResearchWorkspace({ quiet: true });
+  state.researchTimer = setInterval(updateResearchTimer, 1_000);
+  if (isExtension) Promise.all([refreshSharedActivity({ quiet: true }), refreshTeamProspects({ quiet: true }), refreshTeamGmailAccounts()]).then(async () => { await syncInboxBounces({ quiet: true }); await runDueResearchAutomations(); }).catch(() => {});
   if (isExtension) state.teamSyncTimer = setInterval(refreshTeamWorkspace, 12_000);
   if (isExtension && chrome.storage?.onChanged) chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "local") return;

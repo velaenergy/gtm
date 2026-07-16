@@ -44,6 +44,16 @@ test("follow-ups carry Gmail thread and RFC reply references", () => {
   assert.match(mime, /References: <initial@vela\.energy>/);
 });
 
+test("outreach carries stable Vela classification headers", () => {
+  const mime = buildMimeMessage({
+    to: "one@example.com", subject: "Seeking advice", body: "Hello", templateId: "template-1", eventId: "delivery-1", messageKind: "initial",
+  });
+  assert.match(mime, /X-Vela-GTM-Template-ID: template-1/);
+  assert.match(mime, /X-Vela-GTM-Event-ID: delivery-1/);
+  assert.match(mime, /X-Vela-GTM-Message-Kind: initial/);
+  assert.throws(() => buildMimeMessage({ to: "one@example.com", subject: "Hello", body: "Body", messageKind: "reply" }), /initial or follow_up/);
+});
+
 test("reply detection checks only newer inbound thread messages", async () => {
   const replied = await gmailThreadHasReply("token", { threadId: "thread-1", senderEmail: "tarun@vela.energy", sentAt: "2026-07-15T00:00:00.000Z" }, {
     async fetchImpl() {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   alarmNameForJob,
@@ -6,6 +7,8 @@ import {
   jobIdFromAlarm,
   nextScheduledAt,
   normalizeDeliverySettings,
+  scheduledSendKind,
+  scheduledSendMatches,
 } from "../lib/schedule.js";
 
 test("persistent schedule settings normalize to one local time", () => {
@@ -36,4 +39,25 @@ test("scheduled jobs persist delivery data but never OAuth tokens", () => {
   assert.equal(job.status, "scheduled");
   assert.equal("token" in job, false);
   assert.equal(jobIdFromAlarm(alarmNameForJob(job.id)), "job-1");
+});
+
+test("scheduled send kinds stay searchable without breaking legacy jobs", () => {
+  assert.equal(scheduledSendKind({}), "initial");
+  assert.equal(scheduledSendKind({ kind: "follow-up" }), "follow-up");
+  const followUp = { kind: "follow-up", sequenceStep: 2, recipients: ["person@example.com"], subject: "Quick follow up", senderEmail: "sender@example.com" };
+  assert.equal(scheduledSendMatches(followUp, "automatic step 2", { name: "Alex Rivera" }), true);
+  assert.equal(scheduledSendMatches(followUp, "alex", { name: "Alex Rivera" }), true);
+  assert.equal(scheduledSendMatches(followUp, "other company", { name: "Alex Rivera" }), false);
+});
+
+test("scheduled dashboard groups automatic sequences and exposes type search", async () => {
+  const [html, dashboard] = await Promise.all([
+    readFile(new URL("../dashboard.html", import.meta.url), "utf8"),
+    readFile(new URL("../dashboard.js", import.meta.url), "utf8"),
+  ]);
+  assert.match(html, /id="scheduledSearch"/);
+  assert.match(html, /data-scheduled-kind="follow-up"/);
+  assert.match(dashboard, /function scheduledDeliveryGroups/);
+  assert.match(dashboard, /Stop sequence/);
+  assert.match(dashboard, /scheduledSendMatches\(record, state\.scheduledQuery, prospect\)/);
 });

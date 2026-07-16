@@ -17,7 +17,7 @@ const SEARCH_ITEM_SCHEMA = {
         skills: { type: "array", items: { type: "string" }, maxItems: 8 },
         location: { type: "array", items: { type: "string" }, maxItems: 5 },
         industry: { type: "array", items: { type: "string" }, maxItems: 5 },
-        company: { type: "array", items: { type: "string" }, maxItems: 8 },
+        company: { type: "array", items: { type: "string" }, maxItems: 1 },
         keyword: { type: "string" },
       },
       required: ["job_title", "seniority", "skills", "location", "industry", "company", "keyword"],
@@ -73,7 +73,7 @@ Choose exactly one mode:
 - plan: an explicit request to discover a prospect audience, or a clear refinement of the pending audience plan. Produce exactly one Apollo People API search. Do not claim it ran.
 - execute: only when the user explicitly confirms that the pending plan should run, such as "run it", "go ahead", or "start the research". searches must be empty. Never choose execute when no pending plan exists.
 
-For a plan, preserve the requested audience in one filter set so Apollo can return one authoritative total_entries count and up to 100 people. Only include companies or locations explicitly stated by the user or prior conversation. Seniority accepts only: owner, founder, c_suite, partner, vp, head, director, manager, senior, entry, intern. Use only those values. Never turn ordinary conversation into a research plan.
+For a plan, preserve the requested audience in one filter set so Apollo can return one authoritative total_entries count and up to 100 people. The company filter accepts at most one exact employer name explicitly stated by the user or prior conversation; put audience categories such as AI infrastructure or colocation in industry or keyword instead. Only include locations explicitly stated by the user or prior conversation. Seniority accepts only: owner, founder, c_suite, partner, vp, head, director, manager, senior, entry, intern. Use only those values. Never turn ordinary conversation into a research plan.
 
 Pending plan available: ${hasPendingPlan ? "yes" : "no"}
 Pending plan: ${pendingContext}`,
@@ -111,7 +111,7 @@ export function buildSearchPlanRequest(brief, model = "gpt-5.4-mini") {
   return {
     model,
     store: false,
-    instructions: `Convert the prospecting brief into one Apollo People API Search. Preserve the user's audience in a single set of filters so Apollo can return one authoritative total_entries count and up to 100 people. Prioritize direct operating responsibility and enough specificity to avoid generic results. Only include companies or locations explicitly stated by the user; otherwise use empty arrays. Seniority accepts only these exact Apollo values: owner, founder, c_suite, partner, vp, head, director, manager, senior, entry, intern. Use only values from that list.`,
+    instructions: `Convert the prospecting brief into one Apollo People API Search. Preserve the user's audience in a single set of filters so Apollo can return one authoritative total_entries count and up to 100 people. Prioritize direct operating responsibility and enough specificity to avoid generic results. The company filter accepts at most one exact employer name explicitly stated by the user; put audience categories such as AI infrastructure or colocation in industry or keyword instead. Only include locations explicitly stated by the user; otherwise use an empty array. Seniority accepts only these exact Apollo values: owner, founder, c_suite, partner, vp, head, director, manager, senior, entry, intern. Use only values from that list.`,
     input: String(brief || "").trim(),
     max_output_tokens: 900,
     text: { format: { type: "json_schema", name: "vela_search_plan", strict: true, schema: SEARCH_PLAN_SCHEMA } },

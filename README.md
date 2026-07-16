@@ -82,7 +82,7 @@ Settings keeps the browser session and optional ContactOut API fallback as separ
 
 Only high-confidence, non-guessed internal ContactOut addresses are promoted. Guessed addresses remain unverified unless the verification poll explicitly returns `valid` or `verified`. LinkedIn-visible, manually entered, `accept_all`, `invalid`, `disposable`, `unknown`, and placeholder addresses remain unverified.
 
-After profile research, Vela passes bounded LinkedIn and Apollo/ContactOut work context to the configured OpenAI Responses API writer. The selected template acts as a writing guide and source of approved sender facts; AI writes a complete prospect-specific subject and plain-text body with natural paragraph breaks. **Rewrite email** produces another grounded draft with varied wording and structure. Delivery stays locked until a complete draft succeeds.
+After profile research, Vela passes bounded LinkedIn and Apollo/ContactOut work context to the configured OpenAI Responses API writer. The selected template acts as a body-writing guide and source of approved sender facts; AI writes a complete prospect-specific plain-text body with natural paragraph breaks, while every new first-touch email uses the fixed subject **Seeking advice**. **Rewrite email** produces another grounded body with varied wording and structure. Delivery stays locked until a complete draft succeeds.
 
 No ContactOut API token is required for profile reveals when the browser session is connected. An official ContactOut API token may still be saved as an optional fallback and is currently required for ContactOut People Search. AI research searches ContactOut first and falls back to Apollo when both are configured; provider-sourced profiles continue through API enrichment without opening LinkedIn. LinkedIn remains an explicit manual fallback beside each planned search. **Test ContactOut API** validates the optional token and its credits.
 
@@ -156,7 +156,7 @@ Health check:
 curl http://127.0.0.1:8787/health
 ```
 
-The writer sends `store: false` and asks the Responses API for a strict JSON schema containing `subject`, `body`, and `workNote`. Its prompt tells the model to use only profile facts supplied by the extension and to leave email discovery to the enrichment flow.
+The writer sends `store: false` and asks the Responses API for a strict JSON schema containing `body` and `workNote`. Its prompt tells the model to use only profile facts supplied by the extension and to leave email discovery to the enrichment flow. Vela adds the canonical **Seeking advice** subject locally instead of asking AI to generate one.
 
 ## Gmail delivery, scheduling, and shared activity
 
@@ -164,7 +164,7 @@ Team members sign in with an `@velaenergy.ai` Google identity before the extensi
 
 Google Sheets is source-only: download a sheet as `.xlsx` or `.csv`, then import it through the editable column-mapping flow. Rows with an existing `Email Sent` value become Supabase activity as well as local history, making old campaign history part of the duplicate check and analytics. There is no Sheets runtime connection or workbook export workflow.
 
-Settings keeps provider credentials masked by default and provides an explicit **Show** / **Hide** control for each key. **Email generation** also manages reusable named subject/body writing guides. Vela renders a guide-based local fallback, while the AI may vary the final subject, wording, ordering, and paragraph count without changing configured sender facts or the calendar URL.
+Settings keeps provider credentials masked by default and provides an explicit **Show** / **Hide** control for each key. **Email generation** also manages reusable named body writing guides. Vela renders a guide-based local fallback, while the AI may vary wording, ordering, and paragraph count without changing configured sender facts or the calendar URL. The subject is shown read-only because all first-touch outreach uses **Seeking advice**.
 
 With one or more connected senders, the side panel lets the user choose the exact Gmail account for the current compose and sends reviewed messages through Gmail's official `users.messages.send` endpoint with `gmail.send`. The `gmail.readonly` scope is used for bounded reply and delivery-status checks: Vela parses matching messages transiently and stores only the failed recipient, bounce category, diagnostic summary, Gmail message ID, and timestamp. Message bodies and OAuth tokens are never copied to Supabase. Each recipient still receives a separate message and sender accounts never rotate automatically. Without a connected sender, the same action opens one prefilled Gmail composer per selected address so the user can review and manually click **Send**. Scheduling remains available only for connected senders. Clicking **Send email** or **Open Gmail** is the approval boundary.
 

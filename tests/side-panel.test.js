@@ -6,7 +6,9 @@ const background = await readFile(new URL("../background.js", import.meta.url), 
 const contentScript = await readFile(new URL("../content-script.js", import.meta.url), "utf8");
 const dashboardHtml = await readFile(new URL("../dashboard.html", import.meta.url), "utf8");
 const dashboardJs = await readFile(new URL("../dashboard.js", import.meta.url), "utf8");
+const dashboardCss = await readFile(new URL("../dashboard.css", import.meta.url), "utf8");
 const optionsHtml = await readFile(new URL("../options.html", import.meta.url), "utf8");
+const popupHtml = await readFile(new URL("../popup.html", import.meta.url), "utf8");
 
 test("V24 configures the tab side panel before exposing its LinkedIn launcher", () => {
   const configureRequest = contentScript.indexOf('type: "VELA_GTM_CONFIGURE_SIDE_PANEL"');
@@ -37,4 +39,46 @@ test("uses options.html as the single settings surface", () => {
   assert.match(optionsHtml, /data-settings-target="teamWorkspaceHeading">Workspace/);
   assert.match(optionsHtml, /id="teamMembersBody"/);
   assert.match(optionsHtml, /id="connectGmailButton"[^>]*>Add Gmail account/);
+});
+
+test("dashboard always identifies the active workspace user separately from the Gmail sender", () => {
+  assert.match(dashboardHtml, /id="currentUserBadge"[\s\S]*Signed in as[\s\S]*id="currentUserEmail"/);
+  assert.match(dashboardCss, /\.current-user-badge \{[\s\S]*position:fixed; right:18px; bottom:16px/);
+  assert.match(dashboardJs, /const membership = response\?\.data\?\.membership \|\| null;[\s\S]*state\.currentTeamUser = signedIn/);
+  assert.match(dashboardJs, /function renderCurrentUser\(\)/);
+  assert.match(dashboardJs, /currentUserBadge\.addEventListener\("click", openAdvancedSettings\)/);
+  assert.doesNotMatch(dashboardJs, /state\.currentTeamUser = !isExtension[\s\S]*: null/);
+  assert.match(dashboardJs, /const reportableEvents = events\.filter\(\(event\) => event\.operatorId \|\| event\.operatorEmail \|\| event\.senderEmail\)/);
+});
+
+test("V49 keeps the canonical first-touch subject read-only through review and delivery", () => {
+  assert.match(optionsHtml, /id="templateSubject"[^>]*value="Quick intro \+ would love to pick your brain"[^>]*readonly/);
+  assert.match(popupHtml, /id="subjectInput"[^>]*value="Quick intro \+ would love to pick your brain"[^>]*readonly/);
+  assert.match(dashboardHtml, /id="drawerSubject"[^>]*value="Quick intro \+ would love to pick your brain"[^>]*readonly/);
+  assert.match(dashboardJs, /delivery: \{[^}]*subject: OUTREACH_SUBJECT/);
+});
+
+test("draft review keeps the prospect profile focused and its controls legible", () => {
+  assert.doesNotMatch(dashboardHtml, /Human approval required/);
+  assert.match(dashboardHtml, /id="drawerProfileSection"[\s\S]*Work history/);
+  assert.match(dashboardHtml, /id="previousReviewButton"[\s\S]*Previous prospect/);
+  assert.match(dashboardHtml, /id="nextReviewButton"[\s\S]*Next prospect/);
+  assert.match(dashboardCss, /\.drawer-section\.drawer-collapsible \{ padding:0; overflow:hidden; \}/);
+  assert.match(dashboardCss, /\.drawer-content > \* \{ flex:none; \}/);
+  assert.match(dashboardCss, /\.drawer-collapsible > summary \{[^}]*color:var\(--ink\)/);
+  assert.match(dashboardJs, /drawerEmailSection\.hidden = true/);
+});
+
+test("analytics is a focused delivery control room backed by Gmail health signals", () => {
+  const analyticsPanel = dashboardHtml.match(/<section id="analyticsPanel"[\s\S]*?<section id="overviewPanel"/)?.[0] || "";
+
+  assert.match(dashboardJs, /analytics: \{ eyebrow: "Analytics", title: "Delivery health"/);
+  assert.doesNotMatch(analyticsPanel, /Delivery health/, "the page header owns the title; the panel must not repeat it");
+  assert.match(analyticsPanel, /Spam \/ policy blocks/);
+  assert.match(analyticsPanel, /Who is sending what/);
+  assert.match(analyticsPanel, /id="analyticsInboxSyncButton"/);
+  assert.doesNotMatch(analyticsPanel, /Team leaderboard|Sequence health|dailySendChart/);
+  assert.match(dashboardJs, /record\.bounceReason === "policy_blocked"/);
+  assert.match(dashboardJs, /record\.bounceType === "hard"/);
+  assert.match(dashboardJs, /record\.bounceType === "soft"/);
 });

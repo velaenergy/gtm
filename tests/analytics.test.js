@@ -49,6 +49,15 @@ test("merges local and Supabase records without double counting the same recipie
   assert.equal(merged[0].source, "supabase");
 });
 
+test("[V46] canonical Gmail history replaces a duplicate activity row by Gmail message ID", () => {
+  const canonical = { id: "gmail:account:message-1", gmailMessageId: "message-1", recipients: ["one@example.com"], status: "sent", completedAt: "2026-07-16T12:00:00.000Z", senderEmail: "tarun@velaenergy.ai", source: "gmail" };
+  const activity = { id: "delivery-1", gmailMessageId: "message-1", recipients: ["one@example.com"], status: "sent", completedAt: "2026-07-16T12:00:01.000Z", source: "supabase" };
+  const merged = mergeDeliveryRecords([canonical], [activity]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].senderEmail, "tarun@velaenergy.ai");
+  assert.equal(merged[0].source, "gmail");
+});
+
 test("daily analytics fills empty days and summarizes recent volume", () => {
   const now = new Date(2026, 6, 13, 12);
   const today = new Date(2026, 6, 13, 9).toISOString();

@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, contactOutConnectionState, emailTemplates, followUpTemplates, normalizeEmailTemplates, normalizeFollowUpTemplates, resolveTheme } from "./lib/message.js";
+import { DEFAULT_SETTINGS, OUTREACH_SUBJECT, contactOutConnectionState, emailTemplates, followUpTemplates, normalizeEmailTemplates, normalizeFollowUpTemplates, resolveTheme } from "./lib/message.js";
 import {
   GOOGLE_ACCOUNT_AUTH_MODE,
   GOOGLE_ACCOUNTS_STORAGE_KEY,
@@ -70,6 +70,8 @@ const templateSubject = document.getElementById("templateSubject");
 const templateBody = document.getElementById("templateBody");
 const templateSenderName = document.getElementById("templateSenderName");
 const templateCalendarUrl = document.getElementById("templateCalendarUrl");
+const templateSenderEmail = document.getElementById("templateSenderEmail");
+const templateSenderField = document.getElementById("templateSenderField");
 const templateList = document.getElementById("templateList");
 const templateCount = document.getElementById("templateCount");
 const templateEditorHeading = document.getElementById("templateEditorHeading");
@@ -164,11 +166,12 @@ function commitTemplateFields() {
   const active = activeEditableTemplate();
   if (!active) return;
   active.name = templateName.value.trim() || "Untitled template";
-  if (activeTemplateKind === "cold") active.subject = templateSubject.value;
+  if (activeTemplateKind === "cold") active.subject = OUTREACH_SUBJECT;
   active.body = templateBody.value;
   active.writerMode = templateWriterInputs.find((input) => input.checked)?.value === "full" ? "full" : "gaps";
   if (activeTemplateKind === "cold") {
     active.senderName = templateSenderName.value.trim();
+    active.senderEmail = templateSenderEmail.value.trim().toLowerCase();
     active.calendarUrl = templateCalendarUrl.value.trim();
     active.followUpCadenceDays = Math.min(30, Math.max(1, Number(followUpCadenceDays.value) || 3));
     active.followUpTemplateIds = [...sequenceSteps.querySelectorAll("select")].map((select) => select.value).filter(Boolean);
@@ -204,7 +207,7 @@ function renderTemplateList() {
     card.className = "email-template-card";
     card.innerHTML = `<header><strong></strong><div>${templateBadges(template)}</div></header><h4></h4><p></p><footer><button type="button">Edit</button><span>${template.followUpTemplateIds?.length || 0} follow-ups · every ${template.followUpCadenceDays || 3} business days</span></footer>`;
     card.querySelector("strong").textContent = template.name || "Untitled template";
-    renderTemplatePreview(card.querySelector("h4"), template.subject || "No subject yet");
+    renderTemplatePreview(card.querySelector("h4"), OUTREACH_SUBJECT);
     renderTemplatePreview(card.querySelector("p"), template.body || "Add the email copy.");
     card.querySelector("button").addEventListener("click", () => {
       activeTemplateKind = "cold";
@@ -257,13 +260,18 @@ function renderTemplateEditor() {
   if (!active) return;
   const followUp = activeTemplateKind === "follow-up";
   templateName.value = active.name;
-  templateSubject.value = active.subject || "";
+  templateSubject.value = OUTREACH_SUBJECT;
   templateBody.value = active.body;
   templateSenderName.value = active.senderName || DEFAULT_SETTINGS.senderName;
   templateCalendarUrl.value = active.calendarUrl || DEFAULT_SETTINGS.calendarUrl;
+  const senderEmails = [...new Set(connectedGoogleAccounts.map((account) => String(account.email || "").trim().toLowerCase()).filter(Boolean))];
+  if (active.senderEmail && !senderEmails.includes(active.senderEmail)) senderEmails.unshift(active.senderEmail);
+  templateSenderEmail.replaceChildren(new Option("Use selected Gmail sender", ""), ...senderEmails.map((email) => new Option(email, email)));
+  templateSenderEmail.value = active.senderEmail || "";
   templateDialogKind.textContent = followUp ? "Follow-up message" : "Cold email";
   templateEditorHeading.textContent = followUp ? "Edit follow-up" : "Edit template";
   templateSubjectField.hidden = followUp;
+  templateSenderField.hidden = followUp;
   followUpThreadNote.hidden = !followUp;
   sequenceEditor.hidden = followUp;
   followUpCadenceDays.value = active.followUpCadenceDays || 3;
@@ -467,8 +475,8 @@ form.addEventListener("submit", async (event) => {
 
   try {
     commitTemplateFields();
-    if (editableTemplates.some((template) => !template.name.trim() || !template.subject.trim() || !template.body.trim())) {
-      throw new Error("Every email template needs a name, subject, and message.");
+    if (editableTemplates.some((template) => !template.name.trim() || !template.body.trim())) {
+      throw new Error("Every email template needs a name and message.");
     }
     const savedTemplates = normalizeEmailTemplates(editableTemplates);
     if (!savedTemplates.length) throw new Error("Keep at least one complete email template.");
@@ -532,9 +540,9 @@ templateName.addEventListener("input", () => {
   templateEditorHeading.textContent = templateName.value.trim() || "Untitled template";
   renderTemplateList();
 });
-templateSubject.addEventListener("input", commitTemplateFields);
 templateBody.addEventListener("input", commitTemplateFields);
 templateSenderName.addEventListener("input", commitTemplateFields);
+templateSenderEmail.addEventListener("change", commitTemplateFields);
 templateCalendarUrl.addEventListener("input", commitTemplateFields);
 addTemplateButton.addEventListener("click", () => {
   const id = `custom-${Date.now().toString(36)}`;
@@ -543,9 +551,10 @@ addTemplateButton.addEventListener("click", () => {
     id,
     name: "New template",
     eyebrow: "Saved template",
-    subject: "",
+    subject: OUTREACH_SUBJECT,
     body: "",
     senderName: previous?.senderName || DEFAULT_SETTINGS.senderName,
+    senderEmail: previous?.senderEmail || connectedGoogleAccounts.find((account) => account.id === selectedGoogleAccountId)?.email || "",
     calendarUrl: previous?.calendarUrl || DEFAULT_SETTINGS.calendarUrl,
     writerMode: "gaps",
     followUpCadenceDays: 3,
@@ -590,8 +599,8 @@ closeTemplateDialogButton.addEventListener("click", () => templateDialog.close()
 cancelTemplateDialogButton.addEventListener("click", () => templateDialog.close());
 saveTemplateDialogButton.addEventListener("click", () => {
   commitTemplateFields();
-  if (!templateName.value.trim() || !templateBody.value.trim() || (activeTemplateKind === "cold" && !templateSubject.value.trim())) {
-    showToast("Add a name, subject, and message before saving this template.");
+  if (!templateName.value.trim() || !templateBody.value.trim()) {
+    showToast("Add a name and message before saving this template.");
     return;
   }
   renderTemplateList();

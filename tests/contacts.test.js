@@ -21,8 +21,20 @@ test("contacts merge imported prospects with team delivery activity", () => {
 test("contacts keep uncontacted imports visible and support search and status filters", () => {
   const contacts = buildContacts({ prospects: [{ id: "p2", name: "Alex", email: "alex@example.com", source: "Spreadsheet import", company: "Vela" }] });
   assert.equal(contacts[0].status, "Imported");
+  assert.equal(contacts[0].ownerName, "Unknown");
+  assert.equal(contacts[0].ownerSource, "No recorded sender");
   assert.equal(filterContacts(contacts, { query: "vela" }).length, 1);
   assert.equal(filterContacts(contacts, { status: "contacted" }).length, 0);
+});
+
+test("historical imports do not assign the importing teammate as the sender", () => {
+  const [contact] = buildContacts({
+    prospects: [{ id: "p-import", name: "Imported Person", email: "imported@example.com", source: "Imported list" }],
+    deliveryLog: [{ id: "history-1", recipients: ["imported@example.com"], status: "sent", mode: "imported", operatorName: "Riddhiman Rana", completedAt: "2026-07-15T10:00:00Z" }],
+  });
+  assert.deepEqual(contact.operators, []);
+  assert.equal(contact.ownerName, "Unknown");
+  assert.equal(contact.ownerSource, "Imported history");
 });
 
 test("[V32] imported contact provenance never falls through to a generic tool label", () => {

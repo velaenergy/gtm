@@ -1,5 +1,6 @@
 import {
   DEFAULT_SETTINGS,
+  OUTREACH_SUBJECT,
   applyTemplate,
   contactEmailCandidates,
   deliveryRecipientEmails,
@@ -544,7 +545,7 @@ async function loadDraft() {
   const savedNote = saved.note || state.note;
   state.note = normalizeWorkNote(savedNote, state.profile);
   state.templateId = state.templates.some((template) => template.id === saved.templateId) ? saved.templateId : state.templateId;
-  state.subject = saved.subject || "";
+  state.subject = OUTREACH_SUBJECT;
   state.body = saved.body || "";
   const noteWasNormalized = Boolean(savedNote && state.note && savedNote !== state.note);
   if (noteWasNormalized && state.body.includes(savedNote)) state.body = state.body.replace(savedNote, state.note);
@@ -1388,13 +1389,6 @@ function bindEvents() {
       updateWordCount();
     }
     queueDraftSave();
-  });
-
-  elements.subjectInput.addEventListener("input", () => {
-    state.subject = elements.subjectInput.value;
-    state.composerDirty = true;
-    queueDraftSave();
-    renderDelivery();
   });
 
   elements.bodyInput.addEventListener("input", () => {

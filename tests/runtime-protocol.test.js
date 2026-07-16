@@ -5,7 +5,10 @@ import {
   PROVIDER_ACTION,
   RUNTIME_CAPABILITIES_MESSAGE,
   RUNTIME_PROTOCOL_VERSION,
+  WORKSPACE_ACTION,
+  WORKSPACE_RELOAD_MESSAGE,
   runtimeCapabilities,
+  runtimeHasWorkspaceActions,
   runtimeMismatchMessage,
 } from "../lib/runtime-protocol.js";
 
@@ -17,7 +20,20 @@ test("V37 exposes the conversational research action through the runtime protoco
     protocolVersion: 1,
     extensionVersion: "0.8.2",
     providerActions: Object.values(PROVIDER_ACTION),
+    workspaceActions: Object.values(WORKSPACE_ACTION),
   });
+});
+
+test("V37 advertises Gmail sync actions and detects a stale workspace worker", () => {
+  const current = runtimeCapabilities("0.8.2");
+  assert.equal(WORKSPACE_ACTION.GMAIL_HISTORY_SYNC, "VELA_GTM_GMAIL_HISTORY_SYNC");
+  assert.equal(WORKSPACE_ACTION.GMAIL_BOUNCES_SYNC, "VELA_GTM_GMAIL_BOUNCES_SYNC");
+  assert.equal(runtimeHasWorkspaceActions(current), true);
+  assert.equal(runtimeHasWorkspaceActions({ providerActions: current.providerActions }), false);
+  assert.equal(
+    WORKSPACE_RELOAD_MESSAGE,
+    "Vela’s Workspace page is newer than its background service. Reload Vela GTM in chrome://extensions, then reopen Workspace.",
+  );
 });
 
 test("V37 replaces an unknown provider action with an actionable runtime mismatch", () => {
