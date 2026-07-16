@@ -153,7 +153,9 @@ test("the default outreach play resolves all variables", () => {
   assert.match(message.body, /a16z \(the world's largest venture capital firm\)/);
   assert.ok(message.body.indexOf(opener) < message.body.indexOf("I'm Tony."));
   assert.match(message.body, /left Tesla to build the company full-time/);
-  assert.match(message.body, /Would you be open to a 20-minute conversation/);
+  assert.match(message.body, /I'd really appreciate it if we could meet for 20-30 minutes/);
+  assert.match(message.body, /If you're open to it, here's my calendar:/);
+  assert.doesNotMatch(message.body, /Grab any time here/);
   assert.doesNotMatch(message.body, /\[[^\]]+\]\(https?:\/\//);
   assert.doesNotMatch(message.body, /20[–—]30/);
   assert.doesNotMatch(message.body, /{{\w+}}/);

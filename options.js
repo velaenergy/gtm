@@ -1115,25 +1115,20 @@ connectGmailButton.addEventListener("click", async () => {
   }
   try {
     connectGmailButton.disabled = true;
+    const authStatus = await chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_AUTH_STATUS" });
+    if (!authStatus?.ok) throw new Error(authStatus?.error || "Could not check the Vela workspace session.");
+    if (!authStatus.data?.signedIn) throw new Error("Sign in to the Vela workspace before adding a Gmail sender.");
     const authorization = await authorizeGoogleAccount({
       identity: chrome.identity,
       clientId: configuredSettings.googleWebClientId,
       scopes: [GMAIL_SEND_SCOPE, GMAIL_READONLY_SCOPE],
-      includeIdToken: true,
     });
     const selected = authorization.account;
-    const authResponse = await chrome.runtime.sendMessage({
-      type: "VELA_GTM_TEAM_SIGN_IN",
-      idToken: authorization.idToken,
-      accessToken: authorization.token,
-      nonce: authorization.nonce,
-    });
-    if (!authResponse?.ok) throw new Error(authResponse?.error || "Vela team sign-in failed.");
     const syncResponse = await chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_GMAIL_SYNC", account: selected });
     if (!syncResponse?.ok) throw new Error(syncResponse?.error || "Could not share the Gmail account with the team.");
     await persistGoogleAccounts(upsertGoogleAccount(connectedGoogleAccounts, selected), selected.id);
     renderGmailConnection({ connected: true, oauthConfigured: true, email: selected.email, authMode: selected.authMode });
-    renderTeamAuth({ user: authResponse.data.user });
+    renderTeamAuth({ user: authStatus.data.user });
     showToast(`${selected.email} connected and available to the Vela team.`);
   } catch (error) {
     renderGmailConnection({ oauthConfigured: true, detail: error instanceof Error ? error.message : "Could not connect Google delivery." });
@@ -1148,11 +1143,20 @@ gmailAccountsList.addEventListener("click", async (event) => {
   if (removeButton) {
     const account = connectedGoogleAccounts.find((item) => item.id === removeButton.dataset.removeAccountId);
     if (!account) return;
-    await disconnectGoogle(chrome.identity, { authMode: account.authMode });
-    const next = await persistGoogleAccounts(connectedGoogleAccounts.filter((item) => item.id !== account.id), selectedGoogleAccountId);
-    const webClientId = DEFAULT_SETTINGS.googleWebClientId;
-    renderGmailConnection({ connected: Boolean(next), oauthConfigured: Boolean(googleOAuthStrategy({ webClientId })), email: next?.email, authMode: next?.authMode });
-    showToast(`${account.email} removed.`);
+    try {
+      removeButton.disabled = true;
+      const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_GMAIL_REMOVE", account });
+      if (!response?.ok) throw new Error(response?.error || "Could not remove this Gmail sender from the Vela workspace.");
+      await disconnectGoogle(chrome.identity, { authMode: account.authMode });
+      const next = await persistGoogleAccounts(connectedGoogleAccounts.filter((item) => item.id !== account.id), selectedGoogleAccountId);
+      const webClientId = DEFAULT_SETTINGS.googleWebClientId;
+      renderGmailConnection({ connected: Boolean(next), oauthConfigured: Boolean(googleOAuthStrategy({ webClientId })), email: next?.email, authMode: next?.authMode });
+      showToast(`${account.email} removed from Vela delivery.`);
+    } catch (error) {
+      renderGmailConnection({ connected: true, oauthConfigured: true, email: account.email, authMode: account.authMode, detail: error instanceof Error ? error.message : "Could not remove this Gmail sender." });
+      showToast(error instanceof Error ? error.message : "Could not remove this Gmail sender.");
+      removeButton.disabled = false;
+    }
     return;
   }
 

@@ -8,6 +8,8 @@ import {
   claimRecipientSend,
   completeRecipientSend,
   currentTeamMembership,
+  deactivateGmailAccount,
+  deleteSharedProspects,
   duplicateRecipientMatches,
   duplicateActivity,
   gtmMessageRecordFromRow,
@@ -124,13 +126,15 @@ test("stores canonical GTM Gmail messages and maps them back to analytics record
     fetchImpl: async (url, options) => {
       const body = JSON.parse(options.body);
       calls.push({ url: String(url), options, body });
-      return jsonResponse(body.map((row) => ({ id: "row-1", ...row, gmail_accounts: { email: "riddhiman.rana@velaenergy.ai" } })));
+      return jsonResponse(body.map((row) => ({ id: "row-1", ...row, gmail_accounts: { email: "riddhiman.rana@velaenergy.ai" }, team_profiles: { id: "user-1", email: "riddhiman.rana@velaenergy.ai", full_name: "Riddhiman Rana", avatar_url: "https://example.com/riddhiman.jpg" } })));
     },
   });
   assert.equal(calls[0].body[0].captured_by, "user-1");
   assert.equal(calls[0].body[0].message_kind, "reply");
   assert.match(calls[0].url, /on_conflict=gmail_account_id,gmail_message_id/);
   assert.equal(saved[0].accountEmail, "riddhiman.rana@velaenergy.ai");
+  assert.equal(saved[0].operatorName, "Riddhiman Rana");
+  assert.equal(saved[0].operatorEmail, "riddhiman.rana@velaenergy.ai");
   assert.equal(saved[0].bodyText, "Happy to chat.");
   assert.equal(gtmMessageRecordFromRow(calls[0].body[0]).gmailMessageId, "message-1");
 });
@@ -157,6 +161,7 @@ test("reads paginated GTM history without bodies and upserts mailbox cursors", a
   assert.equal(cursor.last_history_id, "100");
   assert.equal(JSON.parse(calls.find((call) => call.options.method === "POST").options.body)[0].updated_by, "user-1");
   assert.equal(calls.some((call) => call.url.includes("body_text")), false);
+  assert.equal(calls.some((call) => call.url.includes("gtm_email_messages_captured_by_fkey")), true);
 });
 
 test("normalizes Supabase activity and produces recipient-specific duplicate warnings", () => {
@@ -333,6 +338,55 @@ test("[V44] upserts every large prospect import in bounded batches", async () =>
   assert.ok(calls.every((call) => call.options.headers.Prefer.includes("resolution=merge-duplicates")));
 });
 
+test("[V59] deletes only the selected approval prospects from shared storage", async () => {
+  const storage = memoryStorage();
+  storage.values[SUPABASE_SESSION_STORAGE_KEY] = {
+    accessToken: "supabase-access",
+    refreshToken: "supabase-refresh",
+    expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    user: { id: "user-1", email: "tarun@velaenergy.ai" },
+  };
+  const calls = [];
+  await deleteSharedProspects([
+    { url: "https://www.linkedin.com/in/greg-miller" },
+    { email: "dane.barhoover@kiewit.com" },
+  ], {
+    storage,
+    fetchImpl: async (url, options) => {
+      calls.push({ url: String(url), options });
+      return jsonResponse([
+        { identity_key: "linkedin:https://www.linkedin.com/in/greg-miller" },
+        { identity_key: "email:dane.barhoover@kiewit.com" },
+      ]);
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].options.method, "DELETE");
+  assert.equal(calls[0].options.headers.Prefer, "return=representation");
+  assert.match(calls[0].url, /select=identity_key/);
+  assert.match(decodeURIComponent(calls[0].url), /linkedin:https:\/\/www\.linkedin\.com\/in\/greg-miller/);
+  assert.match(decodeURIComponent(calls[0].url), /email:dane\.barhoover@kiewit\.com/);
+  assert.doesNotMatch(calls[0].url, /identity_key=not\.is\.null/);
+});
+
+test("[V59] rejects a shared approval delete when Supabase affects no rows", async () => {
+  const storage = memoryStorage();
+  storage.values[SUPABASE_SESSION_STORAGE_KEY] = {
+    accessToken: "supabase-access",
+    refreshToken: "supabase-refresh",
+    expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    user: { id: "user-1", email: "tarun@velaenergy.ai" },
+  };
+
+  await assert.rejects(deleteSharedProspects([
+    { email: "still-there@example.com" },
+  ], {
+    storage,
+    fetchImpl: async () => jsonResponse([]),
+  }), /did not delete 1 of 1 approval/);
+});
+
 test("reads workspace members in join order through the authenticated team session", async () => {
   const storage = memoryStorage();
   storage.values[SUPABASE_SESSION_STORAGE_KEY] = {
@@ -468,6 +522,33 @@ test("adds a chosen Vela Gmail account to the sender roster before syncing its m
   assert.equal(calls[0].body[0].created_by, "user-1");
   assert.match(calls[1].url, /gmail_accounts\?on_conflict=id/);
   assert.equal(calls[1].body[0].email, "riddhiman.rana@velaenergy.ai");
+});
+
+test("[V52] removing a Gmail sender atomically deactivates shared account and delivery authorization", async () => {
+  const storage = memoryStorage();
+  storage.values[SUPABASE_SESSION_STORAGE_KEY] = {
+    accessToken: "supabase-access",
+    refreshToken: "supabase-refresh",
+    expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    user: { id: "user-1", email: "riddhiman.rana@velaenergy.ai" },
+  };
+  const calls = [];
+  const removed = await deactivateGmailAccount({ id: "google-riddhiman", email: "Riddhiman.Rana@VelaEnergy.ai" }, {
+    storage,
+    fetchImpl: async (url, options) => {
+      calls.push({ url, method: options.method, body: JSON.parse(options.body) });
+      return jsonResponse({ id: "google-riddhiman", email: "riddhiman.rana@velaenergy.ai", isActive: false });
+    },
+  });
+
+  assert.deepEqual(removed, { id: "google-riddhiman", email: "riddhiman.rana@velaenergy.ai", isActive: false });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /rpc\/deactivate_gmail_sender/);
+  assert.deepEqual(calls[0].body, {
+    p_account_id: "google-riddhiman",
+    p_account_email: "riddhiman.rana@velaenergy.ai",
+  });
+  assert.equal(calls[0].method, "POST");
 });
 
 test("turns Gmail account RLS internals into an actionable connection error", async () => {

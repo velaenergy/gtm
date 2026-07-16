@@ -13,6 +13,8 @@ import {
   researchAutomationIdFromAlarm,
   researchAutomationAlarmName,
   researchApprovalStack,
+  pendingReviewDrafts,
+  nextReviewProspectId,
   researchFunnel,
   researchBatchPagination,
   researchRunMetrics,
@@ -50,6 +52,16 @@ test("[V47] approval stacks keep ready and approved people from multiple researc
   ]), { total: 3, ready: 2, approved: 1, runs: 2 });
 });
 
+test("[V53] approval progress removes approved drafts and deletion keeps the next position", () => {
+  const prospects = Array.from({ length: 135 }, (_, index) => ({ id: `prospect-${index + 1}`, status: "ready" }));
+  const afterApproval = prospects.map((prospect, index) => index === 0 ? { ...prospect, status: "drafted" } : prospect);
+
+  assert.equal(pendingReviewDrafts(afterApproval).length, 134);
+  assert.equal(pendingReviewDrafts(afterApproval)[0].id, "prospect-2");
+  assert.equal(nextReviewProspectId(pendingReviewDrafts(prospects), "prospect-1"), "prospect-2");
+  assert.equal(nextReviewProspectId(pendingReviewDrafts(prospects), "prospect-135"), "prospect-134");
+});
+
 test("[V42] default research prompts are US-only and follow-up batches advance by 100", () => {
   assert.equal(DEFAULT_RESEARCH_PROMPTS.length, 3);
   assert.ok(DEFAULT_RESEARCH_PROMPTS.every(({ prompt }) => prompt.includes("United States")));
@@ -78,6 +90,16 @@ test("[V43] an empty workspace can render before a research run exists", () => {
   });
 });
 
+test("[V58] Research navigation does not show an unexplained prospect count", async () => {
+  const [dashboardJs, dashboardHtml] = await Promise.all([
+    readFile(new URL("../dashboard.js", import.meta.url), "utf8"),
+    readFile(new URL("../dashboard.html", import.meta.url), "utf8"),
+  ]);
+
+  assert.doesNotMatch(dashboardHtml, /id="navResearch"/);
+  assert.doesNotMatch(dashboardJs, /navResearch/);
+});
+
 test("[V42] the Research UI binds both next-batch entry points", async () => {
   const [dashboardJs, dashboardHtml] = await Promise.all([
     readFile(new URL("../dashboard.js", import.meta.url), "utf8"),
@@ -91,13 +113,19 @@ test("[V42] the Research UI binds both next-batch entry points", async () => {
   assert.match(dashboardJs, /will not use email credits/);
 });
 
-test("[V46][V47] sent history attribution and approval actions stay wired to their real data paths", async () => {
-  const dashboardJs = await readFile(new URL("../dashboard.js", import.meta.url), "utf8");
+test("[V46][V47][V57] sent history and approval actions stay wired to their real data paths", async () => {
+  const [dashboardJs, dashboardHtml] = await Promise.all([
+    readFile(new URL("../dashboard.js", import.meta.url), "utf8"),
+    readFile(new URL("../dashboard.html", import.meta.url), "utf8"),
+  ]);
   assert.match(dashboardJs, /gmailMessagesAsDeliveryRecords\(state\.gtmMessages\)/);
-  assert.match(dashboardJs, /Approve & run\$\{readyToApprove\.length \? ` \$\{readyToApprove\.length\}` : ""\}/);
-  assert.doesNotMatch(dashboardJs, /Approve & run[^\n]* of /);
+  assert.match(dashboardJs, /elements\.processButton\.textContent = "Draft qualified"/);
+  assert.match(dashboardJs, /launchDraftQualifiedResearch/);
+  assert.match(dashboardJs, /setView\("research"\)/);
   assert.match(dashboardJs, /View on LinkedIn/);
-  assert.match(dashboardJs, /approveAndRun\(visibleProspects\(\)\.map/);
+  assert.match(dashboardHtml, />Clear approvals</);
+  assert.doesNotMatch(dashboardHtml, /<th>Updated<\/th>/);
+  assert.match(dashboardJs, /VELA_GTM_TEAM_PROSPECTS_DELETE/);
 });
 
 test("research automation normalizes caps and uses stable Chrome alarm names", () => {

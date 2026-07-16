@@ -7,12 +7,54 @@ import {
   deliveryOutcomeCounts,
   mailboxCapacityUsage,
   mailboxDailyCapacity,
+  mailboxHealthRows,
   mailboxSentEvents,
   mergeDeliveryRecords,
+  summarizeMailboxHealth,
   summarizeDailySends,
   teamMemberKey,
   teamPerformance,
 } from "../lib/analytics.js";
+
+test("mailbox health is derived only from connected Gmail archives and uses thread-level replies", () => {
+  const rows = mailboxHealthRows({
+    fromDate: "2026-07-10T00:00:00.000Z",
+    accounts: [
+      { id: "gmail-tarun", email: "tarun@velaenergy.ai" },
+      { id: "gmail-tony", email: "tony@velaenergy.ai" },
+    ],
+    syncStates: [
+      { gmail_account_id: "gmail-tarun", gmail_accounts: { email: "tarun@velaenergy.ai" }, sync_status: "complete", sync_scope: "all_sent_threads", last_full_sync_at: "2026-07-16T10:00:00.000Z" },
+      { gmail_account_id: "gmail-tony", gmail_accounts: { email: "tony@velaenergy.ai" }, sync_status: "error", sync_scope: "gtm_only", last_error: "Reconnect Gmail" },
+    ],
+    messages: [
+      { gmailAccountId: "gmail-tarun", accountEmail: "tarun@velaenergy.ai", gmailMessageId: "sent-1", gmailThreadId: "thread-1", direction: "outgoing", messageKind: "initial", occurredAt: "2026-07-15T12:00:00.000Z" },
+      { gmailAccountId: "gmail-tarun", accountEmail: "tarun@velaenergy.ai", gmailMessageId: "follow-1", gmailThreadId: "thread-1", direction: "outgoing", messageKind: "follow_up", occurredAt: "2026-07-16T12:00:00.000Z" },
+      { gmailAccountId: "gmail-tarun", accountEmail: "tarun@velaenergy.ai", gmailMessageId: "reply-1", gmailThreadId: "thread-1", direction: "incoming", messageKind: "reply", occurredAt: "2026-07-16T13:00:00.000Z" },
+      { gmailAccountId: "gmail-tarun", accountEmail: "tarun@velaenergy.ai", gmailMessageId: "reply-2", gmailThreadId: "thread-1", direction: "incoming", messageKind: "reply", occurredAt: "2026-07-16T14:00:00.000Z" },
+      { gmailAccountId: "gmail-tony", accountEmail: "tony@velaenergy.ai", gmailMessageId: "bounce-1", gmailThreadId: "thread-2", direction: "system", messageKind: "bounce", bounceType: "hard", bounceReason: "policy_blocked", occurredAt: "2026-07-15T15:00:00.000Z" },
+      { gmailAccountId: "gmail-tony", accountEmail: "tony@velaenergy.ai", gmailMessageId: "old-sent", gmailThreadId: "thread-old", direction: "outgoing", messageKind: "initial", occurredAt: "2026-06-01T12:00:00.000Z" },
+    ],
+  });
+
+  assert.deepEqual(rows.map(({ email, coverage, sentMessages, sentThreads, repliedThreads, replyRate, bounceSignals, policyBlocks }) => ({ email, coverage, sentMessages, sentThreads, repliedThreads, replyRate, bounceSignals, policyBlocks })), [
+    { email: "tarun@velaenergy.ai", coverage: "complete", sentMessages: 2, sentThreads: 1, repliedThreads: 1, replyRate: 100, bounceSignals: 0, policyBlocks: 0 },
+    { email: "tony@velaenergy.ai", coverage: "error", sentMessages: 0, sentThreads: 0, repliedThreads: 0, replyRate: 0, bounceSignals: 1, policyBlocks: 1 },
+  ]);
+  assert.deepEqual(summarizeMailboxHealth(rows), {
+    connectedMailboxes: 2,
+    currentMailboxes: 1,
+    sentMessages: 2,
+    sentThreads: 1,
+    repliedThreads: 1,
+    bounceSignals: 1,
+    policyBlocks: 1,
+    hardBounces: 0,
+    softBounces: 0,
+    syncIssues: 1,
+    replyRate: 100,
+  });
+});
 
 test("collectSentEvents merges the delivery ledger with manual sent marks without duplicating prospects", () => {
   const events = collectSentEvents({
@@ -72,12 +114,14 @@ test("merges local and Supabase records without double counting the same recipie
 });
 
 test("[V46] canonical Gmail history replaces a duplicate activity row by Gmail message ID", () => {
-  const canonical = { id: "gmail:account:message-1", gmailMessageId: "message-1", recipients: ["one@example.com"], status: "sent", completedAt: "2026-07-16T12:00:00.000Z", senderEmail: "tarun@velaenergy.ai", source: "gmail" };
-  const activity = { id: "delivery-1", gmailMessageId: "message-1", recipients: ["one@example.com"], status: "sent", completedAt: "2026-07-16T12:00:01.000Z", source: "supabase" };
+  const canonical = { id: "gmail:account:message-1", gmailMessageId: "message-1", recipients: ["one@example.com"], status: "sent", completedAt: "2026-07-16T12:00:00.000Z", senderEmail: "tarun@velaenergy.ai", operatorId: "sync-user", operatorName: "History Sync", source: "gmail" };
+  const activity = { id: "delivery-1", gmailMessageId: "message-1", recipients: ["one@example.com"], status: "sent", completedAt: "2026-07-16T12:00:01.000Z", operatorId: "user-1", operatorEmail: "riddhiman.rana@velaenergy.ai", operatorName: "Riddhiman Rana", source: "supabase" };
   const merged = mergeDeliveryRecords([canonical], [activity]);
   assert.equal(merged.length, 1);
   assert.equal(merged[0].senderEmail, "tarun@velaenergy.ai");
   assert.equal(merged[0].source, "gmail");
+  assert.equal(merged[0].operatorName, "Riddhiman Rana");
+  assert.equal(merged[0].operatorEmail, "riddhiman.rana@velaenergy.ai");
 });
 
 test("daily analytics fills empty days and summarizes recent volume", () => {

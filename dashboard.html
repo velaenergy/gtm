@@ -44,7 +44,7 @@
             </button>
             <button class="nav-item" type="button" data-view="research" data-tooltip="Research">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m14.5 14.5 3 3M16 9a7 7 0 1 1-14 0 7 7 0 0 1 14 0ZM6.5 9h5M9 6.5v5"/></svg>
-              <span>Research</span><b id="navResearch">0</b>
+              <span>Research</span>
             </button>
             <button class="nav-item" type="button" data-view="review" data-tooltip="Approvals">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h9l3 3v10H4zM13 3.5v3h3M7 10h6M7 13h4"/></svg>
@@ -186,17 +186,19 @@
             </div>
           </section>
 
-          <section id="analyticsPanel" class="analytics-page analytics-v3" hidden aria-label="Outbound delivery health">
-            <header class="analytics-commandbar" aria-label="Analytics controls">
-              <div>
-                <small id="analyticsScopeDetail">Every teammate · last 7 days</small>
+          <section id="analyticsPanel" class="analytics-page analytics-v4" hidden aria-label="Connected Gmail mailbox health">
+            <header class="mailbox-watch-header" aria-label="Mailbox health controls">
+              <div class="mailbox-watch-title">
+                <span><i aria-hidden="true"></i>Gmail observer</span>
+                <h2>Mailbox health</h2>
+                <p id="analyticsScopeDetail">Watching connected sending inboxes and the replies or delivery notices that return to them.</p>
               </div>
               <div class="analytics-command-actions">
                 <button id="analyticsInboxSyncButton" class="analytics-sync-button" type="button">
                   <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 6.5A6.5 6.5 0 1 0 16 13M15.5 6.5V2.8m0 3.7h-3.7"/></svg>
-                  Sync Gmail history
+                  Sync now
                 </button>
-                <div id="analyticsRange" class="analytics-range" role="group" aria-label="Analytics date range">
+                <div id="analyticsRange" class="analytics-range" role="group" aria-label="Mailbox health date range">
                   <button class="is-active" type="button" data-days="7">7D</button>
                   <button type="button" data-days="30">30D</button>
                   <button type="button" data-days="90">90D</button>
@@ -204,75 +206,54 @@
               </div>
             </header>
 
-            <div id="analyticsMemberFilter" class="analytics-member-filter" role="group" aria-label="Filter analytics by teammate"></div>
+            <div class="mailbox-observer-note" role="note">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 17.2a7.2 7.2 0 1 0 0-14.4 7.2 7.2 0 0 0 0 14.4ZM10 8v4.4M10 5.7v.1"/></svg>
+              <div><strong>What Vela watches</strong><span>Every message sent from a connected mailbox, every reply in those threads, and Gmail delivery notices. Gmail does not expose whether a recipient placed a message in spam.</span></div>
+              <p id="analyticsInboxState">Mailbox history syncs automatically. Use Sync now for an immediate check.</p>
+            </div>
 
-            <div class="analytics-health-grid">
-              <article class="panel analytics-health-card" data-slot="card" aria-labelledby="analyticsScopeTitle">
-                <header class="analytics-health-head">
-                  <div><h2 id="analyticsScopeTitle">All team</h2></div>
-                  <span id="analyticsHealthLabel" class="analytics-health-state">Healthy</span>
+            <div class="mailbox-summary-grid" aria-label="Mailbox health summary">
+              <article class="panel mailbox-summary-card is-coverage"><span>Connected mailboxes</span><strong id="analyticsMailboxCount">0</strong><small id="analyticsMailboxCoverage">No mailboxes connected</small></article>
+              <article class="panel mailbox-summary-card is-sent"><span>Messages sent</span><strong id="analyticsSentMessages">0</strong><small id="analyticsSentThreads">0 conversations</small></article>
+              <article class="panel mailbox-summary-card is-replies"><span>Replied threads</span><strong id="analyticsRepliedThreads">0</strong><small id="analyticsReplyRate">0% of sent conversations</small></article>
+              <article class="panel mailbox-summary-card is-bounces"><span>Bounce signals</span><strong id="analyticsBounceSignals">0</strong><small id="analyticsPolicySummary">No policy rejects</small></article>
+            </div>
+
+            <div class="mailbox-watch-grid">
+              <article class="panel mailbox-ledger-card" data-slot="card">
+                <header class="mailbox-card-header" data-slot="card-header">
+                  <div><h3>Connected mailboxes</h3><p>One row per Gmail account Vela sends from.</p></div>
+                  <span id="analyticsMailboxStatus">0 current</span>
                 </header>
-                <div class="analytics-health-body">
-                  <div class="analytics-health-score" aria-label="Delivery rate">
-                    <span>DELIVERED</span>
-                    <strong id="analyticsHealthScore">—</strong>
-                    <small>of accepted sends</small>
-                  </div>
-                  <div class="analytics-health-copy">
-                    <p id="analyticsHealthSummary">Send activity will establish a delivery baseline.</p>
-                    <div class="analytics-primary-metrics" aria-label="Delivery summary">
-                      <span><small>Sent</small><strong id="analyticsSentToday">0</strong></span>
-                      <span><small>Delivered</small><strong id="analyticsDelivered">0</strong></span>
-                      <span><small>Bounced</small><strong id="analyticsBounced">0</strong></span>
-                      <span><small>Replies</small><strong id="engagementReplies">0</strong></span>
-                    </div>
-                  </div>
+                <div class="mailbox-ledger-wrap" data-slot="card-content">
+                  <table class="mailbox-ledger" data-slot="table">
+                    <thead><tr><th>Mailbox</th><th>Coverage</th><th>Sent</th><th>Threads</th><th>Replied</th><th>Bounces</th><th>Last sync</th></tr></thead>
+                    <tbody id="analyticsMailboxBody"></tbody>
+                  </table>
                 </div>
               </article>
 
-              <article class="panel analytics-risk-card" data-slot="card">
-                <header class="analytics-card-title" data-slot="card-header">
-                  <div><h2>Deliverability watch</h2></div>
+              <aside class="panel mailbox-signals-card" data-slot="card">
+                <header class="mailbox-card-header" data-slot="card-header">
+                  <div><h3>Signals to watch</h3><p>Only outcomes Gmail can actually observe.</p></div>
                   <span id="analyticsRiskCount">0 signals</span>
                 </header>
-                <div class="analytics-risk-list" data-slot="card-content">
-                  <div><i class="is-red"></i><span><strong>Spam / policy blocks</strong><small>Recipient 5.7.x and filtering rejects</small></span><b id="analyticsPolicyBlocks">0</b></div>
-                  <div><i class="is-amber"></i><span><strong>Hard bounces</strong><small>Bad address, domain, or permanent reject</small></span><b id="analyticsHardBounces">0</b></div>
-                  <div><i class="is-blue"></i><span><strong>Soft bounces</strong><small>Full mailbox or temporary failure</small></span><b id="analyticsSoftBounces">0</b></div>
-                  <div><i class="is-muted"></i><span><strong>Send failures</strong><small>Gmail could not complete the send</small></span><b id="analyticsSendFailures">0</b></div>
-                  <div><i class="is-green"></i><span><strong>Bounce suppressions</strong><small>Recipients excluded after a Gmail bounce</small></span><b id="analyticsSuppressed">0</b></div>
+                <div class="mailbox-signal-breakdown" data-slot="card-content">
+                  <div><i class="is-red"></i><span><strong>Policy rejects</strong><small>5.7.x and filtering notices</small></span><b id="analyticsPolicyBlocks">0</b></div>
+                  <div><i class="is-amber"></i><span><strong>Hard bounces</strong><small>Permanent address or domain failures</small></span><b id="analyticsHardBounces">0</b></div>
+                  <div><i class="is-blue"></i><span><strong>Soft bounces</strong><small>Temporary or full-mailbox failures</small></span><b id="analyticsSoftBounces">0</b></div>
+                  <div><i class="is-muted"></i><span><strong>Sync issues</strong><small>Mailboxes needing attention</small></span><b id="analyticsSyncIssues">0</b></div>
                 </div>
-                <footer class="analytics-risk-note"><span></span><p id="analyticsInboxState">Policy blocks come from Gmail delivery notices; inbox placement is not inferred.</p></footer>
-              </article>
+              </aside>
             </div>
 
-            <article class="panel analytics-team-card" data-slot="card">
-              <header class="analytics-card-title analytics-team-head" data-slot="card-header">
-                <div><h2>Who is sending what</h2><small id="analyticsTeamDescription">Every operator, sending mailbox, and delivery outcome.</small></div>
-                <span id="analyticsActiveSenders">0 active</span>
+            <article class="panel mailbox-feed-card" data-slot="card">
+              <header class="mailbox-card-header" data-slot="card-header">
+                <div><h3>Reply &amp; delivery feed</h3><p>Incoming outcomes only—routine sent mail stays in the mailbox ledger above.</p></div>
+                <span>Newest first</span>
               </header>
-              <div class="analytics-table-wrap" data-slot="card-content">
-                <table data-slot="table">
-                  <thead data-slot="table-header"><tr data-slot="table-row"><th data-slot="table-head">Operator</th><th data-slot="table-head">Sending from</th><th data-slot="table-head">Sent</th><th data-slot="table-head">Delivered</th><th data-slot="table-head">Bounced</th><th data-slot="table-head">Reply rate</th><th data-slot="table-head">Last activity</th></tr></thead>
-                  <tbody id="analyticsTeamBody" data-slot="table-body"></tbody>
-                </table>
-              </div>
+              <div id="analyticsActivityList" class="mailbox-signal-feed" data-slot="card-content"></div>
             </article>
-
-            <div class="analytics-operations-grid analytics-operations-grid-v3">
-              <article class="panel mailbox-capacity-card" data-slot="card" aria-labelledby="mailboxCapacityHeading">
-                <header class="analytics-card-title" data-slot="card-header">
-                  <div><h2 id="mailboxCapacityHeading">Mailbox load</h2></div>
-                  <span id="mailboxCapacityTotal">0 / 0 sent</span>
-                </header>
-                <div id="mailboxCapacityList" class="mailbox-capacity-list" data-slot="card-content"></div>
-              </article>
-
-              <article class="panel analytics-activity-card" data-slot="card">
-                <header class="analytics-card-title" data-slot="card-header"><div><h2>Recent delivery activity</h2></div><span>Newest first</span></header>
-                <div id="analyticsActivityList" class="analytics-activity-list" data-slot="card-content"></div>
-              </article>
-            </div>
           </section>
 
           <section id="overviewPanel" class="dashboard-home" aria-label="Outreach dashboard">
@@ -342,23 +323,48 @@
               <button id="operationsPrimaryAction" class="button button-outline" type="button" data-jump-view="review">Review more drafts</button>
             </header>
             <div id="scheduledWorkspace" class="scheduled-workspace">
-              <div class="scheduled-toolbar">
-                <label class="scheduled-search" data-slot="input-group">
-                  <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.7" cy="8.7" r="5.2"/><path d="m12.6 12.6 4 4"/></svg>
-                  <span class="sr-only">Search scheduled sends</span>
-                  <input id="scheduledSearch" type="search" placeholder="Search people, subjects, or senders…" autocomplete="off" />
-                </label>
+              <div class="scheduled-command-bar">
                 <div id="scheduledKindFilter" class="scheduled-kind-filter" role="group" aria-label="Filter scheduled sends by type">
                   <button class="is-active" type="button" data-scheduled-kind="all" aria-pressed="true">All <b id="scheduledAllCount">0</b></button>
                   <button type="button" data-scheduled-kind="initial" aria-pressed="false">Initial <b id="scheduledInitialCount">0</b></button>
                   <button type="button" data-scheduled-kind="follow-up" aria-pressed="false">Follow-ups <b id="scheduledFollowUpCount">0</b></button>
                 </div>
+                <div class="scheduled-safety-note"><i aria-hidden="true"></i><span>Reply-aware automation is on</span><small>Sequences stop when Gmail detects a reply</small></div>
               </div>
-              <div class="scheduled-automation-note">
-                <span class="scheduled-automation-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M10 3.2v3.1M10 13.7v3.1M3.2 10h3.1M13.7 10h3.1M5.2 5.2l2.2 2.2M12.6 12.6l2.2 2.2M14.8 5.2l-2.2 2.2M7.4 12.6l-2.2 2.2"/><circle cx="10" cy="10" r="2.2"/></svg></span>
-                <div><strong>Automatic follow-ups are reply-aware</strong><span>Vela sends each step on its business-day cadence and stops the remaining sequence when Gmail detects a reply.</span></div>
+              <div class="scheduled-summary" aria-label="Scheduled queue summary">
+                <article><span>Queued emails</span><strong id="scheduledQueuedMetric">0</strong><small>Across every active sequence</small></article>
+                <article><span>People</span><strong id="scheduledPeopleMetric">0</strong><small>Unique recipients</small></article>
+                <article><span>Due today</span><strong id="scheduledTodayMetric">0</strong><small>In your local timezone</small></article>
+                <article><span>Mailboxes</span><strong id="scheduledMailboxMetric">0</strong><small>Sending accounts in use</small></article>
               </div>
-              <div id="deliveryList" class="delivery-list"></div>
+              <div class="scheduled-toolbar">
+                <label class="scheduled-search" data-slot="input-group">
+                  <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.7" cy="8.7" r="5.2"/><path d="m12.6 12.6 4 4"/></svg>
+                  <span class="sr-only">Search scheduled sends</span>
+                  <input id="scheduledSearch" type="search" placeholder="Search people, subjects, campaigns, or senders…" autocomplete="off" />
+                  <kbd>⌘ K</kbd>
+                </label>
+                <div class="scheduled-filters">
+                  <label><span class="sr-only">Filter by sender</span><select id="scheduledSenderFilter"><option value="all">All senders</option></select></label>
+                  <label><span class="sr-only">Filter by send time</span><select id="scheduledTimeFilter"><option value="all">Any time</option><option value="today">Due today</option><option value="week">Next 7 days</option><option value="later">Later</option></select></label>
+                </div>
+              </div>
+              <div id="scheduledBulkBar" class="scheduled-bulk-bar" hidden>
+                <strong><span id="scheduledSelectedCount">0</span> selected</strong>
+                <span>Selection stays active while you filter.</span>
+                <button id="scheduledClearSelection" type="button">Clear</button>
+                <button id="scheduledStopSelected" type="button">Stop selected</button>
+              </div>
+              <div class="delivery-table-shell">
+                <div class="delivery-table-head" aria-hidden="true"><span></span><span>Person &amp; message</span><span>Workflow</span><span>Sending from</span><span>Next send</span><span>Queue</span><span></span></div>
+                <div id="deliveryList" class="delivery-list"></div>
+                <footer class="scheduled-footer">
+                  <label class="scheduled-select-page"><input id="scheduledSelectPage" type="checkbox" /> <span>Select this page</span></label>
+                  <span id="scheduledResultCount">0 delivery units</span>
+                  <div id="scheduledPagination" class="data-pagination" hidden></div>
+                  <span>100 per page</span>
+                </footer>
+              </div>
             </div>
             <div id="historyWorkspace" class="history-workspace" hidden>
               <div class="history-summary" aria-label="Sent history summary">
@@ -447,7 +453,7 @@
               </div>
               <div class="queue-actions">
                 <button id="newCampaignButtonTop" class="button button-ghost" type="button">+ Campaign</button>
-                <button id="clearProspectsButton" class="button button-ghost destructive-action" type="button" hidden>Clear prospects</button>
+                <button id="clearProspectsButton" class="button button-ghost destructive-action" type="button" hidden>Clear approvals</button>
                 <button id="sendAllButton" class="button button-outline" type="button">Send approved</button>
                 <button id="processButton" class="button button-primary" type="button">Draft qualified</button>
               </div>
@@ -478,7 +484,7 @@
               <table>
                 <thead><tr>
                   <th class="check-cell"><input id="selectAll" type="checkbox" aria-label="Select all visible prospects" /></th>
-                  <th>Person</th><th>Company / role</th><th>Vela fit</th><th>Email</th><th>Stage</th><th>Draft</th><th>Updated</th><th><span class="sr-only">Actions</span></th>
+                  <th>Person</th><th>Company / role</th><th>Vela fit</th><th>Email</th><th>Stage</th><th>Draft</th><th><span class="sr-only">Actions</span></th>
                 </tr></thead>
                 <tbody id="queueBody"></tbody>
               </table>
@@ -511,12 +517,17 @@
     <aside id="reviewDrawer" class="review-drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" aria-hidden="true" inert>
       <header class="drawer-header">
         <div><p id="drawerReviewContext">Draft review</p><h2 id="drawerTitle">Review prospect</h2></div>
-        <div class="drawer-shortcuts" aria-label="Keyboard shortcuts"><span><kbd>⌘</kbd><kbd>↵</kbd> Send</span><span><kbd>←</kbd><kbd>→</kbd> Browse</span><span><kbd>J</kbd> Next</span><span><kbd>K</kbd> Skip</span></div>
+        <div class="drawer-shortcuts" aria-label="Keyboard shortcuts"><span><kbd>⌘</kbd><kbd>↵</kbd> Send</span><span><kbd>⌘</kbd><kbd>⌫</kbd> Delete</span><span><kbd>←</kbd><kbd>→</kbd> Browse</span></div>
         <button id="closeDrawerButton" class="icon-button" type="button" aria-label="Close review panel"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg></button>
       </header>
       <div class="drawer-content">
         <section class="drawer-profile-column">
         <div class="prospect-summary"><span id="drawerAvatar" class="person-avatar">VG</span><div><a id="drawerName" class="prospect-name-link" href="#" target="_blank" rel="noreferrer">Prospect</a><p id="drawerHeadline"></p><p id="drawerLocation" class="prospect-location"></p><a id="drawerLinkedIn" class="linkedin-profile-button" href="#" target="_blank" rel="noreferrer">View on LinkedIn ↗</a></div></div>
+        <section id="drawerFitSection" class="drawer-section fit-review" aria-labelledby="drawerFitTitle">
+          <div class="drawer-section-head"><div><p class="section-kicker">Vela's fit check</p><h3 id="drawerFitTitle">What Vela thinks</h3></div><span id="drawerFitPill" class="fit-pill fit-pending">Not checked</span></div>
+          <p id="drawerFitReason" class="drawer-detail-copy"></p>
+          <div id="drawerFitEvidence" class="fit-evidence"></div>
+        </section>
         <details id="drawerEmailSection" class="drawer-section drawer-collapsible email-review" aria-labelledby="emailReviewTitle">
           <summary><span><small>Email</small><strong id="emailReviewTitle">Recipient &amp; verification</strong></span><span id="drawerEmailStatus" class="verification-pill">Found</span></summary>
           <div class="drawer-collapsible-body">
@@ -545,7 +556,6 @@
         </section>
       </div>
       <footer class="drawer-footer">
-        <button id="skipReviewButton" class="button button-ghost" type="button">Skip <kbd>K</kbd></button>
         <button id="markSentButton" class="button button-ghost" type="button">Mark email sent</button>
         <button id="saveReviewButton" class="button button-outline" type="button">Save changes</button>
         <button id="approveDraftButton" class="button button-primary" type="button">Send <kbd>⌘</kbd><kbd>↵</kbd></button>

@@ -21,8 +21,10 @@ import {
 import {
   QUEUE_STATUS,
   QUEUE_STORAGE_KEY,
+  markProspectsSent,
   normalizeLinkedInUrl,
   parseBulkProspects,
+  prospectDisplayName,
   queueStats,
   upsertProspects,
   withActivity,
@@ -62,11 +64,11 @@ import {
   buildDailySendSeries,
   collectSentEvents,
   mailboxCapacityUsage,
+  mailboxHealthRows,
   mailboxSentEvents,
   mergeDeliveryRecords,
+  summarizeMailboxHealth,
   summarizeDailySends,
-  teamMemberKey,
-  teamPerformance,
 } from "./lib/analytics.js";
 import { buildDeliveryFollowUps } from "./lib/follow-up.js";
 import {
@@ -110,6 +112,8 @@ import {
   normalizeResearchAutomation,
   normalizeResearchMessage,
   normalizeResearchThread,
+  nextReviewProspectId,
+  pendingReviewDrafts,
   researchApprovalStack,
   researchFunnel,
   researchBatchPagination,
@@ -131,19 +135,18 @@ const elements = Object.fromEntries([
   "openImportButton", "openImportButtonTop", "importDialog", "bulkInput", "importButton", "importHint",
   "spreadsheetImportPanel", "linkedinImportPanel", "importFileInput", "dropZone", "importFileName", "mappingStage", "mappingGrid", "mappingSummary", "mappingIssues", "replaceImportFile",
   "processButton", "sendAllButton", "clearProspectsButton", "queueBody", "emptyState", "totalStat", "readyStat", "draftedStat",
-  "sentStat", "attentionStat", "totalDelta", "progressBar", "progressText", "toast", "navResearch", "navReview", "navTracking",
+  "sentStat", "attentionStat", "totalDelta", "progressBar", "progressText", "toast", "navReview", "navTracking",
   "navScheduled", "heroEyebrow", "pageTitle", "pageSubtitle", "workspaceCrumb", "agentPanel", "metricsPanel", "analyticsPanel", "overviewPanel", "pipelineBar",
-  "engagementReplies", "analyticsSentToday", "analyticsDelivered", "analyticsBounced", "analyticsHealthScore", "analyticsHealthLabel", "analyticsHealthSummary", "analyticsRiskCount", "analyticsPolicyBlocks", "analyticsHardBounces", "analyticsSoftBounces", "analyticsSendFailures", "analyticsSuppressed", "analyticsInboxSyncButton", "analyticsInboxState",
-  "mailboxCapacityTotal", "mailboxCapacityList", "analyticsRange", "analyticsMemberFilter", "analyticsScopeTitle", "analyticsScopeDetail", "analyticsActiveSenders", "analyticsTeamBody", "analyticsTeamDescription", "analyticsActivityList",
+  "analyticsMailboxCount", "analyticsMailboxCoverage", "analyticsSentMessages", "analyticsSentThreads", "analyticsRepliedThreads", "analyticsReplyRate", "analyticsBounceSignals", "analyticsPolicySummary", "analyticsMailboxStatus", "analyticsMailboxBody", "analyticsRiskCount", "analyticsPolicyBlocks", "analyticsHardBounces", "analyticsSoftBounces", "analyticsSyncIssues", "analyticsInboxSyncButton", "analyticsInboxState", "analyticsRange", "analyticsScopeDetail", "analyticsActivityList",
   "dashboardMailboxCapacityTotal", "dashboardMailboxCapacityList", "dashboardSentToday", "dashboardSentTodayDetail", "dashboardReplies", "dashboardSendRate", "dashboardSendRateDetail", "dashboardProspectsContacted", "dashboardSendChart", "dashboardSenderList", "dashboardMessageList",
-  "operationsPanel", "operationsKicker", "operationsTitle", "operationsDescription", "operationsPrimaryAction", "scheduledWorkspace", "scheduledSearch", "scheduledKindFilter", "scheduledAllCount", "scheduledInitialCount", "scheduledFollowUpCount", "deliveryList", "historyWorkspace", "historyTotal", "historyPeople", "historyTeammates", "historyDelivered", "historySearch", "historySenderFilter", "historyResultCount", "historyBody", "historyEmpty", "historyPagination", "queueSection",
+  "operationsPanel", "operationsKicker", "operationsTitle", "operationsDescription", "operationsPrimaryAction", "scheduledWorkspace", "scheduledSearch", "scheduledKindFilter", "scheduledAllCount", "scheduledInitialCount", "scheduledFollowUpCount", "scheduledQueuedMetric", "scheduledPeopleMetric", "scheduledTodayMetric", "scheduledMailboxMetric", "scheduledSenderFilter", "scheduledTimeFilter", "scheduledBulkBar", "scheduledSelectedCount", "scheduledClearSelection", "scheduledStopSelected", "scheduledSelectPage", "scheduledResultCount", "scheduledPagination", "deliveryList", "historyWorkspace", "historyTotal", "historyPeople", "historyTeammates", "historyDelivered", "historySearch", "historySenderFilter", "historyResultCount", "historyBody", "historyEmpty", "historyPagination", "queueSection",
   "contactsPanel", "contactsSearch", "contactsStatusFilter", "contactsImportButton", "contactsBody", "contactsEmpty", "contactsCount", "contactsPagination", "navContacts", "contactsTotalMetric", "contactsReachedMetric", "contactsRepliedMetric", "contactsBouncedMetric", "contactsInboxSyncButton", "contactsInboxState",
   "queueHeading", "queueDescription", "tableSearch", "statusFilterButton", "resultCount", "nextResearchBatchButton", "selectAll", "bulkBar",
   "selectedCount", "bulkResearchButton", "bulkApproveButton", "bulkSendButton", "clearSelectionButton",
   "collapseSidebar", "drawerBackdrop", "reviewDrawer", "closeDrawerButton", "drawerAvatar", "drawerName", "drawerHeadline",
   "drawerLocation", "drawerLinkedIn", "drawerEmail", "drawerSubject", "drawerBody", "saveReviewButton", "approveDraftButton", "previousReviewButton", "nextReviewButton", "drawerPosition",
   "drawerEmailSection", "drawerProfileSection",
-  "drawerEmailChoices", "drawerEmailSource", "drawerEmailStatus", "copyDrawerEmail", "retryDrawerLookup", "drawerExperienceCount", "drawerExperienceList", "drawerActivity", "markSentButton", "skipReviewButton", "drawerReviewContext", "drawerRecipient", "drawerSender",
+  "drawerEmailChoices", "drawerEmailSource", "drawerEmailStatus", "copyDrawerEmail", "retryDrawerLookup", "drawerExperienceCount", "drawerExperienceList", "drawerActivity", "drawerFitSection", "drawerFitPill", "drawerFitReason", "drawerFitEvidence", "markSentButton", "drawerReviewContext", "drawerRecipient", "drawerSender",
   "agentActivity", "agentActivityTitle", "agentActivityDetail", "campaignNav", "newCampaignButton", "newCampaignButtonTop",
   "campaignActions", "campaignActionsButton", "campaignActionsMenu", "editCampaignButton", "duplicateCampaignButton", "deleteCampaignButton",
   "campaignDialog", "campaignForm", "campaignName", "campaignDescription", "campaignDialogKicker", "campaignDialogTitle", "campaignDialogDescription", "campaignSubmitButton", "closeCampaignDialog", "cancelCampaignButton",
@@ -253,7 +256,7 @@ const DEMO_TEAM_MEMBERS = [
   { id: "preview-tony", email: "tony@velaenergy.ai", full_name: "Tony Li", created_at: "2026-06-21T16:00:00.000Z" },
 ];
 
-const state = { queue: [], campaigns: [], scheduledJobs: [], deliveryLog: [], googleAccounts: [], approvedSenders: [], selectedGoogleAccountId: "", teamMembers: [], currentTeamUser: null, teamActivity: [], gtmMessages: [], mailboxSyncStates: [], backendStatus: "signed-out", activeCampaignId: "", editingCampaignId: "", settings: { ...DEFAULT_SETTINGS }, searchPlan: null, pendingResearchPlan: null, researchConversation: [], researchThread: null, researchThreads: [], researchMessagesByThread: {}, researchRun: null, researchRunHistory: [], researchAutomations: [], activeResearchAutomationId: "", researchTimer: null, busy: false, searching: false, toastTimer: null, workspacePersistTimer: null, teamSyncTimer: null, view: "overview", analyticsDays: 7, analyticsMember: "all", historyQuery: "", historySender: "all", historyPage: 1, scheduledQuery: "", scheduledKind: "all", query: "", contactQuery: "", contactStatus: "all", contactPage: 1, contactsInboxChecking: false, selected: new Set(), activeProspectId: null, keyboardProspectId: null, drawerReturnFocus: null, reviewRunId: "", attentionOnly: false, sidebarCollapsed: false, importSource: "spreadsheet", importData: null, pendingSendIds: [] };
+const state = { queue: [], campaigns: [], scheduledJobs: [], deliveryLog: [], googleAccounts: [], approvedSenders: [], selectedGoogleAccountId: "", teamMembers: [], currentTeamUser: null, teamActivity: [], gtmMessages: [], mailboxSyncStates: [], backendStatus: "signed-out", teamProspectSyncRevision: 0, teamProspectsMutating: false, activeCampaignId: "", editingCampaignId: "", settings: { ...DEFAULT_SETTINGS }, searchPlan: null, pendingResearchPlan: null, researchConversation: [], researchThread: null, researchThreads: [], researchMessagesByThread: {}, researchRun: null, researchRunHistory: [], researchAutomations: [], activeResearchAutomationId: "", researchTimer: null, busy: false, searching: false, toastTimer: null, workspacePersistTimer: null, teamSyncTimer: null, view: "overview", analyticsDays: 7, analyticsMember: "all", historyQuery: "", historySender: "all", historyPage: 1, scheduledQuery: "", scheduledKind: "all", scheduledSender: "all", scheduledTime: "all", scheduledPage: 1, scheduledSelected: new Set(), scheduledExpanded: new Set(), scheduledSearchTimer: null, scheduledGroupCache: null, scheduledIndexCache: null, query: "", contactQuery: "", contactStatus: "all", contactPage: 1, contactsInboxChecking: false, selected: new Set(), activeProspectId: null, keyboardProspectId: null, drawerReturnFocus: null, reviewRunId: "", reviewDeletePending: false, attentionOnly: false, sidebarCollapsed: false, importSource: "spreadsheet", importData: null, pendingSendIds: [] };
 
 const storage = {
   async get(keys) {
@@ -285,6 +288,8 @@ function workspaceStateSnapshot() {
     analyticsMember: state.analyticsMember,
     scheduledQuery: state.scheduledQuery,
     scheduledKind: state.scheduledKind,
+    scheduledSender: state.scheduledSender,
+    scheduledTime: state.scheduledTime,
     searchPlan: state.searchPlan,
   };
 }
@@ -381,9 +386,44 @@ function updateAgentActivity(step, title, detail = "Vela is using connected sour
   }
 }
 
-async function persistQueue() {
+async function persistQueue({ waitForTeam = false, prospects = [] } = {}) {
   await storage.set({ [QUEUE_STORAGE_KEY]: state.queue });
-  if (isExtension) chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_PROSPECTS_SYNC", prospects: state.queue }).catch(() => {});
+  const changed = Array.isArray(prospects) ? prospects.filter(Boolean) : [];
+  if (!isExtension || !changed.length) return null;
+  const sync = chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_PROSPECTS_SYNC", prospects: changed });
+  if (!waitForTeam) { sync.catch(() => {}); return null; }
+  const response = await sync;
+  if (!response?.ok) throw new Error(response?.error || "Sent locally, but the shared approval queue could not be updated.");
+  return response.data;
+}
+
+function queueProspectsById(ids = []) {
+  const wanted = new Set(ids);
+  return state.queue.filter((prospect) => wanted.has(prospect.id));
+}
+
+async function deleteQueueProspects(prospects = []) {
+  const deleting = Array.isArray(prospects) ? prospects.filter(Boolean) : [];
+  if (!deleting.length) return 0;
+  const ids = new Set(deleting.map((prospect) => prospect.id));
+  state.teamProspectsMutating = true;
+  state.teamProspectSyncRevision += 1;
+  try {
+    if (isExtension) {
+      const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_PROSPECTS_DELETE", prospects: deleting });
+      if (!response?.ok) throw new Error(response?.error || "Could not delete the shared approvals.");
+    }
+    state.queue = state.queue.filter((prospect) => !ids.has(prospect.id));
+    for (const prospect of deleting) {
+      state.campaigns = removeProspectFromAllCampaigns(state.campaigns, prospect.url || prospect.email || prospect.id);
+      state.selected.delete(prospect.id);
+    }
+    await storage.set({ [QUEUE_STORAGE_KEY]: state.queue, [CAMPAIGNS_STORAGE_KEY]: state.campaigns });
+    return deleting.length;
+  } finally {
+    state.teamProspectSyncRevision += 1;
+    state.teamProspectsMutating = false;
+  }
 }
 
 async function persistCampaigns() {
@@ -441,16 +481,14 @@ function renderCurrentUser() {
 
 function deliveryOperator(record = {}) {
   const hasOperator = Boolean(record.operatorId || record.operatorEmail || record.operatorName);
-  const senderEmail = String(record.senderEmail || record.accountEmail || "").trim().toLowerCase();
   const member = state.teamMembers.find((candidate) =>
     candidate.id === record.operatorId
     || String(candidate.email || "").toLowerCase() === String(record.operatorEmail || "").toLowerCase()
-    || (record.operatorName && candidate.full_name === record.operatorName)
-    || String(candidate.email || "").toLowerCase() === senderEmail) || null;
+    || (record.operatorName && candidate.full_name === record.operatorName)) || null;
   return {
-    id: record.operatorId || member?.id || (senderEmail ? `mailbox:${senderEmail}` : ""),
-    name: record.operatorName || member?.full_name || record.operatorEmail || member?.email || senderEmail || "Unknown",
-    email: record.operatorEmail || member?.email || senderEmail,
+    id: record.operatorId || member?.id || "unattributed",
+    name: record.operatorName || member?.full_name || record.operatorEmail || member?.email || "Unattributed history",
+    email: record.operatorEmail || member?.email || "",
     avatarUrl: hasOperator ? record.operatorAvatarUrl || member?.avatar_url || "" : member?.avatar_url || "",
   };
 }
@@ -930,7 +968,7 @@ function prospectMatchesView(prospect) {
   if (state.view === "research" && prospect.researchRunId !== state.researchRun?.id) return false;
   if (state.view === "research" && prospect.targetFit?.verdict && prospect.targetFit.verdict !== "strong") return false;
   if (state.view === "review" && (!belongsToResearch(prospect) || ![QUEUE_STATUS.READY, QUEUE_STATUS.DRAFTED].includes(prospect.status))) return false;
-  if (state.attentionOnly && ![QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(prospect.status)) return false;
+  if (state.view !== "review" && state.attentionOnly && ![QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(prospect.status)) return false;
   if (!state.query) return true;
   const details = companyAndRole(prospect);
   return [prospect.name, prospect.email, prospect.headline, prospect.location, details.company, details.role, prospect.subject].join(" ").toLowerCase().includes(state.query.toLowerCase());
@@ -1156,14 +1194,16 @@ async function refreshSharedActivity({ quiet = false } = {}) {
 }
 
 async function refreshTeamProspects({ quiet = false } = {}) {
-  if (!isExtension) return;
+  if (!isExtension || state.teamProspectsMutating) return;
+  const revision = state.teamProspectSyncRevision;
   try {
     const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_PROSPECTS_READ" });
     if (!response?.ok) throw new Error(response?.error || "Could not read shared prospects.");
+    if (state.teamProspectsMutating || revision !== state.teamProspectSyncRevision) return;
     const shared = Array.isArray(response.data) ? response.data : [];
     if (shared.length) {
       state.queue = upsertProspects(state.queue, shared);
-      await persistQueue();
+      await storage.set({ [QUEUE_STORAGE_KEY]: state.queue });
       renderQueue();
     }
   } catch (error) {
@@ -1234,13 +1274,13 @@ function deliveryStatusLabel(status = "") {
   })[status] || "Delivery";
 }
 
-async function cancelScheduledDeliveries(ids = [], button, { sequence = false } = {}) {
+async function cancelScheduledDeliveries(ids = [], button, { sequence = false, bulk = false } = {}) {
   const queuedIds = [...new Set(ids.filter(Boolean))];
   if (!queuedIds.length) return;
-  const idleLabel = button?.textContent || (sequence ? "Stop sequence" : "Cancel");
+  const idleLabel = button?.textContent || (bulk ? "Stop selected" : sequence ? "Stop sequence" : "Cancel");
   if (button) {
     button.disabled = true;
-    button.textContent = sequence ? "Stopping…" : "Cancelling…";
+    button.textContent = sequence || bulk ? "Stopping…" : "Cancelling…";
   }
   try {
     if (isExtension) {
@@ -1259,7 +1299,9 @@ async function cancelScheduledDeliveries(ids = [], button, { sequence = false } 
       state.deliveryLog = normalizeDeliveryLog(state.deliveryLog.map((item) => idSet.has(item.id) ? { ...item, ...jobs.get(item.id), status: DELIVERY_STATUS.CANCELLED, completedAt, updatedAt: completedAt } : item));
     }
     renderQueue();
-    showToast(sequence ? `${queuedIds.length} automatic follow-up${queuedIds.length === 1 ? "" : "s"} stopped. Nothing was delivered.` : "Scheduled send cancelled. Nothing was delivered.");
+    showToast(bulk
+      ? `${queuedIds.length} scheduled email${queuedIds.length === 1 ? "" : "s"} stopped. Nothing was delivered.`
+      : sequence ? `${queuedIds.length} automatic follow-up${queuedIds.length === 1 ? "" : "s"} stopped. Nothing was delivered.` : "Scheduled send cancelled. Nothing was delivered.");
   } catch (error) {
     if (button?.isConnected) {
       button.disabled = false;
@@ -1513,131 +1555,38 @@ function renderDailyChart(sentSeries, replySeries, target = elements.dailySendCh
 }
 
 function renderAnalytics() {
-  const deliveryLog = unifiedDeliveryLog();
-  const events = collectSentEvents({ deliveryLog, queue: state.queue });
   const cutoff = new Date();
   cutoff.setHours(0, 0, 0, 0);
   cutoff.setDate(cutoff.getDate() - (state.analyticsDays - 1));
-  const rangedEvents = events.filter((event) => Date.parse(event.at) >= cutoff.getTime());
-  const replyEvents = state.queue.map((prospect) => {
-    const event = latestProspectEvent(prospect, REPLY_ACTIVITY_TYPES);
-    return { recipient: String(prospect.email || "").toLowerCase(), at: prospect.replyReceivedAt || event?.at || "" };
-  }).filter((event) => event.at);
-  const replyRecipients = replyEvents.map((event) => event.recipient).filter(Boolean);
-  const latestRangedSendByRecipient = new Map();
-  for (const event of rangedEvents) {
-    const recipient = String(event.recipient || "").toLowerCase();
-    if (recipient && !latestRangedSendByRecipient.has(recipient)) latestRangedSendByRecipient.set(recipient, event);
-  }
-  const replyOwnerByRecipient = new Map([...latestRangedSendByRecipient].map(([recipient, event]) => [recipient, teamMemberKey(event)]));
-  const teamByActivity = teamPerformance(rangedEvents, { replyRecipients, replyOwnerByRecipient });
-  const knownKeys = new Set(teamByActivity.map((member) => member.key));
-  const teamRows = [...teamByActivity];
-  for (const teammate of state.teamMembers) {
-    const key = String(teammate.id || teammate.email || "").toLowerCase();
-    if (!key || knownKeys.has(key)) continue;
-    teamRows.push({
-      key,
-      name: teammate.full_name || teammate.email || "Vela teammate",
-      operatorId: teammate.id || "",
-      operatorEmail: teammate.email || "",
-      avatarUrl: teammate.avatar_url || "",
-      senderEmail: "",
-      senders: [],
-      sent: 0,
-      recipients: 0,
-      replies: 0,
-      replyRate: 0,
-      lastSentAt: "",
-    });
-  }
-  teamRows.sort((a, b) => b.sent - a.sent || a.name.localeCompare(b.name));
-  if (state.analyticsMember !== "all" && !teamRows.some((member) => member.key === state.analyticsMember)) state.analyticsMember = "all";
-  const selectedMember = teamRows.find((member) => member.key === state.analyticsMember) || null;
-  const visibleEvents = selectedMember ? rangedEvents.filter((event) => teamMemberKey(event) === selectedMember.key) : rangedEvents;
-  const hasCanonicalArchive = state.mailboxSyncStates.some((mailbox) => mailbox.sync_status === "complete");
-  const canonicalInPeriod = state.gtmMessages.filter((message) => Date.parse(message.occurredAt) >= cutoff.getTime());
-  const canonicalInScope = canonicalInPeriod.filter((message) => {
-    if (!selectedMember) return true;
-    const mailbox = String(message.accountEmail || (message.direction === "outgoing" ? message.senderEmail : "")).toLowerCase();
-    return selectedMember.senders.map((sender) => String(sender).toLowerCase()).includes(mailbox);
+  const mailboxes = mailboxHealthRows({
+    accounts: state.googleAccounts,
+    messages: state.gtmMessages,
+    syncStates: state.mailboxSyncStates,
+    fromDate: cutoff.toISOString(),
   });
-  const canonicalSent = canonicalInScope.filter((message) => message.direction === "outgoing" && ["initial", "follow_up"].includes(message.messageKind));
-  const canonicalReplies = canonicalInScope.filter((message) => message.messageKind === "reply");
-  const latestSendByRecipient = new Map();
-  for (const event of events) {
-    const recipient = String(event.recipient || "").toLowerCase();
-    if (recipient && !latestSendByRecipient.has(recipient)) latestSendByRecipient.set(recipient, event);
-  }
-  const rangedReplies = replyEvents.filter((event) => Date.parse(event.at) >= cutoff.getTime() && (!selectedMember || teamMemberKey(latestSendByRecipient.get(event.recipient) || {}) === selectedMember.key));
-  const scopeName = selectedMember?.name || "All team";
-  const usage = mailboxCapacityUsage({ deliveryLog, accounts: state.googleAccounts });
-  const recordAt = (record) => record.completedAt || record.updatedAt || record.scheduledAt || record.createdAt || "";
-  const recordOwnerKey = (record) => {
-    if (record.operatorId || record.operatorEmail || record.operatorName) return teamMemberKey(record);
-    const mailbox = String(record.accountEmail || "").toLowerCase();
-    const mailboxOwner = teamRows.find((member) => member.senders.map((sender) => String(sender).toLowerCase()).includes(mailbox));
-    if (mailboxOwner) return mailboxOwner.key;
-    const recipient = String(record.recipients?.[0] || "").toLowerCase();
-    return teamMemberKey(latestSendByRecipient.get(recipient) || {});
-  };
-  const inPeriod = (record) => Date.parse(recordAt(record)) >= cutoff.getTime();
-  const inScope = (record) => !selectedMember || recordOwnerKey(record) === selectedMember.key;
-  const ledgerBounceRecords = deliveryLog.filter((record) => record.status === DELIVERY_STATUS.BOUNCED && inPeriod(record));
-  const canonicalBounceRecords = canonicalInPeriod.filter((message) => message.messageKind === "bounce").map((message) => ({
-    id: message.gmailMessageId,
-    status: DELIVERY_STATUS.BOUNCED,
-    accountEmail: message.accountEmail,
-    senderEmail: message.accountEmail,
-    recipients: message.recipientEmails,
-    subject: message.subject,
-    bounceReason: message.bounceReason,
-    bounceType: message.bounceType,
-    error: message.snippet,
-    completedAt: message.occurredAt,
-  }));
-  const bounceRecords = hasCanonicalArchive ? canonicalBounceRecords : ledgerBounceRecords;
-  const visibleBounces = bounceRecords.filter(inScope);
-  const failedRecords = deliveryLog.filter((record) => record.status === DELIVERY_STATUS.FAILED && inPeriod(record) && inScope(record));
-  const bouncedRecipients = new Set(visibleBounces.flatMap((record) => record.recipients || []).map((recipient) => String(recipient).toLowerCase()).filter(Boolean));
-  const sentCount = hasCanonicalArchive ? canonicalSent.length : visibleEvents.length;
-  const replyCount = hasCanonicalArchive ? canonicalReplies.length : rangedReplies.length;
-  const delivered = Math.max(0, sentCount - bouncedRecipients.size);
-  const bounceRate = sentCount ? Math.round((bouncedRecipients.size / sentCount) * 1000) / 10 : 0;
-  const deliveryRate = sentCount ? Math.max(0, Math.round((delivered / sentCount) * 1000) / 10) : null;
-  const policyBlocks = visibleBounces.filter((record) => record.bounceReason === "policy_blocked").length;
-  const hardBounces = visibleBounces.filter((record) => record.bounceType === "hard").length;
-  const softBounces = visibleBounces.filter((record) => record.bounceType === "soft").length;
+  const summary = summarizeMailboxHealth(mailboxes);
 
-  elements.analyticsScopeTitle.textContent = scopeName;
-  elements.analyticsScopeDetail.textContent = `${scopeName} · last ${state.analyticsDays} days`;
-  elements.analyticsSentToday.textContent = sentCount.toLocaleString();
-  elements.analyticsDelivered.textContent = delivered.toLocaleString();
-  elements.analyticsBounced.textContent = bouncedRecipients.size.toLocaleString();
-  elements.engagementReplies.textContent = replyCount.toLocaleString();
-  elements.analyticsHealthScore.textContent = deliveryRate === null ? "—" : `${deliveryRate}%`;
-  elements.analyticsPolicyBlocks.textContent = policyBlocks.toLocaleString();
-  elements.analyticsHardBounces.textContent = hardBounces.toLocaleString();
-  elements.analyticsSoftBounces.textContent = softBounces.toLocaleString();
-  elements.analyticsSendFailures.textContent = failedRecords.length.toLocaleString();
-  elements.analyticsSuppressed.textContent = bouncedRecipients.size.toLocaleString();
-  const riskSignals = visibleBounces.length + failedRecords.length;
-  elements.analyticsRiskCount.textContent = `${riskSignals.toLocaleString()} signal${riskSignals === 1 ? "" : "s"}`;
-  elements.analyticsActiveSenders.textContent = `${teamByActivity.filter((member) => member.sent).length} active`;
-  const healthTone = !sentCount ? "neutral" : policyBlocks || bounceRate > 5 ? "danger" : bounceRate > 2 ? "watch" : "healthy";
-  const healthLabel = healthTone === "danger" ? "Needs attention" : healthTone === "watch" ? "Watch closely" : healthTone === "healthy" ? "Healthy" : "No baseline";
-  elements.analyticsPanel.dataset.health = healthTone;
-  elements.analyticsHealthLabel.textContent = healthLabel;
-  elements.analyticsHealthLabel.className = `analytics-health-state is-${healthTone}`;
-  elements.analyticsHealthSummary.textContent = !sentCount
-    ? "No accepted sends in this window. Send activity will establish the baseline."
-    : policyBlocks
-      ? `${policyBlocks} recipient policy block${policyBlocks === 1 ? "" : "s"} detected. Review content and sender reputation before increasing volume.`
-      : bounceRate > 2
-        ? `${bounceRate}% of accepted sends bounced, above the 2% deliverability watch line.`
-        : bouncedRecipients.size
-          ? `${delivered.toLocaleString()} delivered with a ${bounceRate}% bounce rate—inside the watch line.`
-          : `No bounces detected across ${sentCount.toLocaleString()} accepted send${sentCount === 1 ? "" : "s"}.`;
+  elements.analyticsScopeDetail.textContent = summary.connectedMailboxes
+    ? `Watching ${summary.connectedMailboxes} connected sending inbox${summary.connectedMailboxes === 1 ? "" : "es"} · last ${state.analyticsDays} days`
+    : "Connect a Gmail sender in Settings to begin watching mailbox outcomes.";
+  elements.analyticsMailboxCount.textContent = summary.connectedMailboxes.toLocaleString();
+  elements.analyticsMailboxCoverage.textContent = summary.connectedMailboxes
+    ? `${summary.currentMailboxes} fully synced · ${summary.syncIssues} need attention`
+    : "No mailboxes connected";
+  elements.analyticsSentMessages.textContent = summary.sentMessages.toLocaleString();
+  elements.analyticsSentThreads.textContent = `${summary.sentThreads.toLocaleString()} conversation${summary.sentThreads === 1 ? "" : "s"}`;
+  elements.analyticsRepliedThreads.textContent = summary.repliedThreads.toLocaleString();
+  elements.analyticsReplyRate.textContent = `${summary.replyRate}% of sent conversations`;
+  elements.analyticsBounceSignals.textContent = summary.bounceSignals.toLocaleString();
+  elements.analyticsPolicySummary.textContent = summary.policyBlocks
+    ? `${summary.policyBlocks.toLocaleString()} policy reject${summary.policyBlocks === 1 ? "" : "s"}`
+    : "No policy rejects";
+  elements.analyticsMailboxStatus.textContent = `${summary.currentMailboxes} current`;
+  elements.analyticsRiskCount.textContent = `${summary.bounceSignals.toLocaleString()} signal${summary.bounceSignals === 1 ? "" : "s"}`;
+  elements.analyticsPolicyBlocks.textContent = summary.policyBlocks.toLocaleString();
+  elements.analyticsHardBounces.textContent = summary.hardBounces.toLocaleString();
+  elements.analyticsSoftBounces.textContent = summary.softBounces.toLocaleString();
+  elements.analyticsSyncIssues.textContent = summary.syncIssues.toLocaleString();
 
   for (const button of elements.analyticsRange.querySelectorAll("[data-days]")) {
     const active = Number(button.dataset.days) === state.analyticsDays;
@@ -1645,110 +1594,72 @@ function renderAnalytics() {
     button.setAttribute("aria-pressed", String(active));
   }
 
-  const filterFragment = document.createDocumentFragment();
-  const addFilter = (key, name, count, initials = "") => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = key === state.analyticsMember ? "is-active" : "";
-    button.dataset.analyticsMember = key;
-    button.setAttribute("aria-pressed", String(key === state.analyticsMember));
-    if (initials) appendText(button, "span", initials, "analytics-filter-avatar");
-    appendText(button, "strong", name);
-    appendText(button, "small", count.toLocaleString());
-    button.addEventListener("click", () => {
-      state.analyticsMember = key;
-      renderAnalytics();
-      persistWorkspaceStateSoon();
-    });
-    filterFragment.append(button);
+  const mailboxFragment = document.createDocumentFragment();
+  const coverageCopy = {
+    complete: ["Complete", "Every sent thread"],
+    syncing: ["Syncing", "Scanning Gmail now"],
+    error: ["Reconnect", "Google access needed"],
+    needs_sync: ["Not complete", "Run the first sync"],
   };
-  addFilter("all", "All team", hasCanonicalArchive ? canonicalInPeriod.filter((message) => message.direction === "outgoing").length : rangedEvents.length);
-  for (const member of teamRows) addFilter(member.key, member.name, member.sent, initialsFor(member.name));
-  elements.analyticsMemberFilter.replaceChildren(filterFragment);
+  for (const mailbox of mailboxes) {
+    const row = document.createElement("tr");
+    row.className = `mailbox-ledger-row is-${mailbox.coverage}`;
+    const identityCell = document.createElement("td");
+    const identity = appendText(identityCell, "div", "", "mailbox-ledger-identity");
+    appendText(identity, "span", initialsFor(mailbox.email), "mailbox-ledger-avatar");
+    const identityCopy = appendText(identity, "div", "", "mailbox-ledger-copy");
+    appendText(identityCopy, "strong", mailbox.email);
+    appendText(identityCopy, "small", mailbox.lastActivityAt ? `Last signal ${relativeTime(mailbox.lastActivityAt)}` : "No activity in this window");
+    row.append(identityCell);
 
-  elements.analyticsTeamDescription.textContent = `Operators, mailboxes, and delivery outcomes from the last ${state.analyticsDays} days.`;
-  const teamFragment = document.createDocumentFragment();
-  for (const member of teamRows) {
-    const row = document.createElement("tr");
-    row.className = member.key === state.analyticsMember ? "is-selected" : "";
-    row.tabIndex = 0;
-    row.setAttribute("role", "button");
-    row.setAttribute("aria-label", `Filter analytics to ${member.name}`);
-    const selectMember = () => {
-      state.analyticsMember = member.key;
-      renderAnalytics();
-      persistWorkspaceStateSoon();
-    };
-    row.addEventListener("click", selectMember);
-    row.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); selectMember(); } });
-    const person = document.createElement("td");
-    const identity = appendText(person, "div", "", "analytics-member");
-    appendText(identity, "span", initialsFor(member.name), "settings-member-avatar");
-    const personCopy = appendText(identity, "div", "", "analytics-member-copy");
-    appendText(personCopy, "strong", member.name);
-    appendText(personCopy, "small", member.operatorEmail || `${member.recipients.toLocaleString()} unique recipient${member.recipients === 1 ? "" : "s"}`);
-    row.append(person);
-    const mailboxCell = document.createElement("td");
-    const mailboxList = appendText(mailboxCell, "div", "", "analytics-mailbox-list");
-    if (member.senders.length) {
-      for (const sender of member.senders.slice(0, 2)) appendText(mailboxList, "span", sender);
-      if (member.senders.length > 2) appendText(mailboxList, "small", `+${member.senders.length - 2} more`);
-    } else appendText(mailboxList, "span", "No sending mailbox", "is-empty");
-    row.append(mailboxCell);
-    appendText(row, "td", member.sent.toLocaleString(), "analytics-number-cell");
-    const memberBounced = new Set(bounceRecords.filter((record) => recordOwnerKey(record) === member.key).flatMap((record) => record.recipients || []).map((recipient) => String(recipient).toLowerCase())).size;
-    appendText(row, "td", Math.max(0, member.sent - memberBounced).toLocaleString(), "analytics-delivered-cell");
-    appendText(row, "td", memberBounced.toLocaleString(), memberBounced ? "analytics-bounce-cell has-bounces" : "analytics-bounce-cell");
-    const rateCell = appendText(row, "td", `${member.replyRate}%`, `analytics-rate-cell${member.replyRate ? " has-replies" : ""}`);
-    rateCell.dataset.rate = String(member.replyRate);
-    appendText(row, "td", member.lastSentAt ? relativeTime(member.lastSentAt) : "—");
-    teamFragment.append(row);
+    const coverageCell = document.createElement("td");
+    const coverage = appendText(coverageCell, "div", "", "mailbox-coverage");
+    const [coverageLabel, coverageDetail] = coverageCopy[mailbox.coverage] || coverageCopy.needs_sync;
+    appendText(coverage, "strong", coverageLabel, `mailbox-coverage-pill is-${mailbox.coverage}`);
+    appendText(coverage, "small", mailbox.coverage === "error" && mailbox.lastError ? mailbox.lastError : coverageDetail);
+    row.append(coverageCell);
+    appendText(row, "td", mailbox.sentMessages.toLocaleString(), "mailbox-ledger-number");
+    appendText(row, "td", mailbox.sentThreads.toLocaleString(), "mailbox-ledger-number");
+    const repliedCell = document.createElement("td");
+    appendText(repliedCell, "strong", mailbox.repliedThreads.toLocaleString(), "mailbox-ledger-replies");
+    appendText(repliedCell, "small", `${mailbox.replyRate}% rate`);
+    row.append(repliedCell);
+    appendText(row, "td", mailbox.bounceSignals.toLocaleString(), mailbox.bounceSignals ? "mailbox-ledger-bounces has-signals" : "mailbox-ledger-bounces");
+    appendText(row, "td", mailbox.lastSyncAt ? relativeTime(mailbox.lastSyncAt) : "Never", "mailbox-ledger-time");
+    mailboxFragment.append(row);
   }
-  if (!teamRows.length) {
+  if (!mailboxes.length) {
     const row = document.createElement("tr");
-    const cell = appendText(row, "td", "No teammate activity in this period.", "analytics-table-empty");
+    const cell = appendText(row, "td", "No connected Gmail mailboxes. Add one in Settings, then Vela will build the first complete sent-thread baseline.", "mailbox-ledger-empty");
     cell.colSpan = 7;
-    teamFragment.append(row);
+    mailboxFragment.append(row);
   }
-  elements.analyticsTeamBody.replaceChildren(teamFragment);
+  elements.analyticsMailboxBody.replaceChildren(mailboxFragment);
 
-  const scopedUsage = selectedMember?.senders?.length ? usage.filter((mailbox) => selectedMember.senders.includes(mailbox.email)) : selectedMember ? [] : usage;
-  renderMailboxCapacity(scopedUsage);
-
-  const activityFragment = document.createDocumentFragment();
-  const canonicalActivity = canonicalInScope
-    .filter((message) => ["initial", "follow_up", "reply", "bounce"].includes(message.messageKind))
-    .map((message) => ({
-      ...message,
-      kind: message.messageKind === "bounce" ? "bounced" : message.messageKind === "reply" ? "reply" : "sent",
-      activityAt: message.occurredAt,
-      recipient: message.messageKind === "reply" ? message.senderEmail : message.recipientEmails?.[0] || "",
-      senderEmail: message.accountEmail || message.senderEmail,
-      error: message.messageKind === "bounce" ? message.bounceReason?.replaceAll("_", " ") : "",
-    }));
-  const activity = [
-    ...(hasCanonicalArchive ? canonicalActivity : [
-      ...visibleEvents.filter((item) => item.senderEmail || item.recipient).map((event) => ({ ...event, kind: "sent", activityAt: event.at })),
-      ...visibleBounces.map((record) => ({ ...record, kind: "bounced", activityAt: recordAt(record), recipient: record.recipients?.[0] || "" })),
-    ]),
-    ...failedRecords.map((record) => ({ ...record, kind: "failed", activityAt: recordAt(record), recipient: record.recipients?.[0] || "" })),
-  ].sort((a, b) => String(b.activityAt).localeCompare(String(a.activityAt))).slice(0, 10);
-  for (const event of activity) {
+  const signalFragment = document.createDocumentFragment();
+  const signals = state.gtmMessages
+    .filter((message) => ["reply", "bounce"].includes(message.messageKind) && Date.parse(message.occurredAt) >= cutoff.getTime())
+    .sort((a, b) => String(b.occurredAt).localeCompare(String(a.occurredAt)))
+    .slice(0, 30);
+  for (const message of signals) {
+    const isReply = message.messageKind === "reply";
     const row = document.createElement("article");
-    row.className = `analytics-activity-row is-${event.kind}`;
-    row.title = [event.error || event.subject || "No subject", event.recipient ? `To ${event.recipient}` : "", event.senderEmail ? `From ${event.senderEmail}` : ""].filter(Boolean).join(" · ");
-    appendText(row, "span", event.kind === "sent" ? initialsFor(event.operatorName || event.senderEmail) : event.kind === "reply" ? "↩" : "!", "analytics-activity-marker");
-    const copy = appendText(row, "div", "", "analytics-activity-copy");
-    appendText(copy, "strong", event.kind === "bounced" ? "Delivery bounced" : event.kind === "failed" ? "Send failed" : event.kind === "reply" ? "Reply received" : event.operatorName || event.senderEmail || "Vela teammate");
-    appendText(copy, "span", ["sent", "reply"].includes(event.kind) ? event.subject || (event.kind === "reply" ? "GTM conversation reply" : "Outreach email") : event.error || event.bounceReason?.replaceAll("_", " ") || "Gmail could not complete delivery");
-    const meta = appendText(row, "div", "", "analytics-activity-meta");
-    appendText(meta, "strong", event.recipient || "—");
-    appendText(meta, "span", event.kind === "bounced" ? event.bounceReason === "policy_blocked" ? "Policy block" : `${event.bounceType || "hard"} bounce` : event.kind === "failed" ? "Failed" : event.kind === "reply" ? "Replied" : "Sent", "analytics-activity-state");
-    appendText(meta, "time", relativeTime(event.activityAt));
-    activityFragment.append(row);
+    row.className = `mailbox-signal-row is-${isReply ? "reply" : message.bounceReason === "policy_blocked" ? "policy" : "bounce"}`;
+    appendText(row, "span", isReply ? "↩" : "!", "mailbox-signal-icon");
+    const copy = appendText(row, "div", "", "mailbox-signal-copy");
+    appendText(copy, "strong", isReply ? "Reply received" : message.bounceReason === "policy_blocked" ? "Policy reject" : `${message.bounceType || "Delivery"} bounce`);
+    appendText(copy, "span", message.subject || (isReply ? "Gmail conversation reply" : message.snippet || "Gmail delivery notice"));
+    const route = appendText(row, "div", "", "mailbox-signal-route");
+    const counterpart = isReply ? message.senderEmail : message.recipientEmails?.[0] || "Unknown recipient";
+    appendText(route, "strong", counterpart);
+    appendText(route, "span", message.accountEmail || "Connected Gmail");
+    const status = appendText(row, "div", "", "mailbox-signal-status");
+    appendText(status, "span", isReply ? "Replied" : message.bounceReason === "policy_blocked" ? "Policy" : "Bounced");
+    appendText(status, "time", relativeTime(message.occurredAt));
+    signalFragment.append(row);
   }
-  if (!activityFragment.childNodes.length) appendText(activityFragment, "p", "No delivery activity in this period.", "analytics-empty-copy");
-  elements.analyticsActivityList.replaceChildren(activityFragment);
+  if (!signals.length) appendText(signalFragment, "p", "No replies or Gmail delivery notices in this window.", "mailbox-feed-empty");
+  elements.analyticsActivityList.replaceChildren(signalFragment);
 }
 
 function renderOverview() {
@@ -1944,70 +1855,195 @@ function renderHistoryWorkspace(records = []) {
 
 function scheduledDeliveryGroups(records = []) {
   const groups = [];
-  const initial = records.filter((record) => scheduledSendKind(record) === SCHEDULED_SEND_KIND.INITIAL);
-  if (initial.length) groups.push({ id: "initial", kind: SCHEDULED_SEND_KIND.INITIAL, records: initial });
   const sequences = new Map();
-  for (const record of records.filter((item) => scheduledSendKind(item) === SCHEDULED_SEND_KIND.FOLLOW_UP)) {
-    const id = record.sequenceId || record.prospectId || record.id;
-    if (!sequences.has(id)) sequences.set(id, []);
-    sequences.get(id).push(record);
+  for (const record of records) {
+    if (scheduledSendKind(record) === SCHEDULED_SEND_KIND.INITIAL) {
+      groups.push({ id: `initial:${record.id}`, kind: SCHEDULED_SEND_KIND.INITIAL, records: [record] });
+      continue;
+    }
+    const sequenceId = record.sequenceId || record.prospectId || record.id;
+    if (!sequences.has(sequenceId)) sequences.set(sequenceId, []);
+    sequences.get(sequenceId).push(record);
   }
-  for (const [id, sequenceRecords] of sequences) groups.push({ id, kind: SCHEDULED_SEND_KIND.FOLLOW_UP, records: sequenceRecords });
+  for (const [sequenceId, sequenceRecords] of sequences) groups.push({ id: `sequence:${sequenceId}`, sequenceId, kind: SCHEDULED_SEND_KIND.FOLLOW_UP, records: sequenceRecords });
+  for (const group of groups) group.records.sort((a, b) => String(a.scheduledAt || "").localeCompare(String(b.scheduledAt || "")));
   return groups.sort((a, b) => String(a.records[0]?.scheduledAt || "").localeCompare(String(b.records[0]?.scheduledAt || "")));
 }
 
-function deliveryGroupIcon(kind) {
-  const mark = document.createElement("span");
-  mark.className = "delivery-group-icon";
-  mark.setAttribute("aria-hidden", "true");
-  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  icon.setAttribute("viewBox", "0 0 20 20");
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute("d", kind === SCHEDULED_SEND_KIND.FOLLOW_UP ? "M5 5.5h7.5a3 3 0 0 1 3 3v.5M5 5.5l2.8-2.8M5 5.5l2.8 2.8M15 14.5H7.5a3 3 0 0 1-3-3V11M15 14.5l-2.8-2.8M15 14.5l-2.8 2.8" : "M3.5 5.5h13v9h-13zM3.5 6l6.5 5 6.5-5");
-  icon.append(path);
-  mark.append(icon);
-  return mark;
+function scheduledDeliveryData() {
+  if (state.scheduledGroupCache?.source === state.scheduledJobs) return state.scheduledGroupCache;
+  const records = state.scheduledJobs.filter((job) => job.status === DELIVERY_STATUS.SCHEDULED).sort((a, b) => String(a.scheduledAt).localeCompare(String(b.scheduledAt)));
+  const data = { source: state.scheduledJobs, records, groups: scheduledDeliveryGroups(records) };
+  state.scheduledGroupCache = data;
+  return data;
 }
 
-function createDeliveryGroup(group) {
-  const followUp = group.kind === SCHEDULED_SEND_KIND.FOLLOW_UP;
-  const section = document.createElement("section");
-  section.className = `delivery-group${followUp ? " delivery-group-follow-up" : ""}`;
-  const header = document.createElement("header");
-  header.className = "delivery-group-head";
-  header.append(deliveryGroupIcon(group.kind));
-  const copy = document.createElement("div");
-  copy.className = "delivery-group-copy";
-  const first = group.records[0];
-  const prospect = deliveryProspect(first);
-  if (followUp) {
-    appendText(copy, "strong", `${prospect?.name || first.recipients?.[0] || "Recipient"} follow-ups`);
-    const allSequenceJobs = state.scheduledJobs.filter((job) => job.status === DELIVERY_STATUS.SCHEDULED && scheduledSendKind(job) === SCHEDULED_SEND_KIND.FOLLOW_UP && (job.sequenceId || job.prospectId || job.id) === group.id);
-    appendText(copy, "span", `${allSequenceJobs.length} step${allSequenceJobs.length === 1 ? "" : "s"} remaining · Next ${deliveryDate(allSequenceJobs[0]?.scheduledAt || first.scheduledAt, { relative: true })} · Stops automatically on reply`);
-    header.append(copy);
-    appendText(header, "span", "Automatic", "delivery-group-badge");
-    const stop = appendText(header, "button", "Stop sequence", "delivery-stop-sequence");
-    stop.type = "button";
-    stop.addEventListener("click", () => cancelScheduledDeliveries(allSequenceJobs.map((job) => job.id), stop, { sequence: true }));
-  } else {
-    appendText(copy, "strong", "Scheduled messages");
-    appendText(copy, "span", `${group.records.length} initial ${group.records.length === 1 ? "message" : "messages"} waiting for Gmail`);
-    header.append(copy);
-    appendText(header, "span", "Initial", "delivery-group-badge");
+function scheduledDeliveryIndexes() {
+  const cached = state.scheduledIndexCache;
+  if (cached?.queue === state.queue && cached?.campaigns === state.campaigns) return cached;
+  const prospectById = new Map();
+  for (const prospect of state.queue) {
+    if (prospect.id) prospectById.set(prospect.id, prospect);
+    if (prospect.url) prospectById.set(prospect.url, prospect);
   }
-  section.append(header);
-  const sequenceSize = followUp
-    ? Math.max(...state.scheduledJobs.filter((job) => (job.sequenceId || job.prospectId || job.id) === group.id).map((job) => Number(job.sequenceStep) || 0), group.records.length)
-    : 0;
-  for (const record of group.records) section.append(createDeliveryRow(record, { cancellable: true, sequenceSize }));
+  const campaignsByProspect = new Map();
+  for (const campaign of state.campaigns) {
+    for (const id of campaign.prospectIds || []) {
+      if (!campaignsByProspect.has(id)) campaignsByProspect.set(id, []);
+      campaignsByProspect.get(id).push(campaign);
+    }
+  }
+  const indexes = { queue: state.queue, campaigns: state.campaigns, prospectById, campaignsByProspect };
+  state.scheduledIndexCache = indexes;
+  return indexes;
+}
+
+function scheduledGroupProspect(group, indexes = scheduledDeliveryIndexes()) {
+  return indexes.prospectById.get(group.records[0]?.prospectId) || null;
+}
+
+function scheduledGroupCampaigns(group, indexes = scheduledDeliveryIndexes()) {
+  const prospect = scheduledGroupProspect(group, indexes);
+  if (!prospect) return [];
+  const identifiers = [prospect.id, prospect.url, group.records[0]?.prospectId].filter(Boolean);
+  return [...new Set(identifiers.flatMap((id) => indexes.campaignsByProspect.get(id) || []))];
+}
+
+function scheduledGroupMatchesTime(group, filter = "all", now = new Date()) {
+  if (filter === "all") return true;
+  const next = new Date(group.records[0]?.scheduledAt || "");
+  if (!Number.isFinite(next.getTime())) return false;
+  const endOfToday = new Date(now);
+  endOfToday.setHours(23, 59, 59, 999);
+  if (filter === "today") return next <= endOfToday;
+  const endOfWeek = new Date(now.getTime() + 7 * 86_400_000);
+  if (filter === "week") return next <= endOfWeek;
+  return next > endOfWeek;
+}
+
+function scheduledGroupMatchesQuery(group, query = "", indexes = scheduledDeliveryIndexes()) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return true;
+  const prospect = scheduledGroupProspect(group, indexes);
+  const campaigns = scheduledGroupCampaigns(group, indexes).map((campaign) => campaign.name).join(" ").toLowerCase();
+  return campaigns.includes(normalized) || group.records.some((record) => scheduledSendMatches(record, query, prospect));
+}
+
+function scheduledGroupJobIds(group) {
+  return group.records.filter((record) => record.status === DELIVERY_STATUS.SCHEDULED).map((record) => record.id);
+}
+
+function createScheduledWorkUnit(group, indexes = scheduledDeliveryIndexes()) {
+  const first = group.records[0];
+  const prospect = scheduledGroupProspect(group, indexes);
+  const followUp = group.kind === SCHEDULED_SEND_KIND.FOLLOW_UP;
+  const campaigns = scheduledGroupCampaigns(group, indexes);
+  const section = document.createElement("section");
+  section.className = `delivery-work-unit${followUp ? " is-sequence" : ""}`;
+  section.dataset.deliveryGroup = group.id;
+  const row = document.createElement("div");
+  row.className = "delivery-work-row";
+
+  const select = document.createElement("input");
+  select.type = "checkbox";
+  select.className = "delivery-work-select";
+  select.setAttribute("aria-label", `Select ${prospect?.name || first.recipients?.[0] || "scheduled delivery"}`);
+  select.checked = state.scheduledSelected.has(group.id);
+  select.addEventListener("change", () => {
+    if (select.checked) state.scheduledSelected.add(group.id);
+    else state.scheduledSelected.delete(group.id);
+    renderScheduledSelectionChrome();
+  });
+  row.append(select);
+
+  const person = document.createElement("div");
+  person.className = "delivery-work-person";
+  appendText(person, "span", initialsFor(prospect?.name || first.recipients?.[0]), "delivery-avatar").setAttribute("aria-hidden", "true");
+  const personCopy = document.createElement("div");
+  appendText(personCopy, "strong", prospect?.name || first.recipients?.[0] || "Recipient");
+  appendText(personCopy, "span", first.subject || "Untitled message");
+  appendText(personCopy, "small", first.recipients?.join(", ") || "Recipient unavailable");
+  person.append(personCopy);
+  row.append(person);
+
+  const workflow = document.createElement("div");
+  workflow.className = "delivery-workflow";
+  appendText(workflow, "strong", followUp ? "Automatic follow-up" : "Initial email", followUp ? "is-automatic" : "");
+  appendText(workflow, "span", campaigns[0]?.name || (prospect?.source ? `${prospect.source} research` : "Direct outreach"));
+  if (campaigns.length > 1) appendText(workflow, "small", `+${campaigns.length - 1} more campaign${campaigns.length === 2 ? "" : "s"}`);
+  row.append(workflow);
+
+  const sender = document.createElement("div");
+  sender.className = "delivery-work-sender";
+  appendText(sender, "strong", first.senderEmail || "Sender unavailable");
+  appendText(sender, "span", "Gmail");
+  row.append(sender);
+
+  const next = document.createElement("div");
+  next.className = "delivery-work-next";
+  appendText(next, "strong", deliveryDate(first.scheduledAt, { relative: true }));
+  appendText(next, "time", deliveryDate(first.scheduledAt));
+  row.append(next);
+
+  const queue = document.createElement("div");
+  queue.className = "delivery-work-queue";
+  appendText(queue, "strong", followUp ? `${group.records.length} remaining` : "1 message");
+  appendText(queue, "span", followUp ? "Stops on reply" : "Reviewed & ready", followUp ? "is-safe" : "");
+  row.append(queue);
+
+  const actions = document.createElement("div");
+  actions.className = "delivery-work-actions";
+  if (followUp) {
+    const detailId = `scheduled-details-${group.id.replace(/[^a-z0-9_-]/gi, "-")}`;
+    const expand = appendText(actions, "button", state.scheduledExpanded.has(group.id) ? "Hide" : "View", "delivery-expand");
+    expand.type = "button";
+    expand.setAttribute("aria-expanded", String(state.scheduledExpanded.has(group.id)));
+    expand.setAttribute("aria-controls", detailId);
+    expand.addEventListener("click", () => {
+      if (state.scheduledExpanded.has(group.id)) state.scheduledExpanded.delete(group.id);
+      else state.scheduledExpanded.add(group.id);
+      renderDeliveryOperations();
+    });
+    const details = document.createElement("div");
+    details.id = detailId;
+    details.className = "delivery-sequence-details";
+    details.hidden = !state.scheduledExpanded.has(group.id);
+    appendText(details, "div", "Sequence steps", "delivery-sequence-label");
+    const sequenceSize = Math.max(...group.records.map((record) => Number(record.sequenceStep) || 0), group.records.length);
+    for (const record of group.records) details.append(createDeliveryRow(record, { cancellable: true, sequenceSize }));
+    section.append(row, details);
+  } else {
+    const cancel = appendText(actions, "button", "Cancel", "delivery-cancel");
+    cancel.type = "button";
+    cancel.addEventListener("click", () => cancelScheduledDelivery(first.id, cancel));
+    section.append(row);
+  }
+  if (followUp) {
+    const stop = appendText(actions, "button", "Stop", "delivery-stop-sequence");
+    stop.type = "button";
+    stop.addEventListener("click", () => cancelScheduledDeliveries(scheduledGroupJobIds(group), stop, { sequence: true }));
+  }
+  row.append(actions);
   return section;
+}
+
+function renderScheduledSelectionChrome(pageGroups = null) {
+  const scheduledIds = new Set(scheduledDeliveryData().groups.map((group) => group.id));
+  for (const id of state.scheduledSelected) if (!scheduledIds.has(id)) state.scheduledSelected.delete(id);
+  elements.scheduledBulkBar.hidden = state.scheduledSelected.size === 0;
+  elements.scheduledSelectedCount.textContent = state.scheduledSelected.size;
+  const visibleGroups = pageGroups || [...elements.deliveryList.querySelectorAll("[data-delivery-group]")].map((node) => ({ id: node.dataset.deliveryGroup }));
+  const selectedOnPage = visibleGroups.filter((group) => state.scheduledSelected.has(group.id)).length;
+  elements.scheduledSelectPage.checked = visibleGroups.length > 0 && selectedOnPage === visibleGroups.length;
+  elements.scheduledSelectPage.indeterminate = selectedOnPage > 0 && selectedOnPage < visibleGroups.length;
 }
 
 function renderDeliveryOperations() {
   if (!["scheduled", "history"].includes(state.view)) return;
   const scheduledView = state.view === "scheduled";
+  const scheduledData = scheduledView ? scheduledDeliveryData() : null;
   const records = scheduledView
-    ? state.scheduledJobs.filter((job) => job.status === DELIVERY_STATUS.SCHEDULED).sort((a, b) => String(a.scheduledAt).localeCompare(String(b.scheduledAt)))
+    ? scheduledData.records
     : unifiedDeliveryLog().filter((record) => record.status !== DELIVERY_STATUS.SCHEDULED);
   elements.operationsKicker.textContent = scheduledView ? "Delivery queue" : "Delivery ledger";
   elements.operationsTitle.textContent = scheduledView ? "Scheduled sends" : "Every delivery, in one place";
@@ -2033,12 +2069,35 @@ function renderDeliveryOperations() {
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-pressed", String(active));
   }
-  const visible = records.filter((record) => {
-    const prospect = deliveryProspect(record);
-    return (state.scheduledKind === "all" || scheduledSendKind(record) === state.scheduledKind) && scheduledSendMatches(record, state.scheduledQuery, prospect);
+  const today = new Date();
+  const endOfToday = new Date(today);
+  endOfToday.setHours(23, 59, 59, 999);
+  elements.scheduledQueuedMetric.textContent = records.length.toLocaleString();
+  elements.scheduledPeopleMetric.textContent = new Set(records.flatMap((record) => record.recipients || []).map((email) => email.toLowerCase())).size.toLocaleString();
+  elements.scheduledTodayMetric.textContent = records.filter((record) => new Date(record.scheduledAt) <= endOfToday).length.toLocaleString();
+  elements.scheduledMailboxMetric.textContent = new Set(records.map((record) => record.senderEmail).filter(Boolean)).size.toLocaleString();
+
+  const senderOptions = [...new Set(records.map((record) => record.senderEmail).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const senderFragment = document.createDocumentFragment();
+  senderFragment.append(new Option("All senders", "all"));
+  for (const sender of senderOptions) senderFragment.append(new Option(sender, sender));
+  elements.scheduledSenderFilter.replaceChildren(senderFragment);
+  if (state.scheduledSender !== "all" && !senderOptions.includes(state.scheduledSender)) state.scheduledSender = "all";
+  elements.scheduledSenderFilter.value = state.scheduledSender;
+  elements.scheduledTimeFilter.value = state.scheduledTime;
+
+  const groups = scheduledData.groups;
+  const indexes = scheduledDeliveryIndexes();
+  const visible = groups.filter((group) => {
+    return (state.scheduledKind === "all" || group.kind === state.scheduledKind)
+      && (state.scheduledSender === "all" || group.records.some((record) => record.senderEmail === state.scheduledSender))
+      && scheduledGroupMatchesTime(group, state.scheduledTime, today)
+      && scheduledGroupMatchesQuery(group, state.scheduledQuery, indexes);
   });
+  const pageInfo = paginate(visible, state.scheduledPage, DATA_PAGE_SIZE);
+  state.scheduledPage = pageInfo.page;
   const fragment = document.createDocumentFragment();
-  for (const group of scheduledDeliveryGroups(visible)) fragment.append(createDeliveryGroup(group));
+  for (const group of pageInfo.items) fragment.append(createScheduledWorkUnit(group, indexes));
   if (!visible.length) {
     const empty = document.createElement("div");
     empty.className = "delivery-empty";
@@ -2047,6 +2106,15 @@ function renderDeliveryOperations() {
     fragment.append(empty);
   }
   elements.deliveryList.replaceChildren(fragment);
+  elements.scheduledResultCount.textContent = visible.length
+    ? `${pageInfo.start.toLocaleString()}–${pageInfo.end.toLocaleString()} of ${pageInfo.total.toLocaleString()} delivery units · ${visible.reduce((sum, group) => sum + group.records.length, 0).toLocaleString()} emails`
+    : "0 delivery units";
+  renderDataPagination(elements.scheduledPagination, pageInfo, "Scheduled sends", (page) => {
+    state.scheduledPage = page;
+    renderDeliveryOperations();
+    elements.scheduledWorkspace.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  renderScheduledSelectionChrome(pageInfo.items);
 }
 
 function closeProspectMenu() {
@@ -2087,7 +2155,7 @@ function openProspectMenu(anchor, prospect, campaign) {
     prospectMenuAction(menu, "Mark response handled", async () => {
       const at = new Date().toISOString();
       state.queue = state.queue.map((item) => item.id === prospect.id ? withActivity(item, "response_sent", "Response handled in Gmail", at) : item);
-      await persistQueue();
+      await persistQueue({ prospects: queueProspectsById([prospect.id]) });
       renderQueue();
       showToast(`${prospect.name || "Conversation"} marked handled.`);
     });
@@ -2101,7 +2169,7 @@ function openProspectMenu(anchor, prospect, campaign) {
         replyReceivedAt: at,
         replyPreview: detail,
       } : item);
-      await persistQueue();
+      await persistQueue({ prospects: queueProspectsById([prospect.id]) });
       renderQueue();
       showToast(`${prospect.name || "Prospect"} added to Needs a response.`);
     });
@@ -2119,9 +2187,7 @@ function openProspectMenu(anchor, prospect, campaign) {
       state.campaigns = removeProspectFromCampaign(state.campaigns, campaign.id, prospect.url || prospect.email || prospect.id);
       await persistCampaigns();
     } else {
-      state.queue = state.queue.filter((item) => item.id !== prospect.id);
-      state.campaigns = removeProspectFromAllCampaigns(state.campaigns, prospect.url || prospect.email || prospect.id);
-      await storage.set({ [QUEUE_STORAGE_KEY]: state.queue, [CAMPAIGNS_STORAGE_KEY]: state.campaigns });
+      await deleteQueueProspects([prospect]);
     }
     state.selected.delete(prospect.id);
     renderQueue();
@@ -2161,7 +2227,6 @@ function renderQueue() {
   }
   elements.totalDelta.textContent = campaign ? `In ${campaign.name}` : "Across your workspace";
   elements.campaignActions.hidden = !campaign;
-  elements.navResearch.textContent = state.queue.filter((item) => belongsToResearch(item) && item.targetFit?.verdict === "strong" && [QUEUE_STATUS.NEW, QUEUE_STATUS.PROCESSING, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(item.status)).length;
   elements.navReview.textContent = researchApprovalStack(state.queue).total;
   elements.navScheduled.textContent = scheduledCount;
   elements.navTracking.textContent = deliveredCount;
@@ -2194,14 +2259,12 @@ function renderQueue() {
   elements.openImportButtonTop.hidden = state.view === "review";
   elements.statusFilterButton.hidden = state.view === "review";
   elements.newCampaignButtonTop.hidden = state.view === "review";
-  elements.clearProspectsButton.hidden = state.view !== "review" || !state.queue.length;
-  const readyToApprove = visible.filter((item) => item.status === QUEUE_STATUS.READY && isEmail(item.email) && item.subject && item.body);
+  elements.clearProspectsButton.hidden = state.view !== "review" || researchApprovalStack(state.queue).total === 0;
   const approvedToRun = visible.filter((item) => item.status === QUEUE_STATUS.DRAFTED && isEmail(item.email) && item.subject && item.body);
   elements.sendAllButton.textContent = state.view === "review" ? `Run approved${approvedToRun.length ? ` ${approvedToRun.length}` : ""}` : "Send approved";
   elements.sendAllButton.disabled = approvedToRun.length === 0;
-  const qualifiedCount = visible.filter((item) => item.targetFit?.verdict === "strong" && [QUEUE_STATUS.NEW, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(item.status)).length;
-  elements.processButton.textContent = state.view === "review" ? `Approve & run${readyToApprove.length ? ` ${readyToApprove.length}` : ""}` : qualifiedCount ? `Draft ${qualifiedCount} qualified` : "Draft qualified";
-  elements.processButton.disabled = state.busy || (state.view === "review" ? readyToApprove.length === 0 : qualifiedCount === 0);
+  elements.processButton.textContent = "Draft qualified";
+  elements.processButton.disabled = state.busy;
   const activePlan = state.searchPlan || state.researchRun?.plan;
   const batchPagination = researchBatchPagination(state.researchRun);
   elements.nextResearchBatchButton.hidden = state.view !== "review" || state.busy || !activePlan || !batchPagination.hasNext;
@@ -2216,13 +2279,14 @@ function renderQueue() {
     for (let index = 0; index < 8; index += 1) {
       const row = document.createElement("tr");
       row.className = "queue-row skeleton-row";
-      for (let cell = 0; cell < 9; cell += 1) appendText(row, "td", "", "skeleton-cell");
+      for (let cell = 0; cell < 8; cell += 1) appendText(row, "td", "", "skeleton-cell");
       fragment.append(row);
     }
     elements.queueBody.replaceChildren(fragment);
     return;
   }
   for (const prospect of visible) {
+    const displayName = prospectDisplayName(prospect);
     const row = document.createElement("tr");
     row.className = `queue-row${state.selected.has(prospect.id) ? " is-selected" : ""}${state.keyboardProspectId === prospect.id ? " is-keyboard-active" : ""}`;
     row.dataset.prospectId = prospect.id;
@@ -2232,7 +2296,7 @@ function renderQueue() {
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.checked = state.selected.has(prospect.id);
-    checkbox.setAttribute("aria-label", `Select ${prospect.name || "prospect"}`);
+    checkbox.setAttribute("aria-label", `Select ${displayName}`);
     checkbox.addEventListener("change", () => {
       if (checkbox.checked) state.selected.add(prospect.id); else state.selected.delete(prospect.id);
       renderQueue();
@@ -2242,10 +2306,10 @@ function renderQueue() {
     const personCell = document.createElement("td");
     const person = document.createElement("div");
     person.className = "person";
-    appendText(person, "span", initialsFor(prospect.name), "person-avatar");
+    appendText(person, "span", initialsFor(displayName), "person-avatar");
     const copy = document.createElement("div");
     copy.className = "person-copy";
-    const personName = appendText(copy, prospect.url ? "a" : "strong", prospect.name || "LinkedIn prospect", prospect.url ? "person-name-link" : "");
+    const personName = appendText(copy, prospect.url ? "a" : "strong", displayName, prospect.url ? "person-name-link" : "");
     if (prospect.url) {
       personName.href = prospect.url;
       personName.target = "_blank";
@@ -2257,7 +2321,7 @@ function renderQueue() {
       linkedIn.href = prospect.url;
       linkedIn.target = "_blank";
       linkedIn.rel = "noreferrer";
-      linkedIn.setAttribute("aria-label", `View ${prospect.name || "prospect"} on LinkedIn`);
+      linkedIn.setAttribute("aria-label", `View ${displayName} on LinkedIn`);
     }
     person.append(copy);
     personCell.append(person);
@@ -2293,8 +2357,6 @@ function renderQueue() {
       appendText(draftCell, "strong", prospect.subject);
       appendText(draftCell, "span", prospect.body?.split("\n").find(Boolean) || "Draft prepared");
     } else appendText(draftCell, "span", "Not drafted", "draft-empty");
-    const updatedCell = appendText(row, "td", relativeTime(prospect.updatedAt || prospect.createdAt), "updated-cell");
-
     const actions = document.createElement("td");
     actions.className = "row-actions";
     if (prospect.status === QUEUE_STATUS.READY) {
@@ -2313,7 +2375,7 @@ function renderQueue() {
     }
     const more = appendText(actions, "button", "···", "row-button row-menu");
     more.type = "button";
-    more.title = `More actions for ${prospect.name || "prospect"}`;
+    more.title = `More actions for ${displayName}`;
     more.setAttribute("aria-label", more.title);
     more.setAttribute("aria-haspopup", "menu");
     more.setAttribute("aria-expanded", "false");
@@ -2324,7 +2386,7 @@ function renderQueue() {
       if (!alreadyOpen) openProspectMenu(more, prospect, campaign);
     });
 
-    row.append(checkCell, personCell, roleCell, fitCell, emailCell, statusCell, draftCell, updatedCell, actions);
+    row.append(checkCell, personCell, roleCell, fitCell, emailCell, statusCell, draftCell, actions);
     fragment.append(row);
   }
   elements.queueBody.replaceChildren(fragment);
@@ -2513,7 +2575,7 @@ async function auditDiscoveredProspects(run) {
       updateAgentActivity("research", `Processing ${prospect.name || "person"}`, `${completed} of ${total}`);
       renderQueue();
       if (completed % 10 === 0 || completed === total) {
-        await persistQueue();
+        await persistQueue({ prospects: queueProspectsById([prospect.id]) });
         await syncCurrentResearchRun();
       }
     },
@@ -2522,7 +2584,7 @@ async function auditDiscoveredProspects(run) {
   state.queue = state.queue.map((item) => auditedById.get(item.id) || item);
   const counts = researchRunCounts(audited);
   state.researchRun = { ...state.researchRun, ...counts, status: "auditing", updatedAt: new Date().toISOString() };
-  await persistQueue();
+  await persistQueue({ prospects: audited });
   await syncCurrentResearchRun({ quiet: false });
   updateAgentActivity("draft", "Results ready", `${counts.foundCount} people pulled`);
   renderQueue();
@@ -3054,7 +3116,7 @@ async function processQueue(ids = null, { contactOutDefault = true, templateId =
           ...item, status: QUEUE_STATUS.ERROR, error: error instanceof Error ? error.message : "Research failed.", updatedAt: new Date().toISOString(),
         } : item);
       }
-      await persistQueue();
+      await persistQueue({ prospects: queueProspectsById([current.id]) });
       renderQueue();
     }
     showToast("Target checks and drafts are ready for approval.");
@@ -3070,8 +3132,8 @@ const VIEW_COPY = {
   overview: { eyebrow: "Dashboard", title: "Dashboard", description: "How your team’s outreach is landing.", queueTitle: "People", queueDescription: "People in the active workflow." },
   research: { eyebrow: "AI people research", title: "Research", description: "Tell Vela who you need, refine the audience together, and run the research when the plan is right.", queueTitle: "Research", queueDescription: "Conversational people research." },
   review: { eyebrow: "Research approval", title: "Approvals", description: "Stack completed research batches here, then approve and run personalized outreach when you’re ready.", queueTitle: "Research approvals", queueDescription: "Qualified people and drafts stacked across your Research runs." },
-  analytics: { eyebrow: "Analytics", title: "Delivery health", description: "See who is sending, which mailbox they use, and every signal that can hurt deliverability.", queueTitle: "Analytics", queueDescription: "Outbound delivery health." },
-  scheduled: { eyebrow: "Scheduled sends", title: "Scheduled sends", description: "Initial sends and automatic follow-up sequences, grouped and searchable.", queueTitle: "Scheduled sends", queueDescription: "Queued Gmail delivery." },
+  analytics: { eyebrow: "Delivery", title: "Mailbox health", description: "Watch every connected sending inbox for replies, bounces, policy rejects, and sync gaps.", queueTitle: "Mailbox health", queueDescription: "Connected Gmail outcomes." },
+  scheduled: { eyebrow: "Delivery operations", title: "Scheduled sends", description: "Run every researched outreach sequence from one high-volume, reply-aware queue.", queueTitle: "Scheduled sends", queueDescription: "Queued Gmail delivery." },
   history: { eyebrow: "Sent history", title: "Sent history", description: "Every shared team and local delivery with its recipient, subject, sender, and result.", queueTitle: "Delivery history", queueDescription: "Unified delivery activity." },
   contacts: { eyebrow: "Team records", title: "Contacts", description: "Search, review, and manage every person your team has worked with.", queueTitle: "Contacts", queueDescription: "Team contacts." },
 };
@@ -3080,7 +3142,7 @@ function setView(view, { preserveFilters = false, persist = true } = {}) {
   setCampaignMenu(false);
   state.view = view;
   state.activeCampaignId = "";
-  if (!preserveFilters) state.attentionOnly = false;
+  if (!preserveFilters || view === "review") state.attentionOnly = false;
   state.selected.clear();
   elements.statusFilterButton.classList.toggle("is-active", state.attentionOnly);
   for (const button of document.querySelectorAll("[data-view]")) button.classList.toggle("is-active", button.dataset.view === view);
@@ -3217,7 +3279,7 @@ async function checkContactOutForProspect(id = "") {
       contactDetails: merged,
       updatedAt,
     } : item);
-    await persistQueue();
+    await persistQueue({ prospects: queueProspectsById([id]) });
     const updated = state.queue.find((item) => item.id === id);
     elements.drawerEmail.value = updated.email || "";
     renderEmailChoices(updated);
@@ -3262,21 +3324,34 @@ function renderDrawerActivity(prospect) {
   elements.drawerActivity.replaceChildren(fragment);
 }
 
+function renderDrawerFit(prospect) {
+  const targetFit = prospect.targetFit;
+  elements.drawerFitSection.hidden = !targetFit;
+  if (!targetFit) return;
+  const fit = fitLabel(targetFit);
+  elements.drawerFitPill.className = `fit-pill ${fit.className}`;
+  elements.drawerFitPill.textContent = fit.label;
+  elements.drawerFitReason.textContent = targetFit.reason || "Vela completed this fit check without a written rationale.";
+  const evidence = document.createDocumentFragment();
+  for (const item of targetFit.evidence || []) appendText(evidence, "span", item);
+  elements.drawerFitEvidence.replaceChildren(evidence);
+}
+
 function reviewableRunProspects(runId = state.reviewRunId) {
   return state.queue.filter((prospect) => prospect.researchRunId === runId && prospect.status !== QUEUE_STATUS.SENT && isEmail(prospect.email) && prospect.subject && prospect.body);
 }
 
 function drawerProspects() {
   if (state.reviewRunId) return reviewableRunProspects();
-  return visibleProspects().filter((prospect) => [QUEUE_STATUS.READY, QUEUE_STATUS.DRAFTED].includes(prospect.status) && isEmail(prospect.email) && prospect.subject && prospect.body);
+  return pendingReviewDrafts(visibleProspects()).filter((prospect) => isEmail(prospect.email) && prospect.subject && prospect.body);
 }
 
 function updateDrawerPosition() {
   const people = drawerProspects();
   const index = people.findIndex((person) => person.id === state.activeProspectId);
-  elements.drawerPosition.textContent = people.length ? `${Math.max(0, index) + 1} of ${people.length}` : "0 of 0";
-  elements.previousReviewButton.disabled = people.length < 2;
-  elements.nextReviewButton.disabled = people.length < 2;
+  elements.drawerPosition.textContent = index >= 0 ? `${index + 1} of ${people.length}` : `${people.length} remaining`;
+  elements.previousReviewButton.disabled = people.length < (index >= 0 ? 2 : 1);
+  elements.nextReviewButton.disabled = people.length < (index >= 0 ? 2 : 1);
 }
 
 function openResearchRunReview(runId, trigger = document.activeElement) {
@@ -3288,12 +3363,12 @@ function openResearchRunReview(runId, trigger = document.activeElement) {
   elements.drawerReviewContext.textContent = `${run?.brief || "Saved run"} · 1 of ${people.length}`;
 }
 
-function openNextRunProspect({ skipped = false } = {}) {
+function openNextRunProspect() {
   const people = drawerProspects();
-  if (!people.length) { closeReviewDrawer(); showToast(skipped ? "No more complete emails in this run." : "Saved run complete."); return; }
+  if (!people.length) { closeReviewDrawer(); showToast("Saved run complete."); return; }
   const currentIndex = people.findIndex((person) => person.id === state.activeProspectId);
   const next = currentIndex === -1 ? people[0] : people[(currentIndex + 1) % people.length];
-  if (!next || (people.length === 1 && next.id === state.activeProspectId)) { closeReviewDrawer(); showToast(skipped ? "No other email to review in this run." : "Saved run complete."); return; }
+  if (!next || (people.length === 1 && next.id === state.activeProspectId)) { closeReviewDrawer(); showToast("Saved run complete."); return; }
   openReviewDrawer(next.id, elements.closeDrawerButton);
   const run = state.researchRunHistory.find((item) => item.id === state.reviewRunId);
   elements.drawerReviewContext.textContent = `${run?.brief || "Saved run"} · ${Math.max(1, people.indexOf(next) + 1)} of ${people.length}`;
@@ -3301,9 +3376,9 @@ function openNextRunProspect({ skipped = false } = {}) {
 
 function openAdjacentReviewProspect(direction = 1) {
   const people = drawerProspects();
-  if (people.length < 2) { showToast("There is no other approved draft to review."); return; }
+  if (!people.length) { showToast("There is no other draft to review."); return; }
   const currentIndex = people.findIndex((person) => person.id === state.activeProspectId);
-  const next = people[(currentIndex + direction + people.length) % people.length];
+  const next = currentIndex < 0 ? people[direction < 0 ? people.length - 1 : 0] : people[(currentIndex + direction + people.length) % people.length];
   openReviewDrawer(next.id, elements.closeDrawerButton);
 }
 
@@ -3316,6 +3391,25 @@ function openNextApprovalDraft(currentId) {
   openReviewDrawer(currentId, elements.closeDrawerButton);
   showToast("All review drafts are approved.");
   return false;
+}
+
+async function deleteCurrentReviewProspect() {
+  const currentId = state.activeProspectId;
+  if (!currentId || state.reviewDeletePending) return;
+  const prospect = state.queue.find((item) => item.id === currentId);
+  if (!prospect) return;
+  const nextId = nextReviewProspectId(drawerProspects(), currentId);
+  state.reviewDeletePending = true;
+  try {
+    await deleteQueueProspects([prospect]);
+    renderQueue();
+    const next = state.queue.find((item) => item.id === nextId) || drawerProspects()[0];
+    if (next) openReviewDrawer(next.id, elements.closeDrawerButton);
+    else closeReviewDrawer();
+    showToast(`${prospect.name || "Prospect"} deleted.`);
+  } finally {
+    state.reviewDeletePending = false;
+  }
 }
 
 async function sendCurrentReview() {
@@ -3336,10 +3430,11 @@ async function sendCurrentReview() {
 function openReviewDrawer(id, trigger = document.activeElement) {
   const prospect = state.queue.find((item) => item.id === id);
   if (!prospect) return;
+  const displayName = prospectDisplayName(prospect);
   state.activeProspectId = id;
   state.drawerReturnFocus = trigger instanceof HTMLElement ? trigger : null;
-  elements.drawerAvatar.textContent = initialsFor(prospect.name);
-  elements.drawerName.textContent = prospect.name || "LinkedIn prospect";
+  elements.drawerAvatar.textContent = initialsFor(displayName);
+  elements.drawerName.textContent = displayName;
   elements.drawerName.href = prospect.url || "#";
   elements.drawerHeadline.textContent = prospect.headline || companyAndRole(prospect).role;
   elements.drawerLocation.textContent = prospect.location || "";
@@ -3355,6 +3450,7 @@ function openReviewDrawer(id, trigger = document.activeElement) {
   elements.drawerRecipient.textContent = prospect.email || "No recipient selected";
   elements.drawerSender.textContent = prospect.senderEmail ? `From ${prospect.senderEmail}` : "From selected Gmail sender";
   renderEmailChoices(prospect);
+  renderDrawerFit(prospect);
   renderExperience(prospect);
   renderDrawerActivity(prospect);
   elements.drawerSubject.value = prospect.status === QUEUE_STATUS.SENT ? prospect.subject || "" : OUTREACH_SUBJECT;
@@ -3363,7 +3459,6 @@ function openReviewDrawer(id, trigger = document.activeElement) {
   elements.approveDraftButton.hidden = prospect.status === QUEUE_STATUS.SENT;
   elements.drawerReviewContext.textContent = state.reviewRunId ? elements.drawerReviewContext.textContent : "Draft review";
   elements.approveDraftButton.textContent = state.reviewRunId ? "Send" : prospect.status === QUEUE_STATUS.DRAFTED ? "Save approved draft" : "Approve draft";
-  elements.skipReviewButton.hidden = !state.reviewRunId;
   elements.markSentButton.textContent = prospect.status === QUEUE_STATUS.SENT || prospect.emailSentAt ? "Mark as not sent" : "Mark email sent";
   updateDrawerPosition();
   elements.reviewDrawer.inert = false;
@@ -3403,7 +3498,7 @@ async function saveReview() {
   if (!subject || !body) { showToast("The subject and message both need content."); return false; }
   const reviewedAt = new Date().toISOString();
   state.queue = state.queue.map((item) => item.id === id ? { ...withActivity(item, "reviewed", "Draft reviewed and saved", reviewedAt), email, subject, body, reviewedAt } : item);
-  await persistQueue();
+  await persistQueue({ prospects: queueProspectsById([id]) });
   renderQueue();
   showToast("Review changes saved.");
   return true;
@@ -3419,22 +3514,10 @@ async function approveProspects(ids = []) {
     return { ...withActivity(item, "approved", "Draft approved for Gmail delivery", approvedAt), subject: OUTREACH_SUBJECT, status: QUEUE_STATUS.DRAFTED, reviewedAt: approvedAt };
   });
   if (!approved) { showToast("No complete drafts in this selection are ready to approve."); return 0; }
-  await persistQueue();
+  await persistQueue({ prospects: state.queue.filter((prospect) => selected.has(prospect.id)) });
   renderQueue();
   showToast(`${approved} draft${approved === 1 ? "" : "s"} approved.`);
   return approved;
-}
-
-async function approveAndRun(ids = []) {
-  const readyIds = state.queue
-    .filter((item) => ids.includes(item.id) && item.status === QUEUE_STATUS.READY && isEmail(item.email) && item.subject && item.body)
-    .map((item) => item.id);
-  if (!readyIds.length) {
-    showToast("No complete drafts in this approval stack are ready to run.");
-    return;
-  }
-  const approved = await approveProspects(readyIds);
-  if (approved) openBulkSend(readyIds);
 }
 
 function approvedForSend(ids = []) {
@@ -3469,6 +3552,7 @@ async function sendApproved(ids = []) {
   const fallbackAccount = selectedGoogleAccount(accounts, saved[GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY], saved[GOOGLE_ACCOUNT_STORAGE_KEY]);
   if (!fallbackAccount) throw new Error("Connect and choose a Gmail sender in Settings before sending.");
   let sent = 0;
+  const sentIds = [];
   const failures = [];
   setBusy(true, `Sending 0 of ${eligible.length}`);
   for (const [index, person] of eligible.entries()) {
@@ -3485,13 +3569,37 @@ async function sendApproved(ids = []) {
       type: "VELA_GTM_EMAIL_SEND",
       delivery: { accountId: account.id, senderEmail: account.email, recipients: [person.email], subject: OUTREACH_SUBJECT, body: person.body, prospectId: person.id, ...followUpSequence },
     });
-    if (response?.ok && response.data?.sent?.length) sent += 1;
+    if (response?.ok && response.data?.sent?.length) {
+      sent += 1;
+      sentIds.push(person.id);
+    }
     else failures.push(`${person.name || person.email}: ${response?.error || "send failed"}`);
   }
   setBusy(false);
+  let teamSyncError = "";
+  if (sentIds.length) {
+    state.queue = markProspectsSent(state.queue, sentIds);
+    try { await persistQueue({ waitForTeam: true, prospects: queueProspectsById(sentIds) }); }
+    catch (error) { teamSyncError = `${sent} sent. ${error instanceof Error ? error.message : "The shared approval queue still needs to sync."}`; }
+    if (sentIds.includes(state.activeProspectId)) closeReviewDrawer();
+  }
   state.selected.clear();
   renderQueue();
-  showToast(failures.length ? `${sent} sent · ${failures.length} need attention` : `${sent} message${sent === 1 ? "" : "s"} sent through the template sender${sent === 1 ? "" : "s"}.`);
+  showToast(teamSyncError || (failures.length ? `${sent} sent · ${failures.length} need attention` : `${sent} message${sent === 1 ? "" : "s"} sent through the template sender${sent === 1 ? "" : "s"}.`));
+}
+
+async function launchDraftQualifiedResearch() {
+  if (state.busy || state.searching) { setView("research"); return; }
+  const pending = state.pendingResearchPlan;
+  setView("research");
+  if (!pending?.plan || !pending.brief) {
+    elements.searchBrief.focus();
+    showToast("Describe the audience you want, then Vela will plan and run the research here.");
+    return;
+  }
+  await ensureResearchThread(pending.brief);
+  appendResearchMessage("user", "Run this research plan and draft the qualified people.");
+  await executeResearchPlan(pending.plan, pending.brief);
 }
 
 function bindEvents() {
@@ -3541,13 +3649,54 @@ function bindEvents() {
   for (const jump of document.querySelectorAll("[data-jump-view]")) jump.addEventListener("click", () => setView(jump.dataset.jumpView));
   elements.scheduledSearch.addEventListener("input", () => {
     state.scheduledQuery = elements.scheduledSearch.value;
-    renderDeliveryOperations();
+    state.scheduledPage = 1;
+    clearTimeout(state.scheduledSearchTimer);
+    state.scheduledSearchTimer = setTimeout(renderDeliveryOperations, 90);
     persistWorkspaceStateSoon();
   });
   for (const button of elements.scheduledKindFilter.querySelectorAll("[data-scheduled-kind]")) button.addEventListener("click", () => {
     state.scheduledKind = button.dataset.scheduledKind || "all";
+    state.scheduledPage = 1;
     renderDeliveryOperations();
     persistWorkspaceStateSoon();
+  });
+  elements.scheduledSenderFilter.addEventListener("change", () => {
+    state.scheduledSender = elements.scheduledSenderFilter.value || "all";
+    state.scheduledPage = 1;
+    renderDeliveryOperations();
+    persistWorkspaceStateSoon();
+  });
+  elements.scheduledTimeFilter.addEventListener("change", () => {
+    state.scheduledTime = elements.scheduledTimeFilter.value || "all";
+    state.scheduledPage = 1;
+    renderDeliveryOperations();
+    persistWorkspaceStateSoon();
+  });
+  elements.scheduledClearSelection.addEventListener("click", () => {
+    state.scheduledSelected.clear();
+    renderDeliveryOperations();
+  });
+  elements.scheduledSelectPage.addEventListener("change", () => {
+    const groups = [...elements.deliveryList.querySelectorAll("[data-delivery-group]")];
+    for (const group of groups) {
+      if (elements.scheduledSelectPage.checked) state.scheduledSelected.add(group.dataset.deliveryGroup);
+      else state.scheduledSelected.delete(group.dataset.deliveryGroup);
+    }
+    renderDeliveryOperations();
+  });
+  elements.scheduledStopSelected.addEventListener("click", async () => {
+    const selected = new Set(state.scheduledSelected);
+    const groups = scheduledDeliveryData().groups.filter((group) => selected.has(group.id));
+    const ids = groups.flatMap(scheduledGroupJobIds);
+    if (!ids.length) return;
+    if (!globalThis.confirm(`Stop ${groups.length} selected delivery unit${groups.length === 1 ? "" : "s"} containing ${ids.length} queued email${ids.length === 1 ? "" : "s"}? Nothing already sent will be changed.`)) return;
+    await cancelScheduledDeliveries(ids, elements.scheduledStopSelected, { bulk: true });
+  });
+  document.addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && state.view === "scheduled") {
+      event.preventDefault();
+      elements.scheduledSearch.focus();
+    }
   });
   for (const button of elements.analyticsRange.querySelectorAll("[data-days]")) button.addEventListener("click", () => {
     state.analyticsDays = Number(button.dataset.days) || 7;
@@ -3670,13 +3819,7 @@ function bindEvents() {
     }
     elements.importDialog.close();
   });
-  elements.processButton.addEventListener("click", () => {
-    if (state.view === "review") {
-      approveAndRun(visibleProspects().map((item) => item.id)).catch((error) => showToast(error instanceof Error ? error.message : "Could not approve this run."));
-      return;
-    }
-    processQueue();
-  });
+  elements.processButton.addEventListener("click", () => launchDraftQualifiedResearch().catch((error) => showToast(error instanceof Error ? error.message : "Could not start research.")));
   elements.nextResearchBatchButton.addEventListener("click", () => runNextResearchBatch());
   elements.sendAllButton.addEventListener("click", () => openBulkSend(visibleProspects().map((item) => item.id)));
   elements.tableSearch.addEventListener("input", () => {
@@ -3696,8 +3839,8 @@ function bindEvents() {
     renderContacts();
     persistWorkspaceStateSoon();
   });
-  elements.contactsInboxSyncButton.addEventListener("click", () => syncInboxBounces({ interactive: true }));
-  elements.analyticsInboxSyncButton.addEventListener("click", () => syncInboxBounces({ interactive: true, fullHistory: true }));
+  elements.contactsInboxSyncButton.addEventListener("click", () => syncInboxBounces());
+  elements.analyticsInboxSyncButton.addEventListener("click", () => syncInboxBounces());
   for (const button of document.querySelectorAll("[data-contact-filter]")) button.addEventListener("click", () => {
     state.contactStatus = button.dataset.contactFilter || "all";
     state.contactPage = 1;
@@ -3719,22 +3862,16 @@ function bindEvents() {
   });
   elements.clearSelectionButton.addEventListener("click", () => { state.selected.clear(); renderQueue(); });
   elements.clearProspectsButton.addEventListener("click", async () => {
-    const count = state.queue.length;
-    if (!count || !globalThis.confirm(`Clear all ${count} saved prospects and drafts from the shared Vela workspace? Sent activity will stay in Analytics.`)) return;
+    const approvals = state.queue.filter((prospect) => belongsToResearch(prospect) && [QUEUE_STATUS.READY, QUEUE_STATUS.DRAFTED].includes(prospect.status));
+    const count = approvals.length;
+    if (!count || !globalThis.confirm(`Clear this set of ${count} approval${count === 1 ? "" : "s"}? Other prospects and sent activity will stay in Vela.`)) return;
     elements.clearProspectsButton.disabled = true;
     try {
-      if (isExtension) {
-        const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_PROSPECTS_CLEAR" });
-        if (!response?.ok) throw new Error(response?.error || "Could not clear shared prospects.");
-      }
-      state.queue = [];
-      state.selected.clear();
-      state.campaigns = state.campaigns.map((campaign) => ({ ...campaign, prospectIds: [] }));
-      await storage.set({ [QUEUE_STORAGE_KEY]: state.queue, [CAMPAIGNS_STORAGE_KEY]: state.campaigns });
+      await deleteQueueProspects(approvals);
       renderQueue();
-      showToast("Prospects and drafts cleared. Sent activity remains intact.");
+      showToast(`${count} approval${count === 1 ? "" : "s"} cleared. Other prospects and sent activity remain intact.`);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "Could not clear prospects.");
+      showToast(error instanceof Error ? error.message : "Could not clear approvals.");
     } finally {
       elements.clearProspectsButton.disabled = false;
     }
@@ -3756,7 +3893,6 @@ function bindEvents() {
   elements.previousReviewButton.addEventListener("click", () => openAdjacentReviewProspect(-1));
   elements.nextReviewButton.addEventListener("click", () => openAdjacentReviewProspect(1));
   elements.saveReviewButton.addEventListener("click", saveReview);
-  elements.skipReviewButton.addEventListener("click", () => openNextRunProspect({ skipped: true }));
   elements.drawerEmail.addEventListener("input", () => { elements.drawerRecipient.textContent = elements.drawerEmail.value.trim() || "No recipient selected"; });
   elements.copyDrawerEmail.addEventListener("click", async () => {
     const email = elements.drawerEmail.value.trim();
@@ -3781,7 +3917,7 @@ function bindEvents() {
       status: isSent ? (item.exportedAt ? QUEUE_STATUS.DRAFTED : QUEUE_STATUS.READY) : QUEUE_STATUS.SENT,
       emailSentAt: isSent ? "" : at,
     } : item);
-    await persistQueue();
+    await persistQueue({ prospects: queueProspectsById([id]) });
     if (!isSent && isExtension && isEmail(prospect.email)) {
       const response = await chrome.runtime.sendMessage({
         type: "VELA_GTM_TEAM_ACTIVITY_IMPORT",
@@ -3819,9 +3955,12 @@ function bindEvents() {
       else elements.approveDraftButton.click();
       return;
     }
+    if ((event.metaKey || event.ctrlKey) && event.key === "Backspace" && state.activeProspectId) {
+      event.preventDefault();
+      deleteCurrentReviewProspect().catch((error) => showToast(error instanceof Error ? error.message : "Could not delete this prospect."));
+      return;
+    }
     if (state.activeProspectId && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && !event.target.closest("input, textarea, select")) {
-      if (event.key.toLowerCase() === "j") { event.preventDefault(); openNextRunProspect(); return; }
-      if (event.key.toLowerCase() === "k") { event.preventDefault(); openNextRunProspect({ skipped: true }); return; }
       if (event.key === "ArrowLeft") { event.preventDefault(); openAdjacentReviewProspect(-1); return; }
       if (event.key === "ArrowRight") { event.preventDefault(); openAdjacentReviewProspect(1); return; }
     }
@@ -3888,6 +4027,8 @@ async function initialize() {
   state.analyticsMember = typeof savedWorkspace.analyticsMember === "string" ? savedWorkspace.analyticsMember : "all";
   state.scheduledQuery = typeof savedWorkspace.scheduledQuery === "string" ? savedWorkspace.scheduledQuery : "";
   state.scheduledKind = ["all", SCHEDULED_SEND_KIND.INITIAL, SCHEDULED_SEND_KIND.FOLLOW_UP].includes(savedWorkspace.scheduledKind) ? savedWorkspace.scheduledKind : "all";
+  state.scheduledSender = typeof savedWorkspace.scheduledSender === "string" ? savedWorkspace.scheduledSender : "all";
+  state.scheduledTime = ["all", "today", "week", "later"].includes(savedWorkspace.scheduledTime) ? savedWorkspace.scheduledTime : "all";
   state.searchPlan = savedWorkspace.searchPlan && Array.isArray(savedWorkspace.searchPlan.searches) ? savedWorkspace.searchPlan : null;
   elements.tableSearch.value = state.query;
   elements.contactsSearch.value = state.contactQuery;

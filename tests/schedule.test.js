@@ -52,6 +52,12 @@ test("[V50] a scheduled initial creates its reply-aware follow-ups only after Gm
   assert.match(background, /gmailThreadHasReply\([\s\S]*stopFollowUpSequence/);
 });
 
+test("[V21] an immediate send silently reuses the selected Gmail session", async () => {
+  const background = await readFile(new URL("../background.js", import.meta.url), "utf8");
+  assert.match(background, /message\.type === "VELA_GTM_EMAIL_SEND"\) return sendDelivery\(message\.delivery\)/);
+  assert.doesNotMatch(background, /message\.type === "VELA_GTM_EMAIL_SEND"[^\n]*interactiveAuth:\s*true/);
+});
+
 test("scheduled send kinds stay searchable without breaking legacy jobs", () => {
   assert.equal(scheduledSendKind({}), "initial");
   assert.equal(scheduledSendKind({ kind: "follow-up" }), "follow-up");
@@ -68,7 +74,13 @@ test("scheduled dashboard groups automatic sequences and exposes type search", a
   ]);
   assert.match(html, /id="scheduledSearch"/);
   assert.match(html, /data-scheduled-kind="follow-up"/);
+  assert.match(html, /id="scheduledSenderFilter"/);
+  assert.match(html, /id="scheduledTimeFilter"/);
+  assert.match(html, /id="scheduledPagination"/);
+  assert.match(html, /id="scheduledStopSelected"/);
   assert.match(dashboard, /function scheduledDeliveryGroups/);
-  assert.match(dashboard, /Stop sequence/);
-  assert.match(dashboard, /scheduledSendMatches\(record, state\.scheduledQuery, prospect\)/);
+  assert.match(dashboard, /function createScheduledWorkUnit/);
+  assert.match(dashboard, /scheduledGroupMatchesQuery\(group, state\.scheduledQuery, indexes\)/);
+  assert.match(dashboard, /paginate\(visible, state\.scheduledPage, DATA_PAGE_SIZE\)/);
+  assert.match(dashboard, /Stops on reply/);
 });

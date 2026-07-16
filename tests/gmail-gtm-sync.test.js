@@ -55,6 +55,10 @@ test("[V46] canonical outgoing Gmail messages become attributed sent-history rec
       recipientEmails: ["Person@Example.com"],
       subject: "A quick question",
       occurredAt: "2026-07-16T12:00:00.000Z",
+      operatorId: "user-riddhiman",
+      operatorEmail: "riddhiman.rana@velaenergy.ai",
+      operatorName: "Riddhiman Rana",
+      operatorAvatarUrl: "https://example.com/riddhiman.jpg",
     },
     { gmailMessageId: "reply-1", direction: "incoming", messageKind: "reply" },
   ]);
@@ -71,6 +75,10 @@ test("[V46] canonical outgoing Gmail messages become attributed sent-history rec
     gmailMessageId: "gmail-sent-1",
     completedAt: "2026-07-16T12:00:00.000Z",
     updatedAt: "2026-07-16T12:00:00.000Z",
+    operatorId: "user-riddhiman",
+    operatorEmail: "riddhiman.rana@velaenergy.ai",
+    operatorName: "Riddhiman Rana",
+    operatorAvatarUrl: "https://example.com/riddhiman.jpg",
     source: "gmail",
   }]);
 });

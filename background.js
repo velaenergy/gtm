@@ -31,6 +31,7 @@ import {
   completeRecipientSend,
   currentTeamMembership,
   duplicateActivity,
+  deactivateGmailAccount,
   duplicateRecipientMatches,
   requireApprovedSender,
   recordSharedActivity,
@@ -42,6 +43,7 @@ import {
   sharedOutreachTemplates,
   sharedProspects,
   clearSharedProspects,
+  deleteSharedProspects,
   sharedResearchLists,
   sharedTeamProfiles,
   signInWithGoogleTokens,
@@ -266,7 +268,24 @@ async function syncDeliveryActivity(record = {}) {
 }
 
 async function recordAndSyncDelivery(input = {}) {
-  const record = await recordDelivery(input);
+  let attributedInput = input;
+  if (input.mode !== "imported") {
+    try {
+      const session = await activeSupabaseSession({ storage: chrome.storage.local });
+      if (session?.user?.id) {
+        attributedInput = {
+          ...input,
+          operatorId: session.user.id,
+          operatorEmail: session.user.email || "",
+          operatorName: session.user.userMetadata?.full_name || session.user.userMetadata?.name || "",
+          operatorAvatarUrl: session.user.userMetadata?.avatar_url || session.user.userMetadata?.picture || "",
+        };
+      }
+    } catch {
+      // The activity sync below owns reporting auth failures; keep the local ledger usable offline.
+    }
+  }
+  const record = await recordDelivery(attributedInput);
   const teamSync = await syncDeliveryActivity(record);
   return { record, tracking: teamSync, teamSync };
 }
@@ -629,7 +648,7 @@ async function importHistoricalDeliveries(records = []) {
   }
 }
 
-async function sendDelivery(input = {}) {
+async function sendDelivery(input = {}, { interactiveAuth = false } = {}) {
   const recipients = uniqueRecipients(input.recipients);
   if (!recipients.length) throw new Error("Select at least one verified recipient.");
   const deliveryId = input.id || crypto.randomUUID();
@@ -639,7 +658,7 @@ async function sendDelivery(input = {}) {
   if (!input.accountId) throw new Error("Connect and choose a Gmail sender in Settings.");
   await requireDuplicateOverride({ ...input, recipients });
 
-  let authorization = await gmailToken(false, input.accountId);
+  let authorization = await gmailToken(interactiveAuth, input.accountId);
   await requireApprovedSender(authorization.account.email, { storage: chrome.storage.local });
   await reserveRecipientsForDelivery(input, recipients, deliveryId, authorization.account.email);
   let { token } = authorization;
@@ -657,7 +676,7 @@ async function sendDelivery(input = {}) {
         if (!(error instanceof GmailApiError) || error.status !== 401 || refreshAttempted) throw error;
         refreshAttempted = true;
         await chrome.identity.removeCachedAuthToken({ token }).catch(() => {});
-        authorization = await gmailToken(false, input.accountId);
+        authorization = await gmailToken(interactiveAuth, input.accountId);
         token = authorization.token;
         result = await sendGmailMessage(token, { to: recipient, subject: input.subject, body: input.body, messageId, threadId: input.threadId, replyToMessageId: input.replyToMessageId, ...messageMetadata });
       }
@@ -893,7 +912,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       RUNTIME_CAPABILITIES_MESSAGE,
       "VELA_GTM_CONFIGURE_SIDE_PANEL", "VELA_GTM_EMAIL_SEND", "VELA_GTM_EMAIL_SCHEDULE", "VELA_GTM_EMAIL_SCHEDULE_CANCEL", "VELA_GTM_EMAIL_DUPLICATE_CHECK",
       "VELA_GTM_TEAM_AUTH_STATUS", "VELA_GTM_TEAM_SIGN_IN", "VELA_GTM_TEAM_INTERACTIVE_SIGN_IN", "VELA_GTM_TEAM_SIGN_OUT", "VELA_GTM_TEAM_ACTIVITY_READ", "VELA_GTM_TEAM_ACTIVITY_IMPORT",
-      "VELA_GTM_TEAM_GMAIL_READ", "VELA_GTM_TEAM_GMAIL_SYNC", ...Object.values(WORKSPACE_ACTION), "VELA_GTM_TEAM_SENDERS_READ", "VELA_GTM_TEAM_MEMBERS_READ", "VELA_GTM_TEAM_MEMBER_SET_ACTIVE", "VELA_GTM_TEAM_PROSPECTS_READ", "VELA_GTM_TEAM_PROSPECTS_SYNC", "VELA_GTM_TEAM_PROSPECTS_CLEAR", "VELA_GTM_RESEARCH_AUTOMATION_SYNC", "VELA_GTM_TEAM_RESEARCH_LISTS_READ", "VELA_GTM_TEAM_RESEARCH_LISTS_SYNC", "VELA_GTM_TEAM_TEMPLATES_READ", "VELA_GTM_TEAM_TEMPLATES_SYNC",
+      "VELA_GTM_TEAM_GMAIL_READ", "VELA_GTM_TEAM_GMAIL_SYNC", "VELA_GTM_TEAM_GMAIL_REMOVE", ...Object.values(WORKSPACE_ACTION), "VELA_GTM_TEAM_SENDERS_READ", "VELA_GTM_TEAM_MEMBERS_READ", "VELA_GTM_TEAM_MEMBER_SET_ACTIVE", "VELA_GTM_TEAM_PROSPECTS_READ", "VELA_GTM_TEAM_PROSPECTS_SYNC", "VELA_GTM_TEAM_PROSPECTS_CLEAR", "VELA_GTM_TEAM_PROSPECTS_DELETE", "VELA_GTM_RESEARCH_AUTOMATION_SYNC", "VELA_GTM_TEAM_RESEARCH_LISTS_READ", "VELA_GTM_TEAM_RESEARCH_LISTS_SYNC", "VELA_GTM_TEAM_TEMPLATES_READ", "VELA_GTM_TEAM_TEMPLATES_SYNC",
     ].includes(message?.type);
   if (!supported) return false;
   (async () => {
@@ -912,6 +931,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "VELA_GTM_TEAM_GMAIL_READ") return sharedGmailAccounts({ storage: chrome.storage.local });
     if (message.type === "VELA_GTM_TEAM_SENDERS_READ") return sharedApprovedSenders({ storage: chrome.storage.local });
     if (message.type === "VELA_GTM_TEAM_GMAIL_SYNC") return syncGmailAccount(message.account, { storage: chrome.storage.local });
+    if (message.type === "VELA_GTM_TEAM_GMAIL_REMOVE") return deactivateGmailAccount(message.account, { storage: chrome.storage.local });
     if (message.type === WORKSPACE_ACTION.GMAIL_BOUNCES_SYNC) return syncGmailBounces({ interactive: Boolean(message.interactive) });
     if (message.type === WORKSPACE_ACTION.GMAIL_HISTORY_SYNC) return syncGtmMailboxes({ interactive: Boolean(message.interactive), full: Boolean(message.full) });
     if (message.type === "VELA_GTM_TEAM_MEMBERS_READ") return sharedTeamProfiles({ storage: chrome.storage.local });
@@ -919,6 +939,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "VELA_GTM_TEAM_PROSPECTS_READ") return sharedProspects({ storage: chrome.storage.local });
     if (message.type === "VELA_GTM_TEAM_PROSPECTS_SYNC") return syncProspects(message.prospects, { storage: chrome.storage.local });
     if (message.type === "VELA_GTM_TEAM_PROSPECTS_CLEAR") return clearSharedProspects({ storage: chrome.storage.local });
+    if (message.type === "VELA_GTM_TEAM_PROSPECTS_DELETE") return deleteSharedProspects(message.prospects, { storage: chrome.storage.local });
     if (message.type === "VELA_GTM_RESEARCH_AUTOMATION_SYNC") {
       const automation = normalizeResearchAutomation(message.automation);
       const local = await chrome.storage.local.get(RESEARCH_AUTOMATIONS_STORAGE_KEY);

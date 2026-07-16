@@ -120,6 +120,13 @@ test("V19 explains the exact redirect URI required for Google OAuth mismatch err
   );
 });
 
+test("replaces Chrome's non-interactive navigation error with a reconnect action", () => {
+  assert.equal(
+    googleOAuthErrorMessage(new Error("User interaction required. Try setting abortOnLoadForNonInteractive and timeoutMsForNonInteractive if multiple navigations are required.")),
+    "The selected Gmail session needs to be reconnected in Settings.",
+  );
+});
+
 test("uses the built-in Web OAuth client as the only Google authorization strategy", () => {
   assert.equal(googleOAuthStrategy({ webClientId: WEB_CLIENT_ID }), GOOGLE_ACCOUNT_AUTH_MODE);
   assert.equal(googleOAuthStrategy({ webClientId: "" }), "");
@@ -200,6 +207,25 @@ test("silent authorization remains bound to the selected sender", async () => {
   assert.equal(calls[0].abortOnLoadForNonInteractive, false);
   assert.equal(request.searchParams.get("prompt"), "none");
   assert.equal(request.searchParams.get("login_hint"), "sender@vela.energy");
+});
+
+test("user-triggered token authorization opens the account chooser", async () => {
+  const calls = [];
+  const token = await getGoogleWebAuthToken({
+    identity: chooserIdentity(calls),
+    clientId: WEB_CLIENT_ID,
+    scopes: [GMAIL_SEND_SCOPE],
+    expectedEmail: "sender@vela.energy",
+    interactive: true,
+    fetchImpl: accountFetch("sender@vela.energy"),
+    cryptoImpl: FIXED_CRYPTO,
+  });
+  const request = new URL(calls[0].url);
+  assert.equal(token, "chosen-gmail-token");
+  assert.equal(calls[0].interactive, true);
+  assert.equal("abortOnLoadForNonInteractive" in calls[0], false);
+  assert.equal(request.searchParams.get("prompt"), "select_account");
+  assert.equal(request.searchParams.get("login_hint"), null);
 });
 
 test("disconnecting an account-chooser sender never touches a Chrome profile token cache", async () => {

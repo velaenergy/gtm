@@ -47,6 +47,14 @@ test("grounds the writer in richer ContactOut profile context", () => {
   assert.deepEqual(request.profile.skills, ["Power", "Critical Facilities"]);
 });
 
+test("enrichment upgrades first-name-only search results to the provider's full name", () => {
+  const merged = mergeEnrichedProfile(
+    { name: "Greg", headline: "Engineering leader" },
+    { profile: { name: "Greg Miller", headline: "Sr Director, Engineering" } },
+  );
+  assert.equal(merged.name, "Greg Miller");
+});
+
 test("keeps richer LinkedIn role descriptions when provider experience is thinner", () => {
   const merged = mergeEnrichedProfile(
     {
@@ -119,7 +127,11 @@ test("uses gpt-5.4-mini and strict structured output without storing the respons
   assert.match(request.instructions, /fixed subject "Quick intro \+ would love to pick your brain"/i);
   assert.equal(Object.hasOwn(request.text.format.schema.properties, "subject"), false);
   assert.match(request.instructions, /Do not hard-wrap lines inside a paragraph/i);
+  assert.match(request.instructions, /regular ASCII hyphen/i);
+  assert.match(request.instructions, /Do not say "grab any time here"/i);
   assert.match(request.instructions, /Do not default to praise/);
+  assert.match(request.instructions, /Do not summarize a resume into a flattering thesis/i);
+  assert.match(request.instructions, /That mix of/i);
   assert.match(request.instructions, /When context is thin, be honest and specific/);
   assert.match(request.instructions, /About section and each role description/i);
 });
@@ -153,6 +165,16 @@ test("V27 validates natural complete drafts and required sender details", () => 
     body: "Hi Alex,\n\nYou lead grid operations at Relay, where interconnection timing shapes which projects can move. I wanted to compare notes on the places large loads lose the most time.\n\nI’m Tarun, building Vela to help energy-intensive teams navigate utilities and power procurement. Would you be open to a 20-minute conversation next week? https://cal.example/vela\n\nBest,\nTarun",
     workNote: "Alex leads grid operations at Relay.",
   }, input), []);
+  assert.match(fullDraftQualityIssues({
+    subject: OUTREACH_SUBJECT,
+    body: "Hi Alex,\n\nYou lead grid operations at Relay, where interconnection timing shapes which projects can move. I wanted to compare notes on the places large loads lose the most time.\n\nI’m Tarun, building Vela to help energy-intensive teams navigate utilities and power procurement. I'd really appreciate it if we could meet for 20–30 minutes. Grab any time here: https://cal.example/vela\n\nBest,\nTarun",
+    workNote: "Alex leads grid operations at Relay.",
+  }, input).join(" "), /regular hyphen.*grab any time here/i);
+  assert.match(fullDraftQualityIssues({
+    subject: OUTREACH_SUBJECT,
+    body: "Hi April,\n\nI saw your background in procurement across EDP Renewables and now CyrusOne, especially the move from O&M procurement into infrastructure power procurement. That mix of renewables and large-load energy buying is exactly the kind of experience we'd like to learn from.\n\nI’m Tarun, building Vela Energy. We’re still learning how teams like yours source power, and I’d appreciate 20-30 minutes to ask a few questions from your side of the table.\n\nIf you're open to it: https://cal.example/vela\n\nBest,\nTarun",
+    workNote: "April works in infrastructure power procurement at CyrusOne.",
+  }, input).join(" "), /resume-style synthesis/i);
 });
 
 test("uses the canonical subject while keeping model-written body structure", async () => {

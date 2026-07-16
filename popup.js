@@ -32,7 +32,7 @@ import {
 } from "./lib/schedule.js";
 import { buildWriterRequest, fullDraftQualityIssues, mergeEnrichedProfile, normalizeWorkNote, normalizeWriterResponse, writerGenerationMode } from "./lib/ai-writer.js";
 import { rememberContactCandidate, resolveContactEmail } from "./lib/contact-resolution.js";
-import { PROVIDER, configuredEnrichmentProviders, providerLabel } from "./lib/provider-priority.js";
+import { PROVIDER, configuredManualEnrichmentProviders, providerLabel } from "./lib/provider-priority.js";
 import { appendDiagnostic } from "./lib/diagnostics.js";
 import { mailboxCapacityUsage, mergeDeliveryRecords } from "./lib/analytics.js";
 import { gmailMessagesAsDeliveryRecords } from "./lib/gmail-gtm-sync.js";
@@ -733,7 +733,7 @@ async function enrichProfile({ requestPermission = true, manageButton = true, op
   if (!state.profile) return;
   const profileAtStart = state.profile;
   const isCurrentProfile = () => state.profile === profileAtStart;
-  const providerIds = configuredEnrichmentProviders(state.settings);
+  const providerIds = configuredManualEnrichmentProviders(state.settings);
   const providers = providerIds.map(providerLabel);
   const provider = providers[0] || "";
   let resolvedProvider = provider;
@@ -879,7 +879,7 @@ async function findProspectEmail({ automatic = false, personalize = true } = {})
   setFindEmailLoading(true, "Looking up");
   await appendDiagnostic({
     area: "popup", stage: "lookup_start", outcome: automatic ? "automatic" : "manual",
-    provider: configuredEnrichmentProviders(state.settings).join("+"), profileKind: isLinkedInProfile(profileAtStart.url) ? "linkedin_profile" : "invalid_profile",
+    provider: configuredManualEnrichmentProviders(state.settings).join("+"), profileKind: isLinkedInProfile(profileAtStart.url) ? "linkedin_profile" : "invalid_profile",
   });
   if (!isCurrentProfile()) return false;
 

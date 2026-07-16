@@ -102,10 +102,9 @@ insert into public.email_templates (id, name, subject, body, sender_name, writer
 
 I'm Tony. My co-founder, Tarun Batchu, and I recently raised a $1.3M pre-seed round from a16z (the world's largest venture capital firm) for our startup, Vela Energy, after I left Tesla to build the company full-time.
 
-We're still exploring the space, so I’m hoping to learn how this process works from your side.
-Would you be open to a 20-minute conversation?
+We're still exploring the space, and I'd really appreciate it if we could meet for 20-30 minutes so I can learn how this process works from your side.
 
-Grab any time here: cal.com/team/velaenergy
+If you're open to it, here's my calendar: cal.com/team/velaenergy
 
 Best,
 Tony$copy$, 'Tony', 'gaps', 3, array['tony-follow-up-1','tony-follow-up-2','tony-follow-up-3'], true),
@@ -115,10 +114,9 @@ Tony$copy$, 'Tony', 'gaps', 3, array['tony-follow-up-1','tony-follow-up-2','tony
 
 I'm Tarun. My co-founder, Tony, and I recently raised a $1.3M pre-seed round from a16z (the world's largest venture capital firm) for our startup, Vela Energy.
 
-We're still exploring the space, so I’m hoping to learn how this process works from your side.
-Would you be open to a 20-minute conversation?
+We're still exploring the space, and I'd really appreciate it if we could meet for 20-30 minutes so I can learn how this process works from your side.
 
-Grab any time here: cal.com/team/velaenergy
+If you're open to it, here's my calendar: cal.com/team/velaenergy
 
 Best,
 Tarun$copy$, 'Tarun', 'gaps', 4, array['tarun-follow-up-1','tarun-follow-up-2','tarun-follow-up-3'], true)
