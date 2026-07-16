@@ -7,6 +7,7 @@ import {
   normalizeContactOutSessionReveal,
   previewContactOutSession,
   revealContactOutSession,
+  selectContactOutSessionRecord,
   summarizeContactOutSessionUser,
 } from "../lib/contactout-session.js";
 
@@ -86,6 +87,51 @@ test("keeps ContactOut verification-in-progress status on revealed candidates", 
   assert.equal(result.email, "");
   assert.deepEqual(result.unverifiedEmails, ["checking@grid.example"]);
   assert.equal(result.emailStatuses["checking@grid.example"], "checking");
+});
+
+test("V40 selects the encrypted ContactOut record matching the requested LinkedIn identity", () => {
+  const selected = selectContactOutSessionRecord({
+    stale: {
+      profile_url: "https://www.linkedin.com/in/nathan-liu/",
+      li_vanity: "nathan-liu",
+      member_id: 111,
+      full_name: "Nathan Liu",
+      emails: [{ value: "n***@case.edu", type: 2 }],
+    },
+    requested: {
+      profile_url: "https://www.linkedin.com/in/karan-bahl/",
+      li_vanity: "karan-bahl",
+      member_id: 222,
+      full_name: "Karan Bahl",
+      emails: [{ value: "k***@case.edu", type: 2 }],
+    },
+  }, {
+    profile_url: "https://www.linkedin.com/in/karan-bahl/",
+    li_vanity: "karan-bahl",
+    full_name: "Karan Bahl",
+    member_id: 222,
+  });
+
+  assert.equal(selected.full_name, "Karan Bahl");
+  assert.equal(selected.member_id, 222);
+});
+
+test("V40 fails closed when ContactOut reveals a different person's profile", () => {
+  assert.throws(() => normalizeContactOutSessionReveal({
+    profile: {
+      full_name: "Nathan Liu",
+      profile_url: "https://www.linkedin.com/in/nathan-liu/",
+      emails: [{ value: "nathan.liu@case.edu", type: 2, confidence_level: "high", is_guess: false }],
+    },
+  }, {
+    descriptor: {
+      profile_url: "https://www.linkedin.com/in/karan-bahl/",
+      li_vanity: "karan-bahl",
+      full_name: "Karan Bahl",
+      member_id: 222,
+    },
+    profile: { name: "Karan Bahl", experiences: [] },
+  }), (error) => error?.code === "profile_mismatch");
 });
 
 test("V17 mirrors ContactOut's preview-to-reveal descriptor contract", async () => {

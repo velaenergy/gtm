@@ -30,7 +30,7 @@ import {
   normalizeDeliverySettings,
 } from "./lib/schedule.js";
 import { buildWriterRequest, fullDraftQualityIssues, mergeEnrichedProfile, normalizeWorkNote, normalizeWriterResponse, writerGenerationMode } from "./lib/ai-writer.js";
-import { resolveContactEmail } from "./lib/contact-resolution.js";
+import { rememberContactCandidate, resolveContactEmail } from "./lib/contact-resolution.js";
 import { PROVIDER, configuredEnrichmentProviders, providerLabel } from "./lib/provider-priority.js";
 import { appendDiagnostic } from "./lib/diagnostics.js";
 import { mailboxCapacityUsage } from "./lib/analytics.js";
@@ -434,7 +434,16 @@ function renderEmail() {
     const copy = document.createElement("span");
     const address = document.createElement("strong");
     address.textContent = email;
-    copy.append(address);
+    const metadata = document.createElement("small");
+    const verificationLabel = candidate.verification === "verified"
+      ? "Verified"
+      : candidate.verification === "pending"
+        ? "Verification in progress"
+        : candidate.verification === "blocked"
+          ? "Unavailable"
+          : "Not verified";
+    metadata.textContent = `${candidate.source} · ${verificationLabel}`;
+    copy.append(address, metadata);
     option.append(checkbox, mark, copy);
     checkbox.addEventListener("change", () => {
       if (!allowMultiple && checkbox.checked) {
@@ -924,7 +933,11 @@ async function findProspectEmail({ automatic = false, personalize = true } = {})
       state.emailType = "linkedin";
       state.emailSource = resolution.strategy === "rsc" ? "LinkedIn Contact Info" : "LinkedIn Contact Info overlay";
       state.confidence = null;
-      state.contactDetails = { ...state.contactDetails, error: "" };
+      state.contactDetails = rememberContactCandidate({ ...state.contactDetails, error: "" }, {
+        email: resolution.email,
+        source: "LinkedIn",
+        status: "unverified",
+      });
       renderEmail();
       queueDraftSave();
     }

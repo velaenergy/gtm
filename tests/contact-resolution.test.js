@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveContactEmail } from "../lib/contact-resolution.js";
+import { contactEmailCandidates } from "../lib/message.js";
+import { rememberContactCandidate, resolveContactEmail } from "../lib/contact-resolution.js";
 
 test("V11 falls back to LinkedIn when ContactOut returns no email", async () => {
   const calls = [];
@@ -34,4 +35,26 @@ test("V11 does not call LinkedIn after ContactOut succeeds", async () => {
   assert.equal(result.email, "verified@example.com");
   assert.equal(result.source, "contactout");
   assert.equal(linkedInCalls, 0);
+});
+
+test("V39 keeps every discovered address after the active recipient changes", () => {
+  const contactDetails = rememberContactCandidate({
+    unverifiedEmails: ["nathan.liu@case.edu"],
+    emailStatuses: { "nathan.liu@case.edu": "unverified" },
+    emailSources: { "nathan.liu@case.edu": ["ContactOut"] },
+  }, {
+    email: "karan.bahl@case.edu",
+    source: "LinkedIn",
+    status: "unverified",
+  });
+
+  assert.deepEqual(
+    contactEmailCandidates({ currentEmail: "karan.bahl@case.edu", contactDetails }).map(({ email }) => email),
+    ["nathan.liu@case.edu", "karan.bahl@case.edu"],
+  );
+  assert.deepEqual(
+    contactEmailCandidates({ currentEmail: "nathan.liu@case.edu", contactDetails }).map(({ email }) => email),
+    ["nathan.liu@case.edu", "karan.bahl@case.edu"],
+  );
+  assert.deepEqual(contactDetails.emailSources["karan.bahl@case.edu"], ["LinkedIn"]);
 });
