@@ -69,6 +69,13 @@ test("draft review keeps the prospect profile focused and its controls legible",
   assert.match(dashboardJs, /drawerEmailSection\.hidden = true/);
 });
 
+test("[V51] approving one draft advances the open review drawer", () => {
+  assert.match(dashboardJs, /function openNextApprovalDraft\(currentId\)/);
+  assert.match(dashboardJs, /const approved = await approveProspects\(\[currentId\]\);[\s\S]*if \(!approved\) return;[\s\S]*openNextApprovalDraft\(currentId\)/);
+  const approvalHandler = dashboardJs.match(/approveDraftButton\.addEventListener\("click", async \(\) => \{([\s\S]*?)\n  \}\);/)?.[1] || "";
+  assert.doesNotMatch(approvalHandler, /closeReviewDrawer\(\)/);
+});
+
 test("dashboard element bindings stay in sync with the rendered markup", () => {
   const elementBlock = dashboardJs.match(/const elements = Object\.fromEntries\(\[([\s\S]*?)\]\.map/)?.[1] || "";
   const boundIds = [...elementBlock.matchAll(/"([^"]+)"/g)].map((match) => match[1]);

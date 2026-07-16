@@ -3307,6 +3307,17 @@ function openAdjacentReviewProspect(direction = 1) {
   openReviewDrawer(next.id, elements.closeDrawerButton);
 }
 
+function openNextApprovalDraft(currentId) {
+  const next = drawerProspects().find((prospect) => prospect.id !== currentId && prospect.status === QUEUE_STATUS.READY);
+  if (next) {
+    openReviewDrawer(next.id, elements.closeDrawerButton);
+    return true;
+  }
+  openReviewDrawer(currentId, elements.closeDrawerButton);
+  showToast("All review drafts are approved.");
+  return false;
+}
+
 async function sendCurrentReview() {
   const id = state.activeProspectId;
   if (!id || state.busy) return;
@@ -3789,10 +3800,14 @@ function bindEvents() {
       catch (error) { showToast(error instanceof Error ? error.message : "Could not send this email."); }
       return;
     }
+    const currentId = state.activeProspectId;
+    if (!currentId) return;
     if (await saveReview()) {
-      await approveProspects([state.activeProspectId]);
-      closeReviewDrawer();
-      showToast("Draft approved and ready to send.");
+      const current = state.queue.find((prospect) => prospect.id === currentId);
+      if (current?.status !== QUEUE_STATUS.READY) return;
+      const approved = await approveProspects([currentId]);
+      if (!approved) return;
+      openNextApprovalDraft(currentId);
     }
   });
   document.addEventListener("keydown", (event) => {
