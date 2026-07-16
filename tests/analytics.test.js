@@ -7,6 +7,7 @@ import {
   deliveryOutcomeCounts,
   mailboxCapacityUsage,
   mailboxDailyCapacity,
+  mailboxSentEvents,
   mergeDeliveryRecords,
   summarizeDailySends,
   teamMemberKey,
@@ -27,6 +28,27 @@ test("collectSentEvents merges the delivery ledger with manual sent marks withou
 
   assert.deepEqual(events.map((event) => event.identity), ["prospect-3", "prospect-1"]);
   assert.equal(events[0].recipient, "");
+});
+
+test("[V50] mailbox totals use confirmed sender records instead of queue sent fallbacks", () => {
+  const deliveryLog = [{
+    id: "research-send-1",
+    prospectId: "prospect-1",
+    senderEmail: "tarun@velaenergy.ai",
+    recipients: ["person@example.com"],
+    status: "sent",
+    completedAt: "2026-07-16T18:00:00.000Z",
+  }];
+  const queue = [{
+    id: "prospect-1",
+    email: "person@example.com",
+    senderEmail: "tarun@velaenergy.ai",
+    emailSentAt: "2026-07-16T18:00:00.000Z",
+  }];
+
+  assert.equal(collectSentEvents({ deliveryLog, queue }).length, 1);
+  assert.equal(mailboxSentEvents({ deliveryLog, queue }).length, 1);
+  assert.equal(mailboxSentEvents({ deliveryLog: [{ ...deliveryLog[0], senderEmail: "" }], queue }).length, 0);
 });
 
 test("legacy sent marks remain visible as unattributed history", () => {

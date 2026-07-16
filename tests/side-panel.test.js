@@ -48,7 +48,7 @@ test("dashboard always identifies the active workspace user separately from the 
   assert.match(dashboardJs, /function renderCurrentUser\(\)/);
   assert.match(dashboardJs, /currentUserBadge\.addEventListener\("click", openAdvancedSettings\)/);
   assert.doesNotMatch(dashboardJs, /state\.currentTeamUser = !isExtension[\s\S]*: null/);
-  assert.match(dashboardJs, /const reportableEvents = events\.filter\(\(event\) => event\.operatorId \|\| event\.operatorEmail \|\| event\.senderEmail\)/);
+  assert.match(dashboardJs, /const reportableEvents = mailboxSentEvents\(\{ deliveryLog \}\)/);
 });
 
 test("V49 keeps the canonical first-touch subject read-only through review and delivery", () => {
@@ -67,6 +67,16 @@ test("draft review keeps the prospect profile focused and its controls legible",
   assert.match(dashboardCss, /\.drawer-content > \* \{ flex:none; \}/);
   assert.match(dashboardCss, /\.drawer-collapsible > summary \{[^}]*color:var\(--ink\)/);
   assert.match(dashboardJs, /drawerEmailSection\.hidden = true/);
+});
+
+test("dashboard element bindings stay in sync with the rendered markup", () => {
+  const elementBlock = dashboardJs.match(/const elements = Object\.fromEntries\(\[([\s\S]*?)\]\.map/)?.[1] || "";
+  const boundIds = [...elementBlock.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+
+  assert.ok(boundIds.length > 0, "dashboard element bindings should be discoverable");
+  for (const id of boundIds) {
+    assert.match(dashboardHtml, new RegExp(`id=["']${id}["']`), `#${id} must exist before dashboard.js binds it`);
+  }
 });
 
 test("analytics is a focused delivery control room backed by Gmail health signals", () => {

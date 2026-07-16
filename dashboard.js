@@ -62,11 +62,13 @@ import {
   buildDailySendSeries,
   collectSentEvents,
   mailboxCapacityUsage,
+  mailboxSentEvents,
   mergeDeliveryRecords,
   summarizeDailySends,
   teamMemberKey,
   teamPerformance,
 } from "./lib/analytics.js";
+import { buildDeliveryFollowUps } from "./lib/follow-up.js";
 import {
   WORKSPACE_BACKUP_STORAGE_KEY,
   workspaceRecoveryPatch,
@@ -139,7 +141,7 @@ const elements = Object.fromEntries([
   "queueHeading", "queueDescription", "tableSearch", "statusFilterButton", "resultCount", "nextResearchBatchButton", "selectAll", "bulkBar",
   "selectedCount", "bulkResearchButton", "bulkApproveButton", "bulkSendButton", "clearSelectionButton",
   "collapseSidebar", "drawerBackdrop", "reviewDrawer", "closeDrawerButton", "drawerAvatar", "drawerName", "drawerHeadline",
-  "drawerLocation", "drawerLinkedIn", "drawerWorkNote", "drawerEmail", "drawerSubject", "drawerBody", "saveReviewButton", "approveDraftButton", "previousReviewButton", "nextReviewButton", "drawerPosition",
+  "drawerLocation", "drawerLinkedIn", "drawerEmail", "drawerSubject", "drawerBody", "saveReviewButton", "approveDraftButton", "previousReviewButton", "nextReviewButton", "drawerPosition",
   "drawerEmailSection", "drawerProfileSection",
   "drawerEmailChoices", "drawerEmailSource", "drawerEmailStatus", "copyDrawerEmail", "retryDrawerLookup", "drawerExperienceCount", "drawerExperienceList", "drawerActivity", "markSentButton", "skipReviewButton", "drawerReviewContext", "drawerRecipient", "drawerSender",
   "agentActivity", "agentActivityTitle", "agentActivityDetail", "campaignNav", "newCampaignButton", "newCampaignButtonTop",
@@ -147,7 +149,7 @@ const elements = Object.fromEntries([
   "campaignDialog", "campaignForm", "campaignName", "campaignDescription", "campaignDialogKicker", "campaignDialogTitle", "campaignDialogDescription", "campaignSubmitButton", "closeCampaignDialog", "cancelCampaignButton",
   "deleteCampaignDialog", "deleteCampaignDescription", "confirmDeleteCampaignButton", "authGate", "authSignInButton", "authGateStatus",
   "currentUserBadge", "currentUserAvatarImage", "currentUserAvatarInitials", "currentUserName", "currentUserEmail",
-  "drawerFitReason", "drawerFitBadge", "drawerFitEvidence", "sendDialog", "sendDialogCount", "sendDialogDescription", "confirmBulkSendButton",
+  "sendDialog", "sendDialogCount", "sendDialogDescription", "confirmBulkSendButton",
 ].map((id) => [id, document.getElementById(id)]));
 
 const DEMO_QUEUE = [
@@ -1751,8 +1753,7 @@ function renderAnalytics() {
 
 function renderOverview() {
   const deliveryLog = unifiedDeliveryLog();
-  const events = collectSentEvents({ deliveryLog, queue: state.queue });
-  const reportableEvents = events.filter((event) => event.operatorId || event.operatorEmail || event.senderEmail);
+  const reportableEvents = mailboxSentEvents({ deliveryLog });
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const thirtyDayCutoff = startOfToday - 29 * 86_400_000;
@@ -1777,7 +1778,8 @@ function renderOverview() {
   elements.dashboardSendRateDetail.textContent = sentToday.length ? `Average across ${elapsedHours.toFixed(1)} active hours today` : "No sends yet today";
   elements.dashboardProspectsContacted.textContent = contacted.size.toLocaleString();
 
-  renderMailboxCapacity(mailboxCapacityUsage({ deliveryLog, accounts: state.googleAccounts }), {
+  const mailboxUsage = mailboxCapacityUsage({ deliveryLog, accounts: state.googleAccounts });
+  renderMailboxCapacity(mailboxUsage, {
     totalElement: elements.dashboardMailboxCapacityTotal,
     listElement: elements.dashboardMailboxCapacityList,
   });
@@ -1787,22 +1789,24 @@ function renderOverview() {
   renderDailyChart(sentSeries, replySeries, elements.dashboardSendChart);
   elements.dashboardSendChart.setAttribute("aria-label", `${recentEvents.length} emails sent and ${replyEvents.length} replies received over the last 30 days.`);
 
-  const senderRows = teamPerformance(sentToday);
-  const senderMax = Math.max(1, ...senderRows.map((member) => member.sent));
+  const senderRows = mailboxUsage.filter((mailbox) => mailbox.sent).sort((a, b) => b.sent - a.sent || a.email.localeCompare(b.email));
+  const senderMax = Math.max(1, ...senderRows.map((mailbox) => mailbox.sent));
   const senderFragment = document.createDocumentFragment();
-  for (const member of senderRows) {
+  for (const mailbox of senderRows) {
+    const member = state.teamMembers.find((candidate) => String(candidate.email || "").toLowerCase() === mailbox.email);
+    const senderName = member?.full_name || mailbox.email;
     const row = document.createElement("article");
     row.className = "dashboard-sender-row";
     const heading = document.createElement("div");
     const identity = appendText(heading, "span", "", "dashboard-sender-identity");
-    appendText(identity, "span", initialsFor(member.name), "settings-member-avatar");
+    appendText(identity, "span", initialsFor(senderName), "settings-member-avatar");
     const copy = appendText(identity, "span", "", "dashboard-sender-copy");
-    appendText(copy, "strong", member.name);
-    appendText(copy, "small", member.senders.join(", ") || member.operatorEmail || "Sending mailbox unavailable");
-    appendText(heading, "b", member.sent.toLocaleString());
+    appendText(copy, "strong", senderName);
+    appendText(copy, "small", mailbox.email);
+    appendText(heading, "b", mailbox.sent.toLocaleString());
     const track = appendText(row, "div", "", "dashboard-sender-track");
     const indicator = document.createElement("i");
-    indicator.style.setProperty("--sender-width", `${Math.max(4, (member.sent / senderMax) * 100)}%`);
+    indicator.style.setProperty("--sender-width", `${Math.max(4, (mailbox.sent / senderMax) * 100)}%`);
     track.append(indicator);
     row.prepend(heading);
     senderFragment.append(row);
@@ -3332,19 +3336,10 @@ function openReviewDrawer(id, trigger = document.activeElement) {
   elements.drawerLinkedIn.hidden = !prospect.url;
   elements.drawerName.classList.toggle("is-disabled", !prospect.url);
   for (const section of elements.reviewDrawer.querySelectorAll("details.drawer-collapsible")) section.open = section.id === "drawerProfileSection";
-  const workNote = prospect.workNote || prospect.background || "";
   const experiences = prospect.profile?.experiences || [];
   const activity = prospect.activity || [];
   elements.drawerEmailSection.hidden = true;
   elements.drawerProfileSection.hidden = !experiences.length && !activity.length;
-  const fit = fitLabel(prospect.targetFit);
-  elements.drawerFitBadge.textContent = fit.label;
-  elements.drawerFitBadge.className = `fit-pill ${fit.className}`;
-  elements.drawerFitReason.textContent = prospect.targetFit?.reason || "Run verification to score this person against Vela’s target context.";
-  const evidence = document.createDocumentFragment();
-  for (const item of prospect.targetFit?.evidence || []) appendText(evidence, "span", item);
-  elements.drawerFitEvidence.replaceChildren(evidence);
-  elements.drawerWorkNote.value = workNote;
   elements.drawerEmail.value = prospect.email || "";
   elements.drawerRecipient.textContent = prospect.email || "No recipient selected";
   elements.drawerSender.textContent = prospect.senderEmail ? `From ${prospect.senderEmail}` : "From selected Gmail sender";
@@ -3396,7 +3391,7 @@ async function saveReview() {
   if (!isEmail(email)) { showToast("Add a valid email before approving this draft."); elements.drawerEmail.focus(); return false; }
   if (!subject || !body) { showToast("The subject and message both need content."); return false; }
   const reviewedAt = new Date().toISOString();
-  state.queue = state.queue.map((item) => item.id === id ? { ...withActivity(item, "reviewed", "Draft reviewed and saved", reviewedAt), email, subject, body, workNote: elements.drawerWorkNote.value.trim(), reviewedAt } : item);
+  state.queue = state.queue.map((item) => item.id === id ? { ...withActivity(item, "reviewed", "Draft reviewed and saved", reviewedAt), email, subject, body, reviewedAt } : item);
   await persistQueue();
   renderQueue();
   showToast("Review changes saved.");
@@ -3472,9 +3467,12 @@ async function sendApproved(ids = []) {
       failures.push(`${person.name || person.email}: connect ${person.senderEmail} for the ${person.templateId || "selected"} template`);
       continue;
     }
+    const template = selectedOutreachTemplate(person.templateId);
+    const profile = { ...(person.profile || {}), name: person.name || person.profile?.name || "", headline: person.headline || person.profile?.headline || "" };
+    const followUpSequence = buildDeliveryFollowUps({ profile, workNote: person.workNote || person.background || "", template, settings: state.settings });
     const response = await chrome.runtime.sendMessage({
       type: "VELA_GTM_EMAIL_SEND",
-      delivery: { accountId: account.id, senderEmail: account.email, recipients: [person.email], subject: OUTREACH_SUBJECT, body: person.body, prospectId: person.id },
+      delivery: { accountId: account.id, senderEmail: account.email, recipients: [person.email], subject: OUTREACH_SUBJECT, body: person.body, prospectId: person.id, ...followUpSequence },
     });
     if (response?.ok && response.data?.sent?.length) sent += 1;
     else failures.push(`${person.name || person.email}: ${response?.error || "send failed"}`);

@@ -11,3 +11,9 @@ test("V38 gates extension-only popup work through the preview runtime state", ()
     /async function confirmDuplicateRecipients\(delivery = \{\}\) \{\s*if \(state\.isPreview\) return \{ proceed: true, override: false \};/,
   );
 });
+
+test("[V50] sender quota hydrates the same shared Gmail and team records as Dashboard", () => {
+  assert.match(popup, /type: "VELA_GTM_TEAM_ACTIVITY_READ"/);
+  assert.match(popup, /gmailMessagesAsDeliveryRecords\(/);
+  assert.match(popup, /mergeDeliveryRecords\(/);
+});

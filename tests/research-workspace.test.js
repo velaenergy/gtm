@@ -108,3 +108,9 @@ test("research automation normalizes caps and uses stable Chrome alarm names", (
   assert.equal(researchAutomationIdFromAlarm(researchAutomationAlarmName(automation.id)), "run-daily");
   assert.equal(nextAutomationRun(60, new Date("2026-07-16T00:00:00.000Z")), "2026-07-16T01:00:00.000Z");
 });
+
+test("[V50] research and YOLO sends keep the selected template follow-up sequence", async () => {
+  const dashboardJs = await readFile(new URL("../dashboard.js", import.meta.url), "utf8");
+  assert.match(dashboardJs, /buildDeliveryFollowUps\(/);
+  assert.match(dashboardJs, /delivery: \{[^}]*\.\.\.followUpSequence/s);
+});

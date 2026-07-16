@@ -5,7 +5,6 @@ import {
   contactEmailCandidates,
   deliveryRecipientEmails,
   emailTemplates,
-  followUpTemplates,
   gmailComposeUrl,
   mailtoComposeUrl,
   isEmail,
@@ -16,6 +15,7 @@ import {
   resolveTheme,
   templateVariables,
 } from "./lib/message.js";
+import { buildDeliveryFollowUps } from "./lib/follow-up.js";
 import { aiDraftDeliveryReady, runAutomaticProfileWorkflow } from "./lib/profile-workflow.js";
 import {
   GOOGLE_ACCOUNTS_STORAGE_KEY,
@@ -34,7 +34,8 @@ import { buildWriterRequest, fullDraftQualityIssues, mergeEnrichedProfile, norma
 import { rememberContactCandidate, resolveContactEmail } from "./lib/contact-resolution.js";
 import { PROVIDER, configuredEnrichmentProviders, providerLabel } from "./lib/provider-priority.js";
 import { appendDiagnostic } from "./lib/diagnostics.js";
-import { mailboxCapacityUsage } from "./lib/analytics.js";
+import { mailboxCapacityUsage, mergeDeliveryRecords } from "./lib/analytics.js";
+import { gmailMessagesAsDeliveryRecords } from "./lib/gmail-gtm-sync.js";
 import { DELIVERY_LOG_STORAGE_KEY, normalizeDeliveryLog } from "./lib/delivery-ledger.js";
 import { QUEUE_STORAGE_KEY, prospectIdentity, upsertProspects } from "./lib/queue.js";
 import {
@@ -636,7 +637,14 @@ async function loadSettings() {
     });
   }
   state.deliverySettings = normalizeDeliverySettings(result[DELIVERY_SETTINGS_KEY]);
-  state.deliveryLog = normalizeDeliveryLog(result[DELIVERY_LOG_STORAGE_KEY]);
+  const localDeliveryLog = normalizeDeliveryLog(result[DELIVERY_LOG_STORAGE_KEY]);
+  if (state.isPreview) state.deliveryLog = localDeliveryLog;
+  else {
+    const activity = await chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_ACTIVITY_READ" }).catch(() => null);
+    const sharedDeliveryLog = (activity?.data?.records || []).filter((record) => record.source === "supabase");
+    const canonicalDeliveryLog = gmailMessagesAsDeliveryRecords(activity?.data?.gtmMessages || []);
+    state.deliveryLog = mergeDeliveryRecords(canonicalDeliveryLog, sharedDeliveryLog, localDeliveryLog);
+  }
   if (["light", "dark"].includes(previewTheme)) state.settings.theme = previewTheme;
   applyTheme(state.settings.theme);
   populateTemplates();
@@ -1290,14 +1298,12 @@ async function deliverEmail() {
     duplicateOverride: duplicateDecision.override,
   };
   const selectedTemplate = state.templates.find((template) => template.id === state.templateId);
-  const savedFollowUps = followUpTemplates(state.settings);
-  const variables = templateVariables(state.profile, state.settings, state.note, selectedTemplate);
-  delivery.templateId = selectedTemplate?.id || "";
-  delivery.followUpCadenceDays = selectedTemplate?.followUpCadenceDays || 3;
-  delivery.followUps = (selectedTemplate?.followUpTemplateIds || []).map((templateId) => {
-    const followUp = savedFollowUps.find((template) => template.id === templateId);
-    return followUp ? { templateId, body: applyTemplate({ body: followUp.body }, variables).body } : null;
-  }).filter(Boolean);
+  Object.assign(delivery, buildDeliveryFollowUps({
+    profile: state.profile,
+    workNote: state.note,
+    template: selectedTemplate,
+    settings: state.settings,
+  }));
   if (state.deliverySettings.scheduleEnabled) delivery.scheduledAt = nextScheduledAt(state.deliverySettings.scheduleTime).toISOString();
 
   if (state.isPreview) {

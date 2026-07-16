@@ -33,12 +33,23 @@ test("scheduled jobs persist delivery data but never OAuth tokens", () => {
     recipients: ["person@example.com"],
     subject: "Hello",
     body: "Body",
+    followUps: [{ templateId: "sender-follow-up-1", body: "Following up." }],
+    followUpCadenceDays: 4,
     scheduledAt: "2026-07-13T17:00:00.000Z",
     token: "must-not-persist",
   }, now);
   assert.equal(job.status, "scheduled");
+  assert.deepEqual(job.followUps, [{ templateId: "sender-follow-up-1", body: "Following up." }]);
+  assert.equal(job.followUpCadenceDays, 4);
   assert.equal("token" in job, false);
   assert.equal(jobIdFromAlarm(alarmNameForJob(job.id)), "job-1");
+});
+
+test("[V50] a scheduled initial creates its reply-aware follow-ups only after Gmail sends", async () => {
+  const background = await readFile(new URL("../background.js", import.meta.url), "utf8");
+  assert.match(background, /const result = await sendDelivery\(\{ \.\.\.job, duplicateOverride: true \}\)/);
+  assert.match(background, /input\.kind !== "follow-up" && input\.followUps\?\.length[\s\S]*scheduleAutomaticFollowUps\(/);
+  assert.match(background, /gmailThreadHasReply\([\s\S]*stopFollowUpSequence/);
 });
 
 test("scheduled send kinds stay searchable without breaking legacy jobs", () => {

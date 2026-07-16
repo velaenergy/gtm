@@ -160,7 +160,9 @@ The writer sends `store: false` and asks the Responses API for a strict JSON sch
 
 ## Gmail delivery, scheduling, and shared activity
 
-Team members sign in with an `@velaenergy.ai` Google identity before the extension workspace opens. Supabase is the central source for teammate profiles, approved sender settings, connected Gmail metadata, prospects, and recipient-level activity. Before an immediate or scheduled send, the background worker verifies the mailbox against the active sender roster and checks Supabase plus the local delivery ledger. Prior sent, partial, or scheduled activity produces a recipient-specific warning and requires an explicit send-again confirmation.
+Team members sign in with an `@velaenergy.ai` Google identity before the extension workspace opens. Supabase is the central source for teammate profiles, approved sender settings, connected Gmail metadata, prospects, and recipient-level activity. Dashboard **Sent today**, dashboard mailbox capacity, and the side-panel sender quota all use the same deduplicated Gmail, Supabase, and local delivery records for each connected `From` mailbox. Before an immediate or scheduled send, the background worker verifies the mailbox against the active sender roster and checks Supabase plus the local delivery ledger. Prior sent, partial, or scheduled activity produces a recipient-specific warning and requires an explicit send-again confirmation.
+
+Initial sends from the side panel, approvals, research runs, and YOLO automations all carry the selected template's automatic follow-up sequence. A scheduled initial preserves that sequence until Gmail sends it; only then does the background worker create the business-day follow-up alarms, and it cancels the remaining sequence when Gmail or the prospect record reports a reply.
 
 Google Sheets is source-only: download a sheet as `.xlsx` or `.csv`, then import it through the editable column-mapping flow. Rows with an existing `Email Sent` value become Supabase activity as well as local history, making old campaign history part of the duplicate check and analytics. There is no Sheets runtime connection or workbook export workflow.
 

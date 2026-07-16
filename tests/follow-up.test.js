@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { FOLLOW_UP_TEMPLATES, TEMPLATES, followUpTemplates } from "../lib/message.js";
-import { addBusinessDays, buildFollowUpJobs, hasRecordedReply } from "../lib/follow-up.js";
+import { addBusinessDays, buildDeliveryFollowUps, buildFollowUpJobs, hasRecordedReply } from "../lib/follow-up.js";
 
 test("Tony and Tarun defaults keep their screenshot copy and cadence", () => {
   assert.equal(FOLLOW_UP_TEMPLATES.length, 6);
@@ -25,6 +25,20 @@ test("automatic sequences schedule on business days", () => {
   assert.equal(jobs.length, 3);
   assert.deepEqual(jobs.map((job) => job.sequenceStep), [1, 2, 3]);
   assert.ok(jobs.every((job) => job.threadId === "thread-1" && job.kind === "follow-up"));
+});
+
+test("[V50] every initial delivery can carry its selected template sequence", () => {
+  const sequence = buildDeliveryFollowUps({
+    profile: { name: "Alex Rivera" },
+    workNote: "your work on grid infrastructure",
+    template: TEMPLATES[0],
+    settings: {},
+  });
+
+  assert.equal(sequence.templateId, "tony");
+  assert.equal(sequence.followUpCadenceDays, 3);
+  assert.equal(sequence.followUps.length, 3);
+  assert.match(sequence.followUps[0].body, /Hi Alex/);
 });
 
 test("recorded replies stop a sequence", () => {
