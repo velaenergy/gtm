@@ -67,6 +67,11 @@ import {
   upsertDeliveryRecord,
 } from "./lib/delivery-ledger.js";
 import { buildFollowUpJobs, hasRecordedReply } from "./lib/follow-up.js";
+import {
+  PROVIDER_ACTION,
+  RUNTIME_CAPABILITIES_MESSAGE,
+  runtimeCapabilities,
+} from "./lib/runtime-protocol.js";
 
 const TEAM_SYNC_STATE_STORAGE_KEY = "velaGtmTeamSyncState";
 const GMAIL_BOUNCE_SYNC_STATE_STORAGE_KEY = "velaGtmGmailBounceSyncState";
@@ -650,12 +655,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const supported = message?.type?.startsWith("VELA_GTM_PROVIDER_")
     || message?.type?.startsWith("VELA_GTM_CONTACTOUT_SESSION_")
     || [
+      RUNTIME_CAPABILITIES_MESSAGE,
       "VELA_GTM_CONFIGURE_SIDE_PANEL", "VELA_GTM_EMAIL_SEND", "VELA_GTM_EMAIL_SCHEDULE", "VELA_GTM_EMAIL_SCHEDULE_CANCEL", "VELA_GTM_EMAIL_DUPLICATE_CHECK",
       "VELA_GTM_TEAM_AUTH_STATUS", "VELA_GTM_TEAM_SIGN_IN", "VELA_GTM_TEAM_INTERACTIVE_SIGN_IN", "VELA_GTM_TEAM_SIGN_OUT", "VELA_GTM_TEAM_ACTIVITY_READ", "VELA_GTM_TEAM_ACTIVITY_IMPORT",
       "VELA_GTM_TEAM_GMAIL_READ", "VELA_GTM_TEAM_GMAIL_SYNC", "VELA_GTM_GMAIL_BOUNCES_SYNC", "VELA_GTM_TEAM_SENDERS_READ", "VELA_GTM_TEAM_MEMBERS_READ", "VELA_GTM_TEAM_MEMBER_SET_ACTIVE", "VELA_GTM_TEAM_PROSPECTS_READ", "VELA_GTM_TEAM_PROSPECTS_SYNC", "VELA_GTM_TEAM_RESEARCH_RUNS_READ", "VELA_GTM_TEAM_RESEARCH_RUN_SYNC", "VELA_GTM_TEAM_TEMPLATES_READ", "VELA_GTM_TEAM_TEMPLATES_SYNC",
     ].includes(message?.type);
   if (!supported) return false;
   (async () => {
+    if (message.type === RUNTIME_CAPABILITIES_MESSAGE) return runtimeCapabilities(chrome.runtime.getManifest().version);
     if (message.type === "VELA_GTM_CONFIGURE_SIDE_PANEL") return configureSidePanelForTab(sender);
     if (message.type === "VELA_GTM_EMAIL_SEND") return sendDelivery(message.delivery);
     if (message.type === "VELA_GTM_EMAIL_SCHEDULE") return scheduleDelivery(message.delivery);
@@ -680,10 +687,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "VELA_GTM_TEAM_TEMPLATES_READ") return sharedOutreachTemplates({ storage: chrome.storage.local });
     if (message.type === "VELA_GTM_TEAM_TEMPLATES_SYNC") return syncOutreachTemplates(message.templates, { storage: chrome.storage.local });
     const configured = await settings();
-    if (message.type === "VELA_GTM_PROVIDER_CONTACTOUT") {
+    if (message.type === PROVIDER_ACTION.CONTACTOUT) {
       return enrichViaContactOut(message.profile, { apiKey: configured.contactOutApiKey, includePhone: configured.includeContactOutPhone });
     }
-    if (message.type === "VELA_GTM_PROVIDER_CONTACTOUT_STATUS") {
+    if (message.type === PROVIDER_ACTION.CONTACTOUT_STATUS) {
       return contactOutAccountStatus({ apiKey: configured.contactOutApiKey });
     }
     if (message.type === "VELA_GTM_CONTACTOUT_SESSION_CONNECT") {
@@ -692,27 +699,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "VELA_GTM_CONTACTOUT_SESSION_STATUS") {
       return contactOutSessionStatus({ createPage: Boolean(message.createPage) });
     }
-    if (message.type === "VELA_GTM_PROVIDER_CONTACTOUT_SESSION") {
+    if (message.type === PROVIDER_ACTION.CONTACTOUT_SESSION) {
       if (!configured.contactOutSessionEnabled) throw new Error("Enable the ContactOut browser session in Settings first.");
       return previewContactOutSession(message.profile, { includePhone: false });
     }
-    if (message.type === "VELA_GTM_PROVIDER_CONTACTOUT_SESSION_REVEAL") {
+    if (message.type === PROVIDER_ACTION.CONTACTOUT_SESSION_REVEAL) {
       if (!configured.contactOutSessionEnabled) throw new Error("Enable the ContactOut browser session in Settings first.");
       return revealContactOutSession(message.revealToken);
     }
-    if (message.type === "VELA_GTM_PROVIDER_APOLLO") {
+    if (message.type === PROVIDER_ACTION.APOLLO) {
       return enrichViaApollo(message.profile, { apiKey: configured.apolloApiKey, includePhone: configured.includeContactOutPhone });
     }
-    if (message.type === "VELA_GTM_PROVIDER_APOLLO_STATUS") {
+    if (message.type === PROVIDER_ACTION.APOLLO_STATUS) {
       return apolloAccountStatus({ apiKey: configured.apolloApiKey });
     }
-    if (message.type === "VELA_GTM_PROVIDER_WRITE") {
+    if (message.type === PROVIDER_ACTION.WRITE) {
       return writeOutreach(message.input, { apiKey: configured.openAIApiKey, model: configured.openAIModel || "gpt-5.4-mini" });
     }
-    if (message.type === "VELA_GTM_PROVIDER_PLAN_SEARCH") {
+    if (message.type === PROVIDER_ACTION.PLAN_SEARCH) {
       return planProspectSearch(message.brief, { apiKey: configured.openAIApiKey, model: configured.openAIModel || "gpt-5.4-mini" });
     }
-    if (message.type === "VELA_GTM_PROVIDER_RESEARCH_MESSAGE") {
+    if (message.type === PROVIDER_ACTION.RESEARCH_MESSAGE) {
       return respondToResearchMessage(message.message, {
         apiKey: configured.openAIApiKey,
         model: configured.openAIModel || "gpt-5.4-mini",
@@ -720,10 +727,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         pendingPlan: message.pendingPlan,
       });
     }
-    if (message.type === "VELA_GTM_PROVIDER_VERIFY_TARGET") {
+    if (message.type === PROVIDER_ACTION.VERIFY_TARGET) {
       return verifyTargetFit(message.input, { apiKey: configured.openAIApiKey, model: configured.openAIModel || "gpt-5.4-mini" });
     }
-    if (message.type === "VELA_GTM_PROVIDER_PEOPLE_SEARCH") {
+    if (message.type === PROVIDER_ACTION.PEOPLE_SEARCH) {
       return searchPeopleWithProviders(message.filters, configured);
     }
     throw new Error("Unknown Vela provider action.");

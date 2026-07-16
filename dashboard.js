@@ -78,6 +78,12 @@ import { buildContacts, filterContacts } from "./lib/contacts.js";
 import { auditResearchBatch, gmailLearningContext, researchRunCounts } from "./lib/research-batch.js";
 import { searchApolloPeopleWithRecovery, titlesOnlyApolloPeopleFilters } from "./lib/apollo.js";
 import { DATA_PAGE_SIZE, paginate, paginationTokens } from "./lib/pagination.js";
+import {
+  PROVIDER_ACTION,
+  RUNTIME_CAPABILITIES_MESSAGE,
+  RUNTIME_RELOAD_MESSAGE,
+  runtimeMismatchMessage,
+} from "./lib/runtime-protocol.js";
 
 const isExtension = Boolean(globalThis.chrome?.runtime?.id);
 const pageParams = new URLSearchParams(location.search);
@@ -2111,8 +2117,17 @@ async function researchAgentTurn(message) {
     return { mode: "plan", reply: "That sounds like a people-research request, so I prepared an audience plan for you to review.", plan };
   }
   if (state.settings.openAIApiKey) {
-    const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_PROVIDER_RESEARCH_MESSAGE", message, history, pendingPlan });
-    if (!response?.ok) throw new Error(response?.error || "Vela assistant failed.");
+    let capabilities;
+    try {
+      capabilities = await chrome.runtime.sendMessage({ type: RUNTIME_CAPABILITIES_MESSAGE });
+    } catch {
+      throw new Error(RUNTIME_RELOAD_MESSAGE);
+    }
+    if (!capabilities?.ok || !capabilities.data?.providerActions?.includes(PROVIDER_ACTION.RESEARCH_MESSAGE)) {
+      throw new Error(runtimeMismatchMessage(capabilities?.error || "Unknown Vela provider action."));
+    }
+    const response = await chrome.runtime.sendMessage({ type: PROVIDER_ACTION.RESEARCH_MESSAGE, message, history, pendingPlan });
+    if (!response?.ok) throw new Error(runtimeMismatchMessage(response?.error || "Vela assistant failed."));
     if (response.data?.plan) renderSearchPlan(response.data.plan);
     elements.agentActivity.hidden = true;
     return response.data;
