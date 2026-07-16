@@ -1195,7 +1195,7 @@ function duplicateWarningMessage(matches = []) {
 }
 
 async function confirmDuplicateRecipients(delivery = {}) {
-  if (state.isPreview || !isExtension) return { proceed: true, override: false };
+  if (state.isPreview) return { proceed: true, override: false };
   const response = await chrome.runtime.sendMessage({ type: "VELA_GTM_EMAIL_DUPLICATE_CHECK", delivery });
   if (!response?.ok) throw new Error(response?.error || "Could not check sent history.");
   const matches = response.data?.matches || [];
