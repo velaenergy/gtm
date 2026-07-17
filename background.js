@@ -95,6 +95,7 @@ import {
 const TEAM_SYNC_STATE_STORAGE_KEY = "velaGtmTeamSyncState";
 const GMAIL_BOUNCE_SYNC_STATE_STORAGE_KEY = "velaGtmGmailBounceSyncState";
 const GMAIL_BOUNCE_ALARM = "vela-gtm-bounce-sync";
+const scheduledJobsInFlight = new Set();
 
 async function scheduleResearchAutomation(automation = {}) {
   const name = researchAutomationAlarmName(automation.id);
@@ -651,6 +652,9 @@ async function importHistoricalDeliveries(records = []) {
 async function sendDelivery(input = {}, { interactiveAuth = false } = {}) {
   const recipients = uniqueRecipients(input.recipients);
   if (!recipients.length) throw new Error("Select at least one verified recipient.");
+  if (input.kind === "follow-up" && (!input.threadId || !input.replyToMessageId)) {
+    throw new Error("This follow-up is missing its original Gmail thread. Stop the sequence and send a new reviewed email instead.");
+  }
   const deliveryId = input.id || crypto.randomUUID();
   const messageKind = input.kind === "follow-up" ? "follow_up" : "initial";
   const messageMetadata = { templateId: input.templateId, eventId: deliveryId, messageKind };
@@ -798,16 +802,22 @@ async function stopFollowUpSequence(sequenceId, reason = "Sequence stopped after
 }
 
 async function processScheduledJob(id) {
-  const saved = await chrome.storage.local.get(SCHEDULED_SENDS_STORAGE_KEY);
-  const job = normalizeScheduledSends(saved[SCHEDULED_SENDS_STORAGE_KEY]).find((item) => item.id === id);
-  if (!job || job.status !== "scheduled") return;
+  if (scheduledJobsInFlight.has(id)) return { id, status: "sending" };
+  scheduledJobsInFlight.add(id);
+  let job;
   try {
-    if (job.kind === "follow-up" && job.prospectId) {
-      const queueState = await chrome.storage.local.get(QUEUE_STORAGE_KEY);
-      const prospect = (queueState[QUEUE_STORAGE_KEY] || []).find((item) => item.id === job.prospectId);
-      if (prospect && hasRecordedReply(prospect)) {
-        await stopFollowUpSequence(job.sequenceId, "Sequence stopped after a recorded reply.");
-        return;
+    const saved = await chrome.storage.local.get(SCHEDULED_SENDS_STORAGE_KEY);
+    job = normalizeScheduledSends(saved[SCHEDULED_SENDS_STORAGE_KEY]).find((item) => item.id === id);
+    if (!job) return { id, status: "missing" };
+    if (job.status !== DELIVERY_STATUS.SCHEDULED) return { id, status: job.status };
+    if (job.kind === "follow-up") {
+      if (job.prospectId) {
+        const queueState = await chrome.storage.local.get(QUEUE_STORAGE_KEY);
+        const prospect = (queueState[QUEUE_STORAGE_KEY] || []).find((item) => item.id === job.prospectId);
+        if (prospect && hasRecordedReply(prospect)) {
+          await stopFollowUpSequence(job.sequenceId, "Sequence stopped after a recorded reply.");
+          return { id, status: DELIVERY_STATUS.CANCELLED, reason: "reply" };
+        }
       }
       if (job.threadId) {
         const { token, account } = await gmailToken(false, job.accountId);
@@ -815,28 +825,51 @@ async function processScheduledJob(id) {
         if (replied) {
           await stopFollowUpSequence(job.sequenceId, "Sequence stopped after a Gmail reply.");
           await recordProspectDelivery(job.prospectId, "gmail_reply", "Reply detected in Gmail; automatic follow-ups stopped");
-          return;
+          return { id, status: DELIVERY_STATUS.CANCELLED, reason: "reply" };
         }
       }
     }
     const result = await sendDelivery({ ...job, duplicateOverride: true });
     const completedAt = new Date().toISOString();
-    await updateScheduledJob(id, { status: result.failed.length ? "partial" : "sent", error: result.failed.map((item) => item.error).join("; "), completedAt });
+    const status = result.failed.length ? DELIVERY_STATUS.PARTIAL : DELIVERY_STATUS.SENT;
+    await updateScheduledJob(id, { status, error: result.failed.map((item) => item.error).join("; "), completedAt });
+    return { id, status, sent: result.sent.length, failed: result.failed.length };
   } catch (error) {
     const completedAt = new Date().toISOString();
     const message = error instanceof Error ? error.message : "Scheduled Gmail send failed.";
-    await updateScheduledJob(id, { status: "failed", error: message, completedAt });
+    await updateScheduledJob(id, { status: DELIVERY_STATUS.FAILED, error: message, completedAt });
     if (!error?.deliveryRecorded) {
       await recordAndSyncDelivery({
-        ...job,
+        ...(job || { id }),
         status: DELIVERY_STATUS.FAILED,
         completedAt,
         updatedAt: completedAt,
         error: message,
       });
     }
-    await recordProspectDelivery(job.prospectId, "send_failed", message, { at: completedAt });
+    await recordProspectDelivery(job?.prospectId, "send_failed", message, { at: completedAt });
+    return { id, status: DELIVERY_STATUS.FAILED, error: message };
+  } finally {
+    scheduledJobsInFlight.delete(id);
   }
+}
+
+async function sendScheduledFollowUpNow(id) {
+  const saved = await chrome.storage.local.get(SCHEDULED_SENDS_STORAGE_KEY);
+  const job = normalizeScheduledSends(saved[SCHEDULED_SENDS_STORAGE_KEY]).find((item) => item.id === id);
+  if (!job) throw new Error("That follow-up no longer exists.");
+  if (job.kind !== "follow-up") throw new Error("Only queued follow-ups can be sent from this action.");
+  if (job.status !== DELIVERY_STATUS.SCHEDULED) throw new Error("Only queued follow-ups can be sent now.");
+  if (scheduledJobsInFlight.has(id)) throw new Error("That follow-up is already being sent.");
+  await requireAlarmsApi().clear(alarmNameForJob(id));
+  const result = await processScheduledJob(id);
+  if (result.status === "sending") throw new Error("That follow-up is already being sent.");
+  if (result.status === DELIVERY_STATUS.FAILED) throw new Error(result.error || "Gmail could not send this follow-up.");
+  if (result.status === DELIVERY_STATUS.CANCELLED && result.reason !== "reply") throw new Error("That follow-up is no longer queued.");
+  if (![DELIVERY_STATUS.SENT, DELIVERY_STATUS.PARTIAL, DELIVERY_STATUS.CANCELLED].includes(result.status)) {
+    throw new Error("That follow-up changed before it could be sent.");
+  }
+  return result;
 }
 
 async function cancelScheduledJob(id) {
@@ -921,6 +954,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "VELA_GTM_EMAIL_SEND") return sendDelivery(message.delivery);
     if (message.type === "VELA_GTM_EMAIL_SCHEDULE") return scheduleDelivery(message.delivery);
     if (message.type === "VELA_GTM_EMAIL_SCHEDULE_CANCEL") return cancelScheduledJob(message.id);
+    if (message.type === WORKSPACE_ACTION.EMAIL_SCHEDULE_SEND_NOW) return sendScheduledFollowUpNow(message.id);
     if (message.type === "VELA_GTM_EMAIL_DUPLICATE_CHECK") return checkDuplicateDelivery(message.delivery);
     if (message.type === "VELA_GTM_TEAM_AUTH_STATUS") return teamAuthStatus();
     if (message.type === "VELA_GTM_TEAM_SIGN_IN") return signInTeam(message);

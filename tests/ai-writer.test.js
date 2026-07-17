@@ -124,15 +124,17 @@ test("uses gpt-5.4-mini and strict structured output without storing the respons
   assert.equal(request.text.format.type, "json_schema");
   assert.equal(request.text.format.strict, true);
   assert.match(request.instructions, /complete, natural first-touch outreach email/i);
-  assert.match(request.instructions, /fixed subject "Quick intro \+ would love to pick your brain"/i);
+  assert.match(request.instructions, /fixed subject "Quick intro \+ seeking advice"/i);
   assert.equal(Object.hasOwn(request.text.format.schema.properties, "subject"), false);
   assert.match(request.instructions, /Do not hard-wrap lines inside a paragraph/i);
   assert.match(request.instructions, /regular ASCII hyphen/i);
   assert.match(request.instructions, /Do not say "grab any time here"/i);
+  assert.match(request.instructions, /I came across your profile and/i);
+  assert.match(request.instructions, /Do not recite the prospect's job title or position/i);
   assert.match(request.instructions, /Do not default to praise/);
   assert.match(request.instructions, /Do not summarize a resume into a flattering thesis/i);
   assert.match(request.instructions, /That mix of/i);
-  assert.match(request.instructions, /When context is thin, be honest and specific/);
+  assert.match(request.instructions, /When context is thin, be honest and general/);
   assert.match(request.instructions, /About section and each role description/i);
 });
 
@@ -148,6 +150,7 @@ test("rejects short and generic AI outreach patterns", () => {
   ]);
   assert.match(openerQualityIssues("Your work leading site selection across energy markets and critical infrastructure teams.").join(" "), /legacy personalization fragment/);
   assert.deepEqual(openerQualityIssues("You lead site selection at VectorGrid, and I wanted to ask how power availability is changing which markets your team can pursue."), []);
+  assert.deepEqual(openerQualityIssues("I came across your profile and wanted to ask how power availability is changing the markets your team can pursue."), []);
   assert.match(openerQualityIssues("Hi Ben, I’m reaching out because you lead cybersecurity across DWS and I wanted to ask how your team approaches critical infrastructure risk.").join(" "), /greeting/i);
   assert.match(openerQualityIssues("Your current role at Wells Fargo and teaching experience, suggests you can explain complex systems.").join(" "), /inline template slot/i);
 });
@@ -162,9 +165,14 @@ test("V27 validates natural complete drafts and required sender details", () => 
   }, input).join(" "), /fixed-width line breaks/i);
   assert.deepEqual(fullDraftQualityIssues({
     subject: OUTREACH_SUBJECT,
-    body: "Hi Alex,\n\nYou lead grid operations at Relay, where interconnection timing shapes which projects can move. I wanted to compare notes on the places large loads lose the most time.\n\nI’m Tarun, building Vela to help energy-intensive teams navigate utilities and power procurement. Would you be open to a 20-minute conversation next week? https://cal.example/vela\n\nBest,\nTarun",
+    body: "Hi Alex,\n\nI came across your profile and saw some of the grid operations work you’ve been doing around interconnection timing. I wanted to ask where large loads tend to lose the most time.\n\nI’m Tarun, one of the founders of Vela Energy, an early-stage startup building AI agents that help large energy users get powered on faster. Would you be open to a 20-minute conversation next week? https://cal.example/vela\n\nBest,\nTarun",
     workNote: "Alex leads grid operations at Relay.",
   }, input), []);
+  assert.match(fullDraftQualityIssues({
+    subject: OUTREACH_SUBJECT,
+    body: "Hi Alex,\n\nYou are the VP of Grid Operations at Relay, where interconnection timing shapes which projects can move. I wanted to compare notes on the places large loads lose the most time.\n\nI’m Tarun, one of the founders of Vela Energy, an early-stage startup building AI agents that help large energy users get powered on faster. Would you be open to a 20-minute conversation next week? https://cal.example/vela\n\nBest,\nTarun",
+    workNote: "Alex leads grid operations at Relay.",
+  }, input).join(" "), /came across your profile.*job title or position/i);
   assert.match(fullDraftQualityIssues({
     subject: OUTREACH_SUBJECT,
     body: "Hi Alex,\n\nYou lead grid operations at Relay, where interconnection timing shapes which projects can move. I wanted to compare notes on the places large loads lose the most time.\n\nI’m Tarun, building Vela to help energy-intensive teams navigate utilities and power procurement. I'd really appreciate it if we could meet for 20–30 minutes. Grab any time here: https://cal.example/vela\n\nBest,\nTarun",
@@ -179,7 +187,7 @@ test("V27 validates natural complete drafts and required sender details", () => 
 
 test("uses the canonical subject while keeping model-written body structure", async () => {
   const generated = {
-    body: "Hi Alex,\n\nYou lead grid operations at Relay, where interconnection timing can shape which large-load projects move forward. I wanted to ask where your team sees the biggest avoidable delays today.\n\nI’m Tarun, CEO of Vela Energy. We’re building AI agents that help energy-intensive teams navigate utilities, interconnection, and power procurement so projects get energized faster.\n\nWould you be open to a 20-minute conversation next week? https://cal.com/team/velaenergy\n\nBest,\nTarun",
+    body: "Hi Alex,\n\nI came across your profile and saw some of the grid operations work you’ve been doing around interconnection. I wanted to ask where large-load projects tend to hit the most avoidable delays.\n\nI’m Tarun, one of the founders of Vela Energy, an early-stage startup building AI agents that help energy-intensive teams get powered on faster.\n\nWould you be open to a 20-minute conversation next week? https://cal.com/team/velaenergy\n\nBest,\nTarun",
     workNote: "Alex leads grid operations at Relay and works through interconnection delays for large energy users.",
   };
   const result = await writeOutreach(

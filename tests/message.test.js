@@ -139,20 +139,21 @@ const profile = {
 test("buildWorkNote turns experience into a specific, grammatical phrase", () => {
   assert.equal(
     buildWorkNote(profile),
-    "your work as VP, Operations at Stream Data Centers, including your experience with AWS and U.S. Navy",
+    "the work you’ve been doing at Stream Data Centers, including your experience with AWS and U.S. Navy",
   );
 });
 
 test("the default outreach play resolves all variables", () => {
-  const opener = "You have led operations across Stream Data Centers, AWS, and the Navy; I wanted to ask where large loads lose the most time getting powered.";
-  const inlineOpener = "you have led operations across Stream Data Centers, AWS, and the Navy; I wanted to ask where large loads lose the most time getting powered";
+  const opener = "The operations work you’ve been doing across Stream Data Centers, AWS, and the Navy";
+  const inlineOpener = "the operations work you’ve been doing across Stream Data Centers, AWS, and the Navy";
   const variables = templateVariables(profile, { senderName: "Tarun", calendarUrl: "https://cal.com/team/velaenergy" }, opener);
   const message = applyTemplate(TEMPLATES[0], variables);
   assert.equal(message.subject, OUTREACH_SUBJECT);
   assert.match(message.body, /^Hi Joshua,/);
-  assert.match(message.body, /a16z \(the world's largest venture capital firm\)/);
-  assert.ok(message.body.indexOf(opener) < message.body.indexOf("I'm Tony."));
-  assert.match(message.body, /left Tesla to build the company full-time/);
+  assert.match(message.body, /I came across your profile and wanted to reach out after reading about the operations work you’ve been doing/);
+  assert.ok(message.body.indexOf("I came across your profile") < message.body.indexOf("I'm Tony"));
+  assert.match(message.body, /early-stage startup building AI agents that help large energy users get powered on faster/);
+  assert.doesNotMatch(message.body, /VP, Operations|your current role|your position/i);
   assert.match(message.body, /I'd really appreciate it if we could meet for 20-30 minutes/);
   assert.match(message.body, /If you're open to it, here's my calendar:/);
   assert.doesNotMatch(message.body, /Grab any time here/);
@@ -162,15 +163,19 @@ test("the default outreach play resolves all variables", () => {
 });
 
 test("inline personalization is grammatical inside the pick-your-brain template", () => {
-  const workNote = "Your current role in information security at Atlantic Union Bank seems directly relevant to how large systems stay reliable under pressure..";
+  const workNote = "The security work you’ve been doing at Atlantic Union Bank seems relevant to how large systems stay reliable under pressure..";
   assert.equal(
     inlinePhrase(workNote),
-    "your current role in information security at Atlantic Union Bank seems directly relevant to how large systems stay reliable under pressure",
+    "the security work you’ve been doing at Atlantic Union Bank seems relevant to how large systems stay reliable under pressure",
   );
   const variables = templateVariables({ name: "Micah" }, DEFAULT_SETTINGS, workNote);
   const message = applyTemplate(TEMPLATES[0], variables);
-  assert.match(message.body, /Your current role in information security/);
+  assert.match(message.body, /reading about the security work you’ve been doing/);
   assert.doesNotMatch(message.body, /\.\./);
+});
+
+test("V49 uses the requested canonical first-touch subject", () => {
+  assert.equal(OUTREACH_SUBJECT, "Quick intro + seeking advice");
 });
 
 test("migrates only the untouched legacy quick-intro template", () => {
@@ -210,7 +215,7 @@ Best,
     variables,
   );
   assert.equal(migratedDraft.subject, applyTemplate(TEMPLATES[0], variables).subject);
-  assert.match(migratedDraft.body, /I'm Tony\./);
+  assert.match(migratedDraft.body, /I'm Tony, one of the founders of Vela Energy/);
 });
 
 test("updates prior and custom templates to the canonical outreach subject", () => {
@@ -231,7 +236,7 @@ Best,
     body: previousBody,
   }] });
   assert.equal(updated.subject, OUTREACH_SUBJECT);
-  assert.match(updated.body, /I'm Tony\./);
+  assert.match(updated.body, /I'm Tony, one of the founders of Vela Energy/);
 
   const [custom] = emailTemplates({ emailTemplates: [{
     id: "quick-intro",

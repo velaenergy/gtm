@@ -113,7 +113,9 @@ import {
   normalizeResearchMessage,
   normalizeResearchThread,
   nextReviewProspectId,
+  approvalSendSummary,
   pendingReviewDrafts,
+  reviewDrawerDrafts,
   researchApprovalStack,
   researchFunnel,
   researchBatchPagination,
@@ -1315,7 +1317,55 @@ async function cancelScheduledDelivery(id, button) {
   return cancelScheduledDeliveries([id], button);
 }
 
-function createDeliveryRow(record = {}, { compact = false, cancellable = false, sequenceSize = 0 } = {}) {
+async function sendScheduledFollowUpNow(record = {}, button) {
+  if (!record.id || scheduledSendKind(record) !== SCHEDULED_SEND_KIND.FOLLOW_UP) return;
+  const idleLabel = button?.textContent || "Send now";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Sending…";
+  }
+  try {
+    let result;
+    if (isExtension) {
+      let capabilities;
+      try {
+        capabilities = await chrome.runtime.sendMessage({ type: RUNTIME_CAPABILITIES_MESSAGE });
+      } catch {
+        throw new Error(WORKSPACE_RELOAD_MESSAGE);
+      }
+      if (!capabilities?.ok || !runtimeHasWorkspaceActions(capabilities.data, [WORKSPACE_ACTION.EMAIL_SCHEDULE_SEND_NOW])) {
+        throw new Error(WORKSPACE_RELOAD_MESSAGE);
+      }
+      const response = await chrome.runtime.sendMessage({ type: WORKSPACE_ACTION.EMAIL_SCHEDULE_SEND_NOW, id: record.id });
+      if (!response?.ok) throw new Error(response?.error || "Could not send this follow-up now.");
+      result = response.data;
+      const saved = await storage.get([SCHEDULED_SENDS_STORAGE_KEY, DELIVERY_LOG_STORAGE_KEY]);
+      state.scheduledJobs = normalizeScheduledSends(saved[SCHEDULED_SENDS_STORAGE_KEY]);
+      state.deliveryLog = normalizeDeliveryLog(saved[DELIVERY_LOG_STORAGE_KEY]);
+    } else {
+      const completedAt = new Date().toISOString();
+      result = { id: record.id, status: DELIVERY_STATUS.SENT, sent: 1, failed: 0 };
+      state.scheduledJobs = state.scheduledJobs.map((job) => job.id === record.id
+        ? { ...job, status: DELIVERY_STATUS.SENT, completedAt }
+        : job);
+      state.deliveryLog = normalizeDeliveryLog([{ ...record, status: DELIVERY_STATUS.SENT, completedAt, updatedAt: completedAt }, ...state.deliveryLog]);
+    }
+    renderQueue();
+    if (result?.status === DELIVERY_STATUS.CANCELLED && result.reason === "reply") {
+      showToast("A reply was found, so this follow-up and the rest of its sequence were stopped.");
+      return;
+    }
+    showToast(`Follow-up ${record.sequenceStep || ""} sent now in the existing Gmail thread.`.replace("Follow-up  sent", "Follow-up sent"));
+  } catch (error) {
+    if (button?.isConnected) {
+      button.disabled = false;
+      button.textContent = idleLabel;
+    }
+    showToast(error instanceof Error ? error.message : "Could not send this follow-up now.");
+  }
+}
+
+function createDeliveryRow(record = {}, { compact = false, cancellable = false, sendable = false, sequenceSize = 0 } = {}) {
   const prospect = deliveryProspect(record);
   const kind = scheduledSendKind(record);
   const row = document.createElement("article");
@@ -1342,10 +1392,22 @@ function createDeliveryRow(record = {}, { compact = false, cancellable = false, 
   appendText(timing, "time", compact ? deliveryDate(record.scheduledAt || record.completedAt || record.updatedAt, { relative: true }) : deliveryDate(record.scheduledAt || record.completedAt || record.updatedAt));
   if (!compact && record.error) appendText(timing, "small", record.error, "delivery-error");
   row.append(timing);
-  if (cancellable && record.status === DELIVERY_STATUS.SCHEDULED) {
-    const cancel = appendText(row, "button", "Cancel", "delivery-cancel");
-    cancel.type = "button";
-    cancel.addEventListener("click", () => cancelScheduledDelivery(record.id, cancel));
+  if ((sendable || cancellable) && record.status === DELIVERY_STATUS.SCHEDULED) {
+    const actions = document.createElement("div");
+    actions.className = "delivery-row-actions";
+    if (sendable && kind === SCHEDULED_SEND_KIND.FOLLOW_UP) {
+      const sendNow = appendText(actions, "button", "Send now", "delivery-send-now");
+      sendNow.type = "button";
+      sendNow.setAttribute("aria-label", `Send follow-up ${record.sequenceStep || ""} now`.trim());
+      sendNow.title = "Send this follow-up now in the existing Gmail thread";
+      sendNow.addEventListener("click", () => sendScheduledFollowUpNow(record, sendNow));
+    }
+    if (cancellable) {
+      const cancel = appendText(actions, "button", "Cancel", "delivery-cancel");
+      cancel.type = "button";
+      cancel.addEventListener("click", () => cancelScheduledDelivery(record.id, cancel));
+    }
+    row.append(actions);
   }
   return row;
 }
@@ -2010,7 +2072,7 @@ function createScheduledWorkUnit(group, indexes = scheduledDeliveryIndexes()) {
     details.hidden = !state.scheduledExpanded.has(group.id);
     appendText(details, "div", "Sequence steps", "delivery-sequence-label");
     const sequenceSize = Math.max(...group.records.map((record) => Number(record.sequenceStep) || 0), group.records.length);
-    for (const record of group.records) details.append(createDeliveryRow(record, { cancellable: true, sequenceSize }));
+    for (const record of group.records) details.append(createDeliveryRow(record, { cancellable: true, sendable: true, sequenceSize }));
     section.append(row, details);
   } else {
     const cancel = appendText(actions, "button", "Cancel", "delivery-cancel");
@@ -2261,9 +2323,10 @@ function renderQueue() {
   elements.newCampaignButtonTop.hidden = state.view === "review";
   elements.clearProspectsButton.hidden = state.view !== "review" || researchApprovalStack(state.queue).total === 0;
   const approvedToRun = visible.filter((item) => item.status === QUEUE_STATUS.DRAFTED && isEmail(item.email) && item.subject && item.body);
+  const readyToApprove = visible.filter((item) => item.status === QUEUE_STATUS.READY && isEmail(item.email) && item.subject && item.body);
   elements.sendAllButton.textContent = state.view === "review" ? `Run approved${approvedToRun.length ? ` ${approvedToRun.length}` : ""}` : "Send approved";
   elements.sendAllButton.disabled = approvedToRun.length === 0;
-  elements.processButton.textContent = "Draft qualified";
+  elements.processButton.textContent = state.view === "review" && readyToApprove.length ? "Run and approve all" : "Draft qualified";
   elements.processButton.disabled = state.busy;
   const activePlan = state.searchPlan || state.researchRun?.plan;
   const batchPagination = researchBatchPagination(state.researchRun);
@@ -3343,13 +3406,14 @@ function reviewableRunProspects(runId = state.reviewRunId) {
 
 function drawerProspects() {
   if (state.reviewRunId) return reviewableRunProspects();
-  return pendingReviewDrafts(visibleProspects()).filter((prospect) => isEmail(prospect.email) && prospect.subject && prospect.body);
+  const complete = visibleProspects().filter((prospect) => isEmail(prospect.email) && prospect.subject && prospect.body);
+  return reviewDrawerDrafts(complete, state.activeProspectId);
 }
 
 function updateDrawerPosition() {
   const people = drawerProspects();
   const index = people.findIndex((person) => person.id === state.activeProspectId);
-  elements.drawerPosition.textContent = index >= 0 ? `${index + 1} of ${people.length}` : `${people.length} remaining`;
+  elements.drawerPosition.textContent = index >= 0 ? `${index + 1} of ${people.length}` : "Current draft";
   elements.previousReviewButton.disabled = people.length < (index >= 0 ? 2 : 1);
   elements.nextReviewButton.disabled = people.length < (index >= 0 ? 2 : 1);
 }
@@ -3383,7 +3447,9 @@ function openAdjacentReviewProspect(direction = 1) {
 }
 
 function openNextApprovalDraft(currentId) {
-  const next = drawerProspects().find((prospect) => prospect.id !== currentId && prospect.status === QUEUE_STATUS.READY);
+  const next = pendingReviewDrafts(visibleProspects())
+    .filter((prospect) => isEmail(prospect.email) && prospect.subject && prospect.body)
+    .find((prospect) => prospect.id !== currentId);
   if (next) {
     openReviewDrawer(next.id, elements.closeDrawerButton);
     return true;
@@ -3535,6 +3601,43 @@ function openBulkSend(ids = []) {
   elements.sendDialog.showModal();
 }
 
+async function runAndApproveAll() {
+  const approvals = visibleProspects();
+  const readyIds = approvals
+    .filter((item) => item.status === QUEUE_STATUS.READY && isEmail(item.email) && item.subject && item.body)
+    .map((item) => item.id);
+  if (!readyIds.length) return launchDraftQualifiedResearch();
+  const approved = await approveProspects(readyIds);
+  if (!approved) return;
+  openBulkSend(approvals.map((item) => item.id));
+}
+
+function duplicateWarningMessage(matches = []) {
+  const byRecipient = new Map();
+  for (const match of matches) if (!byRecipient.has(match.recipient)) byRecipient.set(match.recipient, match);
+  const details = [...byRecipient.values()].map((match) => {
+    const when = match.at ? ` on ${new Date(match.at).toLocaleString()}` : "";
+    return `${match.recipient} was already ${match.status}${when}`;
+  });
+  return `${details.join("\n")}\n\nDo you want to send another email anyway?`;
+}
+
+async function confirmDashboardDuplicateRecipients(people = []) {
+  const recipients = people.map((person) => person.email).filter(isEmail);
+  const response = await chrome.runtime.sendMessage({
+    type: "VELA_GTM_EMAIL_DUPLICATE_CHECK",
+    delivery: { recipients },
+  });
+  if (!response?.ok) throw new Error(response?.error || "Could not check sent history before sending.");
+  const matches = response.data?.matches || [];
+  if (!matches.length) {
+    if (response.data?.backendStatus === "error") showToast("Checked local sent history, but team activity sync needs attention in Settings.");
+    return { proceed: true, override: false };
+  }
+  const proceed = globalThis.confirm(duplicateWarningMessage(matches));
+  return { proceed, override: proceed };
+}
+
 async function sendApproved(ids = []) {
   const eligible = approvedForSend(ids);
   if (!eligible.length) return;
@@ -3551,6 +3654,11 @@ async function sendApproved(ids = []) {
   const accounts = normalizeGoogleAccounts(saved[GOOGLE_ACCOUNTS_STORAGE_KEY]);
   const fallbackAccount = selectedGoogleAccount(accounts, saved[GOOGLE_SELECTED_ACCOUNT_ID_STORAGE_KEY], saved[GOOGLE_ACCOUNT_STORAGE_KEY]);
   if (!fallbackAccount) throw new Error("Connect and choose a Gmail sender in Settings before sending.");
+  const duplicateDecision = await confirmDashboardDuplicateRecipients(eligible);
+  if (!duplicateDecision.proceed) {
+    showToast("Send canceled. No email was sent.");
+    return;
+  }
   let sent = 0;
   const sentIds = [];
   const failures = [];
@@ -3567,7 +3675,7 @@ async function sendApproved(ids = []) {
     const followUpSequence = buildDeliveryFollowUps({ profile, workNote: person.workNote || person.background || "", template, settings: state.settings });
     const response = await chrome.runtime.sendMessage({
       type: "VELA_GTM_EMAIL_SEND",
-      delivery: { accountId: account.id, senderEmail: account.email, recipients: [person.email], subject: OUTREACH_SUBJECT, body: person.body, prospectId: person.id, ...followUpSequence },
+      delivery: { accountId: account.id, senderEmail: account.email, recipients: [person.email], subject: OUTREACH_SUBJECT, body: person.body, prospectId: person.id, duplicateOverride: duplicateDecision.override, ...followUpSequence },
     });
     if (response?.ok && response.data?.sent?.length) {
       sent += 1;
@@ -3585,7 +3693,7 @@ async function sendApproved(ids = []) {
   }
   state.selected.clear();
   renderQueue();
-  showToast(teamSyncError || (failures.length ? `${sent} sent · ${failures.length} need attention` : `${sent} message${sent === 1 ? "" : "s"} sent through the template sender${sent === 1 ? "" : "s"}.`));
+  showToast(teamSyncError || approvalSendSummary(sent, failures));
 }
 
 async function launchDraftQualifiedResearch() {
@@ -3819,7 +3927,10 @@ function bindEvents() {
     }
     elements.importDialog.close();
   });
-  elements.processButton.addEventListener("click", () => launchDraftQualifiedResearch().catch((error) => showToast(error instanceof Error ? error.message : "Could not start research.")));
+  elements.processButton.addEventListener("click", () => {
+    const action = state.view === "review" ? runAndApproveAll() : launchDraftQualifiedResearch();
+    action.catch((error) => showToast(error instanceof Error ? error.message : "Could not start this action."));
+  });
   elements.nextResearchBatchButton.addEventListener("click", () => runNextResearchBatch());
   elements.sendAllButton.addEventListener("click", () => openBulkSend(visibleProspects().map((item) => item.id)));
   elements.tableSearch.addEventListener("input", () => {

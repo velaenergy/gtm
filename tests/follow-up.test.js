@@ -25,6 +25,7 @@ test("automatic sequences schedule on business days", () => {
   assert.equal(jobs.length, 3);
   assert.deepEqual(jobs.map((job) => job.sequenceStep), [1, 2, 3]);
   assert.ok(jobs.every((job) => job.threadId === "thread-1" && job.kind === "follow-up"));
+  assert.ok(jobs.every((job) => job.subject === "Hello" && job.replyToMessageId === "<message@vela.energy>"));
 });
 
 test("[V50] every initial delivery can carry its selected template sequence", () => {

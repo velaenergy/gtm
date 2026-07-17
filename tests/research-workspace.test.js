@@ -13,7 +13,9 @@ import {
   researchAutomationIdFromAlarm,
   researchAutomationAlarmName,
   researchApprovalStack,
+  approvalSendSummary,
   pendingReviewDrafts,
+  reviewDrawerDrafts,
   nextReviewProspectId,
   researchFunnel,
   researchBatchPagination,
@@ -60,6 +62,22 @@ test("[V53] approval progress removes approved drafts and deletion keeps the nex
   assert.equal(pendingReviewDrafts(afterApproval)[0].id, "prospect-2");
   assert.equal(nextReviewProspectId(pendingReviewDrafts(prospects), "prospect-1"), "prospect-2");
   assert.equal(nextReviewProspectId(pendingReviewDrafts(prospects), "prospect-135"), "prospect-134");
+});
+
+test("[V60] opening an approved draft keeps it in an ordinal review cohort", () => {
+  const prospects = [
+    { id: "ready-1", status: "ready" },
+    { id: "approved-1", status: "drafted" },
+    { id: "approved-2", status: "drafted" },
+  ];
+
+  assert.deepEqual(reviewDrawerDrafts(prospects, "ready-1").map(({ id }) => id), ["ready-1"]);
+  assert.deepEqual(reviewDrawerDrafts(prospects, "approved-1").map(({ id }) => id), ["approved-1", "approved-2"]);
+});
+
+test("[V61] a single approval send failure names the reason instead of generic attention", () => {
+  assert.equal(approvalSendSummary(0, ["DJ Alberty: connect tarun@velaenergy.ai"]), "0 sent · DJ Alberty: connect tarun@velaenergy.ai");
+  assert.equal(approvalSendSummary(2, ["One failed", "Two failed"]), "2 sent · 2 need attention · First: One failed");
 });
 
 test("[V42] default research prompts are US-only and follow-up batches advance by 100", () => {
@@ -119,7 +137,8 @@ test("[V46][V47][V57] sent history and approval actions stay wired to their real
     readFile(new URL("../dashboard.html", import.meta.url), "utf8"),
   ]);
   assert.match(dashboardJs, /gmailMessagesAsDeliveryRecords\(state\.gtmMessages\)/);
-  assert.match(dashboardJs, /elements\.processButton\.textContent = "Draft qualified"/);
+  assert.match(dashboardJs, /elements\.processButton\.textContent = state\.view === "review" && readyToApprove\.length \? "Run and approve all" : "Draft qualified"/);
+  assert.match(dashboardJs, /async function runAndApproveAll\(\)[\s\S]*approveProspects\(readyIds\)[\s\S]*openBulkSend/);
   assert.match(dashboardJs, /launchDraftQualifiedResearch/);
   assert.match(dashboardJs, /setView\("research"\)/);
   assert.match(dashboardJs, /View on LinkedIn/);

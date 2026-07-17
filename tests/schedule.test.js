@@ -84,3 +84,19 @@ test("scheduled dashboard groups automatic sequences and exposes type search", a
   assert.match(dashboard, /paginate\(visible, state\.scheduledPage, DATA_PAGE_SIZE\)/);
   assert.match(dashboard, /Stops on reply/);
 });
+
+test("[V37,V50] each queued follow-up can be sent now through the reply-aware scheduled path", async () => {
+  const [background, dashboard] = await Promise.all([
+    readFile(new URL("../background.js", import.meta.url), "utf8"),
+    readFile(new URL("../dashboard.js", import.meta.url), "utf8"),
+  ]);
+  assert.match(background, /async function sendScheduledFollowUpNow/);
+  assert.match(background, /WORKSPACE_ACTION\.EMAIL_SCHEDULE_SEND_NOW/);
+  assert.match(background, /sendScheduledFollowUpNow[\s\S]*clear\(alarmNameForJob\(id\)\)[\s\S]*processScheduledJob\(id\)/);
+  assert.match(background, /processScheduledJob[\s\S]*gmailThreadHasReply[\s\S]*sendDelivery\(\{ \.\.\.job, duplicateOverride: true \}\)/);
+  assert.match(dashboard, /WORKSPACE_ACTION\.EMAIL_SCHEDULE_SEND_NOW/);
+  assert.match(dashboard, /runtimeHasWorkspaceActions\(capabilities\.data, \[WORKSPACE_ACTION\.EMAIL_SCHEDULE_SEND_NOW\]\)/);
+  assert.match(dashboard, /WORKSPACE_RELOAD_MESSAGE/);
+  assert.match(dashboard, /"button", "Send now", "delivery-send-now"/);
+  assert.match(dashboard, /sendable: true/);
+});

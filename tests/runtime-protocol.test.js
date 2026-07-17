@@ -28,7 +28,9 @@ test("V37 advertises Gmail sync actions and detects a stale workspace worker", (
   const current = runtimeCapabilities("0.8.2");
   assert.equal(WORKSPACE_ACTION.GMAIL_HISTORY_SYNC, "VELA_GTM_GMAIL_HISTORY_SYNC");
   assert.equal(WORKSPACE_ACTION.GMAIL_BOUNCES_SYNC, "VELA_GTM_GMAIL_BOUNCES_SYNC");
+  assert.equal(WORKSPACE_ACTION.EMAIL_SCHEDULE_SEND_NOW, "VELA_GTM_EMAIL_SCHEDULE_SEND_NOW");
   assert.equal(runtimeHasWorkspaceActions(current), true);
+  assert.equal(runtimeHasWorkspaceActions(current, [WORKSPACE_ACTION.EMAIL_SCHEDULE_SEND_NOW]), true);
   assert.equal(runtimeHasWorkspaceActions({ providerActions: current.providerActions }), false);
   assert.equal(
     WORKSPACE_RELOAD_MESSAGE,

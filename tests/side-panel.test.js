@@ -79,9 +79,9 @@ test("[V21][V30] removing a Gmail sender persists before deleting the browser co
 });
 
 test("V49 keeps the canonical first-touch subject read-only through review and delivery", () => {
-  assert.match(optionsHtml, /id="templateSubject"[^>]*value="Quick intro \+ would love to pick your brain"[^>]*readonly/);
-  assert.match(popupHtml, /id="subjectInput"[^>]*value="Quick intro \+ would love to pick your brain"[^>]*readonly/);
-  assert.match(dashboardHtml, /id="drawerSubject"[^>]*value="Quick intro \+ would love to pick your brain"[^>]*readonly/);
+  assert.match(optionsHtml, /id="templateSubject"[^>]*value="Quick intro \+ seeking advice"[^>]*readonly/);
+  assert.match(popupHtml, /id="subjectInput"[^>]*value="Quick intro \+ seeking advice"[^>]*readonly/);
+  assert.match(dashboardHtml, /id="drawerSubject"[^>]*value="Quick intro \+ seeking advice"[^>]*readonly/);
   assert.match(dashboardJs, /delivery: \{[^}]*subject: OUTREACH_SUBJECT/);
 });
 
@@ -102,11 +102,12 @@ test("draft review keeps the prospect profile focused and its controls legible",
   assert.doesNotMatch(dashboardJs, /event\.key\.toLowerCase\(\) === "j"\) \{ event\.preventDefault\(\); openNextRunProspect/);
 });
 
-test("Draft qualified opens Research and runs only a confirmed pending plan", () => {
+test("approvals can approve every ready draft before opening the existing run confirmation", () => {
   assert.match(dashboardJs, /async function launchDraftQualifiedResearch\(\)[\s\S]*setView\("research"\)/);
   assert.match(dashboardJs, /pending\?\.plan[\s\S]*executeResearchPlan\(pending\.plan, pending\.brief\)/);
-  assert.match(dashboardJs, /processButton\.addEventListener\("click", \(\) => launchDraftQualifiedResearch\(\)/);
-  assert.doesNotMatch(dashboardJs, /processButton\.addEventListener\("click", \(\) => \{[\s\S]*approveAndRun/);
+  assert.match(dashboardJs, /elements\.processButton\.textContent = state\.view === "review" && readyToApprove\.length \? "Run and approve all" : "Draft qualified"/);
+  assert.match(dashboardJs, /async function runAndApproveAll\(\)[\s\S]*approveProspects\(readyIds\)[\s\S]*openBulkSend\(approvals\.map/);
+  assert.match(dashboardJs, /state\.view === "review" \? runAndApproveAll\(\) : launchDraftQualifiedResearch\(\)/);
 });
 
 test("successful approval sends are persisted through the shared prospect boundary", () => {
@@ -137,9 +138,20 @@ test("[V51] approving one draft advances the open review drawer", () => {
 
 test("[V53] review shortcuts update pending progress and delete into the next draft", () => {
   assert.match(dashboardHtml, /<kbd>⌘<\/kbd><kbd>⌫<\/kbd> Delete/);
-  assert.match(dashboardJs, /function drawerProspects\(\)[\s\S]*pendingReviewDrafts\(visibleProspects\(\)\)/);
+  assert.match(dashboardJs, /function drawerProspects\(\)[\s\S]*reviewDrawerDrafts\(complete, state\.activeProspectId\)/);
+  assert.match(dashboardJs, /function openNextApprovalDraft\(currentId\)[\s\S]*pendingReviewDrafts\(visibleProspects\(\)\)/);
+  assert.doesNotMatch(dashboardJs, /drawerPosition\.textContent[^\n]*remaining/);
   assert.match(dashboardJs, /async function deleteCurrentReviewProspect\(\)[\s\S]*nextReviewProspectId/);
   assert.match(dashboardJs, /\(event\.metaKey \|\| event\.ctrlKey\) && event\.key === "Backspace" && state\.activeProspectId/);
+});
+
+test("[V61] dashboard approval sends confirm duplicates and surface a specific failure", () => {
+  const sendApproved = dashboardJs.match(/async function sendApproved\(ids = \[\]\) \{([\s\S]*?)\n}\n\nasync function launchDraftQualifiedResearch/)?.[1] || "";
+  assert.match(dashboardJs, /async function confirmDashboardDuplicateRecipients\(people = \[\]\)[\s\S]*VELA_GTM_EMAIL_DUPLICATE_CHECK[\s\S]*globalThis\.confirm/);
+  assert.match(sendApproved, /confirmDashboardDuplicateRecipients\(eligible\)/);
+  assert.match(sendApproved, /duplicateOverride: duplicateDecision\.override/);
+  assert.match(sendApproved, /approvalSendSummary\(sent, failures\)/);
+  assert.doesNotMatch(sendApproved, /failures\.length \? `\$\{sent} sent · \$\{failures\.length} need attention`/);
 });
 
 test("dashboard element bindings stay in sync with the rendered markup", () => {
