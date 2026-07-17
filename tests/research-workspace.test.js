@@ -131,6 +131,13 @@ test("[V42] the Research UI binds both next-batch entry points", async () => {
   assert.match(dashboardJs, /will not use email credits/);
 });
 
+test("[V62] a broadened zero-strong run is not presented as ready or told to broaden again", async () => {
+  const dashboardJs = await readFile(new URL("../dashboard.js", import.meta.url), "utf8");
+  assert.match(dashboardJs, /complete" && !run\.readyCount \? "No qualified results"/);
+  assert.match(dashboardJs, /The automatic fallback already widened the Apollo search/);
+  assert.doesNotMatch(dashboardJs, /discovery\?\.broadened[\s\S]{0,500}Try broadening the audience/);
+});
+
 test("[V46][V47][V57] sent history and approval actions stay wired to their real data paths", async () => {
   const [dashboardJs, dashboardHtml] = await Promise.all([
     readFile(new URL("../dashboard.js", import.meta.url), "utf8"),

@@ -4,14 +4,20 @@ import test from "node:test";
 import { auditResearchBatch, buildProspectAuditRequest, gmailLearningContext, researchRunCounts } from "../lib/research-batch.js";
 import { upsertProspects } from "../lib/queue.js";
 
-test("grounds target auditing in profile facts and shared Gmail outcomes", () => {
+test("[V62] grounds target auditing in profile facts, the approved audience, and shared Gmail outcomes", () => {
   const context = gmailLearningContext({
     activity: [{ status: "sent" }, { status: "sent" }],
     prospects: [{ headline: "VP, Power", replyReceivedAt: "2026-07-15", subject: "Power availability" }],
   });
-  const request = buildProspectAuditRequest({ name: "Avery", headline: "Director, Critical Facilities", company: "Atlas" }, context);
+  const request = buildProspectAuditRequest(
+    { name: "Avery", headline: "Director, Critical Facilities", company: "Atlas" },
+    context,
+    { brief: "VP and director-level U.S. data center operators focused on power", plan: { strategy: "Target direct operators" } },
+  );
   assert.match(request.context, /2 delivered messages and 1 known human reply/);
   assert.match(request.context, /profile responsibility remains the authority/i);
+  assert.match(request.context, /approved audience: VP and director-level U\.S\. data center operators focused on power/i);
+  assert.match(request.context, /Target direct operators/);
   assert.equal(request.profile.experiences[0].company, "Atlas");
 });
 
@@ -23,7 +29,9 @@ test("audits a batch with bounded workers and preserves per-person failures", as
   const result = await auditResearchBatch(prospects, {
     concurrency: 3,
     operator: { id: "user-1", name: "Tarun" },
+    audienceContext: { brief: "Energy leaders", plan: { strategy: "Direct owners" } },
     verify: async (_request, prospect) => {
+      assert.match(_request.context, /Approved audience: Energy leaders/);
       active += 1;
       peak = Math.max(peak, active);
       await new Promise((resolve) => setTimeout(resolve, 2));

@@ -37,14 +37,15 @@ test("Apollo enriches qualified prospects in credit-efficient batches of ten", a
   assert.equal(results[9].email, "person9@example.com");
 });
 
-test("Apollo people search maps filters and keeps API-ID results without requiring LinkedIn", async () => {
-  const result = await peopleSearchViaApollo({ job_title: ["Critical Operations"], location: ["Seattle"], keyword: "data center power" }, {
+test("[V62] Apollo people search maps supported filters and folds industry labels into keywords", async () => {
+  const result = await peopleSearchViaApollo({ job_title: ["Critical Operations"], location: ["Seattle"], industry: ["Data Center", "Utilities"], keyword: "power" }, {
     apiKey: "apollo-secret",
     fetchImpl: async (_url, options) => {
       const body = JSON.parse(options.body);
       assert.deepEqual(body.person_titles, ["Critical Operations"]);
       assert.deepEqual(body.person_locations, ["Seattle"]);
-      assert.equal(body.q_keywords, "data center power");
+      assert.equal(body.q_keywords, "power Data Center Utilities");
+      assert.equal("organization_industries" in body, false);
       assert.equal(body.per_page, 100);
       return { ok: true, status: 200, async json() { return { total_entries: 2, people: [{ linkedin_url: "https://www.linkedin.com/in/alex-morgan", name: "Alex Morgan", title: "VP Operations" }, { linkedin_url: "https://example.com/not-linkedin", name: "Ignore" }] }; } };
     },
@@ -123,7 +124,7 @@ test("[V33] Apollo zero results get one safe broader attempt before becoming emp
   assert.deepEqual(calls[1].location, ["Seattle"]);
   assert.equal(calls[1].keyword, undefined);
   assert.equal(calls[1].industry, undefined);
-  assert.equal(calls[1].include_similar_titles, true);
+  assert.equal(calls[1].include_similar_titles, false);
 });
 
 test("[V33] title-only retry is explicit and drops every non-title audience constraint", () => {

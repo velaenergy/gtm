@@ -547,7 +547,9 @@ function renderResearchRun() {
   elements.researchRunCard.hidden = !run;
   if (!run) return;
   const statusLabels = { planning: "Preparing research", searching: "Searching sources", auditing: "Evaluating people", complete: "Ready for approval", error: "Needs attention" };
-  elements.researchRunStatus.textContent = run.status === "complete" && !run.foundCount ? "No matches yet" : statusLabels[run.status] || "Research run";
+  elements.researchRunStatus.textContent = run.status === "complete" && !run.foundCount
+    ? "No matches yet"
+    : run.status === "complete" && !run.readyCount ? "No qualified results" : statusLabels[run.status] || "Research run";
   const totalMatches = Math.max(0, Number(run.totalFound) || 0);
   const pulled = Math.max(0, Number(run.foundCount) || 0);
   const formattedTotal = totalMatches.toLocaleString();
@@ -2629,6 +2631,7 @@ async function auditDiscoveredProspects(run) {
   const audited = await auditResearchBatch(runProspects, {
     concurrency: 4,
     gmailContext,
+    audienceContext: { brief: run.brief, plan: run.plan },
     operator,
     verify: verifyAuditTarget,
     onProgress: async ({ prospect, completed, total }) => {
@@ -2822,7 +2825,11 @@ async function executeResearchPlan(plan, brief, { page = 1, automation = null } 
       appendResearchMessage("assistant", `${ready.length} ${ready.length === 1 ? "person is" : "people are"} ready in Approvals.`, `${needsAttention.length ? `${needsAttention.length} more need contact or research attention and were kept out of the approval batch.` : "Review the audience and drafts, then use Approve & run when you’re ready."}${nextBatchDetail}`);
       setView("review");
     } else {
-      appendResearchMessage("assistant", "The research finished, but nothing is ready for approval yet.", `${needsAttention.length ? `${needsAttention.length} people need contact or research attention. Refine the audience or check the connected providers and try again.` : "Try broadening the audience or removing one of the filters."}${nextBatchDetail}`);
+      const fitSummary = `${state.researchRun.strongCount || 0} strong · ${state.researchRun.reviewCount || 0} review · ${state.researchRun.skipCount || 0} skipped.`;
+      const nextStep = discovery?.broadened
+        ? "The automatic fallback already widened the Apollo search, so refine the role titles or focus terms before trying again."
+        : "Refine the role titles or remove one optional focus term before trying again.";
+      appendResearchMessage("assistant", "The research finished, but nothing qualified for approval.", `${fitSummary} ${needsAttention.length ? `${needsAttention.length} people also need contact or research attention. ` : ""}${nextStep}${nextBatchDetail}`);
     }
   } catch (error) {
     state.researchRun = { ...state.researchRun, status: "error", error: error instanceof Error ? error.message : "Research failed.", updatedAt: new Date().toISOString() };
