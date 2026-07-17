@@ -147,11 +147,21 @@ test("[V53] review shortcuts update pending progress and delete into the next dr
 
 test("[V61] dashboard approval sends confirm duplicates and surface a specific failure", () => {
   const sendApproved = dashboardJs.match(/async function sendApproved\(ids = \[\]\) \{([\s\S]*?)\n}\n\nasync function launchDraftQualifiedResearch/)?.[1] || "";
-  assert.match(dashboardJs, /async function confirmDashboardDuplicateRecipients\(people = \[\]\)[\s\S]*VELA_GTM_EMAIL_DUPLICATE_CHECK[\s\S]*globalThis\.confirm/);
+  assert.match(dashboardJs, /async function confirmDashboardDuplicateRecipients\(people = \[\]\)[\s\S]*VELA_GTM_EMAIL_DUPLICATE_CHECK[\s\S]*requestDashboardDuplicateDecision/);
   assert.match(sendApproved, /confirmDashboardDuplicateRecipients\(eligible\)/);
   assert.match(sendApproved, /duplicateOverride: duplicateDecision\.override/);
   assert.match(sendApproved, /approvalSendSummary\(sent, failures\)/);
   assert.doesNotMatch(sendApproved, /failures\.length \? `\$\{sent} sent · \$\{failures\.length} need attention`/);
+});
+
+test("[V65] duplicate approval sends expose skip, override, and cancel choices", () => {
+  assert.match(dashboardHtml, /id="duplicateSendDialog"/);
+  assert.match(dashboardHtml, /id="skipDuplicateSendButton"[^>]*>Skip already sent<\/button>/);
+  assert.match(dashboardHtml, /id="duplicateSendAnywayButton"[^>]*>Send all anyway<\/button>/);
+  assert.match(dashboardJs, /resolveDuplicateSendDecision\(people, matches, decision\)/);
+  assert.match(dashboardJs, /const sendable = duplicateDecision\.people/);
+  assert.match(dashboardJs, /duplicateDecision\.skippedCount/);
+  assert.doesNotMatch(dashboardJs, /globalThis\.confirm\(duplicateWarningMessage\(matches\)\)/);
 });
 
 test("dashboard element bindings stay in sync with the rendered markup", () => {

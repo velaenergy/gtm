@@ -571,6 +571,18 @@
       </form>
     </dialog>
 
+    <dialog id="duplicateSendDialog" class="modal duplicate-send-modal" aria-labelledby="duplicateSendTitle">
+      <form method="dialog" class="modal-card duplicate-send-card">
+        <header><div><p class="modal-kicker">Sent-history check</p><h2 id="duplicateSendTitle">Some people were already emailed</h2></div><button class="icon-button" value="cancel" aria-label="Close duplicate check"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg></button></header>
+        <div class="duplicate-send-body">
+          <div class="duplicate-send-summary"><strong id="duplicateSendCount">0</strong><span>already sent</span></div>
+          <p id="duplicateSendDescription">Skip these recipients and continue with everyone new, or send the full selection again.</p>
+          <div id="duplicateSendList" class="duplicate-send-list" aria-label="Previously emailed recipients"></div>
+        </div>
+        <footer><button class="button button-ghost" value="cancel">Cancel</button><button id="duplicateSendAnywayButton" class="button button-outline" type="button">Send all anyway</button><button id="skipDuplicateSendButton" class="button button-primary" type="button">Skip already sent</button></footer>
+      </form>
+    </dialog>
+
     <dialog id="researchAutomationDialog" class="modal research-automation-modal" aria-labelledby="researchAutomationTitle">
       <form method="dialog" class="modal-card research-automation-card">
         <header><div><p class="modal-kicker">Recurring research</p><h2 id="researchAutomationTitle">Automate this research</h2></div><button class="icon-button" value="cancel" aria-label="Close automation settings"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg></button></header>

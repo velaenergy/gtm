@@ -21,6 +21,7 @@ assert.equal(manifest.action.default_popup, undefined, "The toolbar action must 
 assert.equal(manifest.side_panel.default_path, "popup.html", "The Vela profile workspace must load in the Chrome side panel.");
 assert.ok(manifest.permissions.includes("sidePanel"), "The sidePanel permission is required for the persistent workspace.");
 assert.ok(manifest.permissions.includes("storage"), "Storage permission is required for settings and drafts.");
+assert.ok(manifest.permissions.includes("unlimitedStorage"), "unlimitedStorage is required because the durable shared prospect cache can exceed Chrome's 10 MB local quota.");
 assert.ok(manifest.permissions.includes("activeTab"), "activeTab is required for the current LinkedIn profile.");
 assert.ok(manifest.permissions.includes("identity"), "identity is required for Google delivery OAuth.");
 assert.ok(!manifest.permissions.includes("identity.email"), "Web OAuth identifies the selected sender without Chrome-profile email access.");

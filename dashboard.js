@@ -116,6 +116,7 @@ import {
   approvalSendSummary,
   pendingReviewDrafts,
   reviewDrawerDrafts,
+  resolveDuplicateSendDecision,
   researchApprovalStack,
   researchFunnel,
   researchBatchPagination,
@@ -155,6 +156,7 @@ const elements = Object.fromEntries([
   "deleteCampaignDialog", "deleteCampaignDescription", "confirmDeleteCampaignButton", "authGate", "authSignInButton", "authGateStatus",
   "currentUserBadge", "currentUserAvatarImage", "currentUserAvatarInitials", "currentUserName", "currentUserEmail",
   "sendDialog", "sendDialogCount", "sendDialogDescription", "confirmBulkSendButton",
+  "duplicateSendDialog", "duplicateSendCount", "duplicateSendDescription", "duplicateSendList", "skipDuplicateSendButton", "duplicateSendAnywayButton",
 ].map((id) => [id, document.getElementById(id)]));
 
 const DEMO_QUEUE = [
@@ -3622,14 +3624,39 @@ async function runAndApproveAll() {
   openBulkSend(approvals.map((item) => item.id));
 }
 
-function duplicateWarningMessage(matches = []) {
+let duplicateSendDecisionResolve = null;
+
+function settleDashboardDuplicateDecision(decision = "cancel") {
+  const resolve = duplicateSendDecisionResolve;
+  duplicateSendDecisionResolve = null;
+  if (elements.duplicateSendDialog.open) elements.duplicateSendDialog.close();
+  resolve?.(decision);
+}
+
+function requestDashboardDuplicateDecision(matches = [], total = 0) {
   const byRecipient = new Map();
-  for (const match of matches) if (!byRecipient.has(match.recipient)) byRecipient.set(match.recipient, match);
-  const details = [...byRecipient.values()].map((match) => {
-    const when = match.at ? ` on ${new Date(match.at).toLocaleString()}` : "";
-    return `${match.recipient} was already ${match.status}${when}`;
-  });
-  return `${details.join("\n")}\n\nDo you want to send another email anyway?`;
+  for (const match of matches) {
+    const recipient = String(match?.recipient || "").trim().toLowerCase();
+    if (recipient && !byRecipient.has(recipient)) byRecipient.set(recipient, match);
+  }
+  const duplicates = [...byRecipient.values()];
+  const remaining = Math.max(0, total - duplicates.length);
+  elements.duplicateSendCount.textContent = duplicates.length.toLocaleString();
+  elements.duplicateSendDescription.textContent = remaining
+    ? `Skip ${duplicates.length} previously emailed recipient${duplicates.length === 1 ? "" : "s"} and send only to the ${remaining} new ${remaining === 1 ? "person" : "people"}, or send the full selection again.`
+    : "Everyone in this selection was already emailed. You can skip the full batch or intentionally send it again.";
+  elements.skipDuplicateSendButton.textContent = remaining ? `Skip already sent · Send ${remaining}` : "Skip all · Send none";
+  const list = document.createDocumentFragment();
+  for (const match of duplicates) {
+    const row = document.createElement("div");
+    row.className = "duplicate-send-item";
+    appendText(row, "strong", match.recipient);
+    appendText(row, "span", match.at ? new Date(match.at).toLocaleString() : `Already ${match.status || "sent"}`);
+    list.append(row);
+  }
+  elements.duplicateSendList.replaceChildren(list);
+  elements.duplicateSendDialog.showModal();
+  return new Promise((resolve) => { duplicateSendDecisionResolve = resolve; });
 }
 
 async function confirmDashboardDuplicateRecipients(people = []) {
@@ -3642,10 +3669,10 @@ async function confirmDashboardDuplicateRecipients(people = []) {
   const matches = response.data?.matches || [];
   if (!matches.length) {
     if (response.data?.backendStatus === "error") showToast("Checked local sent history, but team activity sync needs attention in Settings.");
-    return { proceed: true, override: false };
+    return { proceed: true, override: false, people, skippedCount: 0 };
   }
-  const proceed = globalThis.confirm(duplicateWarningMessage(matches));
-  return { proceed, override: proceed };
+  const decision = await requestDashboardDuplicateDecision(matches, people.length);
+  return resolveDuplicateSendDecision(people, matches, decision);
 }
 
 async function sendApproved(ids = []) {
@@ -3669,12 +3696,19 @@ async function sendApproved(ids = []) {
     showToast("Send canceled. No email was sent.");
     return;
   }
+  const sendable = duplicateDecision.people;
+  if (!sendable.length) {
+    state.selected.clear();
+    renderQueue();
+    showToast(`Skipped ${duplicateDecision.skippedCount} already-sent recipient${duplicateDecision.skippedCount === 1 ? "" : "s"}. No new email was sent.`);
+    return;
+  }
   let sent = 0;
   const sentIds = [];
   const failures = [];
-  setBusy(true, `Sending 0 of ${eligible.length}`);
-  for (const [index, person] of eligible.entries()) {
-    elements.progressText.textContent = `Sending ${index + 1} of ${eligible.length}`;
+  setBusy(true, `Sending 0 of ${sendable.length}`);
+  for (const [index, person] of sendable.entries()) {
+    elements.progressText.textContent = `Sending ${index + 1} of ${sendable.length}`;
     const account = accounts.find((candidate) => String(candidate.email).toLowerCase() === String(person.senderEmail || "").toLowerCase()) || fallbackAccount;
     if (person.senderEmail && account === fallbackAccount && String(fallbackAccount.email).toLowerCase() !== String(person.senderEmail).toLowerCase()) {
       failures.push(`${person.name || person.email}: connect ${person.senderEmail} for the ${person.templateId || "selected"} template`);
@@ -3703,7 +3737,11 @@ async function sendApproved(ids = []) {
   }
   state.selected.clear();
   renderQueue();
-  showToast(teamSyncError || approvalSendSummary(sent, failures));
+  const sendSummary = approvalSendSummary(sent, failures);
+  const completedSummary = duplicateDecision.skippedCount
+    ? `${sendSummary.replace(/\.$/, "")} · ${duplicateDecision.skippedCount} already sent skipped.`
+    : sendSummary;
+  showToast(teamSyncError || completedSummary);
 }
 
 async function launchDraftQualifiedResearch() {
@@ -4009,6 +4047,10 @@ function bindEvents() {
     catch (error) { showToast(error instanceof Error ? error.message : "Bulk send failed."); }
     finally { elements.confirmBulkSendButton.disabled = false; state.pendingSendIds = []; setBusy(false); }
   });
+  elements.skipDuplicateSendButton.addEventListener("click", () => settleDashboardDuplicateDecision("skip"));
+  elements.duplicateSendAnywayButton.addEventListener("click", () => settleDashboardDuplicateDecision("override"));
+  elements.duplicateSendDialog.addEventListener("cancel", (event) => { event.preventDefault(); settleDashboardDuplicateDecision("cancel"); });
+  elements.duplicateSendDialog.addEventListener("close", () => settleDashboardDuplicateDecision("cancel"));
   elements.collapseSidebar.addEventListener("click", () => setSidebarCollapsed(!document.querySelector(".sidebar").classList.contains("is-collapsed")));
   elements.closeDrawerButton.addEventListener("click", closeReviewDrawer);
   elements.drawerBackdrop.addEventListener("click", closeReviewDrawer);

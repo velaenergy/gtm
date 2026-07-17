@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Vela GTM",
   "description": "Turn LinkedIn profiles into researched, personalized Vela outreach drafts.",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "minimum_chrome_version": "116",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAp2D/uJTiDm0NiLu356b+tP6IKX2G/e4bV1fXipyUhDORfWrDpWNO4W40XHl2W5RXu/1qCctUiVEiSIZEzaysQ183wbB9xPn0pXdbmljJI7a1HW9wWxuDSxxBLw+Bz3sfS2vrVHgZbOybo4vMeslEeHPPiOuk7774wbhwri8lOLJElMRTxqImiA2LmEwLqK9Cffpd6mwjr+08O/C6JSAwG758JKQ9J4pFySPP5RPQz25SR8ACDeIR6ZV5K0hl3RUtpCk2l6kEYZyRJGa4fJQQevqz7/Az1j6Clit3rV/yWjeOYe4UNh3VpGgQtbdfE4hV9YtYCVo+P5tYs9eayAjJ+wIDAQAB",
   "action": {
@@ -27,7 +27,7 @@
     "48": "assets/icon-48.png",
     "128": "assets/icon-128.png"
   },
-  "permissions": ["activeTab", "alarms", "identity", "scripting", "sidePanel", "storage", "tabs"],
+  "permissions": ["activeTab", "alarms", "identity", "scripting", "sidePanel", "storage", "tabs", "unlimitedStorage"],
   "host_permissions": [
     "https://www.linkedin.com/*",
     "https://contactout.com/*",

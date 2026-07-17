@@ -21,10 +21,24 @@ import {
   researchBatchPagination,
   researchRunMetrics,
   researchThreadTitle,
+  resolveDuplicateSendDecision,
 } from "../lib/research-workspace.js";
 
 test("research chats receive compact useful titles", () => {
   assert.equal(researchThreadTitle("Find VP power leaders at data centers"), "VP power leaders at data centers");
+});
+
+test("[V65] duplicate bulk sends can skip previously emailed recipients", () => {
+  const people = [{ id: "1", email: "sent@example.com" }, { id: "2", email: "new@example.com" }];
+  const matches = [{ recipient: "SENT@example.com", status: "sent" }];
+  assert.deepEqual(resolveDuplicateSendDecision(people, matches, "skip"), {
+    proceed: true,
+    override: false,
+    people: [people[1]],
+    skippedCount: 1,
+  });
+  assert.deepEqual(resolveDuplicateSendDecision(people, matches, "override").people, people);
+  assert.equal(resolveDuplicateSendDecision(people, matches, "cancel").proceed, false);
 });
 
 test("local research history stays bounded and independent from team persistence", () => {
