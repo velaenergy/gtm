@@ -131,7 +131,7 @@ const requestedCampaignId = pageParams.get("campaign") || "";
 const requestedView = pageParams.get("view") || "";
 const WORKSPACE_STATE_STORAGE_KEY = "velaGtmWorkspaceState";
 const elements = Object.fromEntries([
-  "settingsButton", "searchForm", "searchBrief", "planSearchButton", "researchResultLimit", "researchMessages", "researchRunCard", "researchRunStatus", "researchRunProgress", "researchRunCounts", "researchRunBar",
+  "settingsButton", "searchForm", "searchBrief", "planSearchButton", "researchResultLimit", "researchMessages", "researchRunCard", "researchRunStatus", "researchRunProgress", "researchRunCounts", "researchRunBar", "researchRunNextBatchButton",
   "researchThreadSelect", "researchLiveTimer", "newResearchChatButton", "clearResearchChatButton", "openResearchAutomationButton", "researchHistoryCount", "researchHistoryList",
   "researchAutomationDialog", "researchAutomationName", "researchAutomationPrompt", "researchAutomationCadence", "researchAutomationLimit", "researchAutomationMode", "researchAutomationSendCap", "researchAutomationSender", "researchAutomationTemplate", "researchAutomationContactOut", "researchAutomationActive", "saveResearchAutomationButton",
   "openImportButton", "openImportButtonTop", "importDialog", "bulkInput", "importButton", "importHint",
@@ -546,6 +546,9 @@ function renderResearchRun() {
   const run = state.researchRun;
   elements.researchRunCard.hidden = !run;
   if (!run) return;
+  const batchPagination = researchBatchPagination(run);
+  elements.researchRunNextBatchButton.hidden = run.status !== "complete" || state.busy || !batchPagination.hasNext;
+  elements.researchRunNextBatchButton.textContent = `Research next batch (${batchPagination.nextPage})`;
   const statusLabels = { planning: "Preparing research", searching: "Searching sources", auditing: "Evaluating people", complete: "Ready for approval", error: "Needs attention" };
   elements.researchRunStatus.textContent = run.status === "complete" && !run.foundCount
     ? "No matches yet"
@@ -3939,6 +3942,7 @@ function bindEvents() {
     action.catch((error) => showToast(error instanceof Error ? error.message : "Could not start this action."));
   });
   elements.nextResearchBatchButton.addEventListener("click", () => runNextResearchBatch());
+  elements.researchRunNextBatchButton.addEventListener("click", () => runNextResearchBatch());
   elements.sendAllButton.addEventListener("click", () => openBulkSend(visibleProspects().map((item) => item.id)));
   elements.tableSearch.addEventListener("input", () => {
     state.query = elements.tableSearch.value.trim();

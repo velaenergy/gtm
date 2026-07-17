@@ -124,7 +124,11 @@ test("[V42] the Research UI binds both next-batch entry points", async () => {
     readFile(new URL("../dashboard.html", import.meta.url), "utf8"),
   ]);
   assert.match(dashboardHtml, /id="nextResearchBatchButton"/);
+  assert.match(dashboardHtml, /id="researchRunNextBatchButton"/);
   assert.match(dashboardJs, /nextResearchBatchButton\.addEventListener\("click", \(\) => runNextResearchBatch\(\)\)/);
+  assert.match(dashboardJs, /researchRunNextBatchButton\.addEventListener\("click", \(\) => runNextResearchBatch\(\)\)/);
+  assert.match(dashboardJs, /researchRunNextBatchButton\.hidden = run\.status !== "complete" \|\| state\.busy \|\| !batchPagination\.hasNext/);
+  assert.match(dashboardJs, /researchRunNextBatchButton\.textContent = `Research next batch \(\$\{batchPagination\.nextPage\}\)`/);
   assert.match(dashboardJs, /isNextResearchBatchRequest\(message\).*researchBatchPagination\(state\.researchRun\)\.hasNext/);
   assert.match(dashboardJs, /executeResearchPlan\(plan, brief, \{ page: pagination\.nextPage \}\)/);
   assert.match(dashboardJs, /completed fit checks for \$\{audited\}/);
