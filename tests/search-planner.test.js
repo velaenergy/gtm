@@ -15,6 +15,9 @@ test("builds a strict, non-stored search planning request", () => {
   assert.equal(request.text.format.schema.properties.searches.minItems, 1);
   assert.equal(request.text.format.schema.properties.searches.maxItems, 1);
   assert.equal(request.text.format.schema.properties.searches.items.properties.filters.properties.company.maxItems, 1);
+  assert.equal(request.text.format.schema.properties.searches.items.properties.filters.properties.company.items.maxLength, 200);
+  assert.equal(request.text.format.schema.properties.searches.items.properties.filters.properties.job_title.items.maxLength, 120);
+  assert.equal(request.text.format.schema.properties.searches.items.properties.filters.properties.keyword.maxLength, 250);
   assert.match(request.instructions, /exact employer name/i);
   assert.match(request.instructions, /never put standalone seniority or topical keywords/i);
 });

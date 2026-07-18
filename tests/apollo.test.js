@@ -67,6 +67,27 @@ test("[V48] Apollo people search scalarizes planner company lists", async () => 
   });
 });
 
+test("[V66] Apollo people search bounds every generated filter before transport", async () => {
+  await peopleSearchViaApollo({
+    job_title: Array.from({ length: 12 }, (_, index) => `Role ${index} ${"responsibility ".repeat(20)}`),
+    location: [`United States ${"region ".repeat(40)}`],
+    company: [`Example ${"Holdings ".repeat(40)}`],
+    industry: [`Data centers ${"infrastructure ".repeat(30)}`],
+    keyword: `power ${"interconnection ".repeat(50)}`,
+  }, {
+    apiKey: "apollo-secret",
+    fetchImpl: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      assert.equal(body.person_titles.length, 8);
+      assert.ok(body.person_titles.every((value) => value.length <= 120));
+      assert.ok(body.person_locations.every((value) => value.length <= 120));
+      assert.ok(body.q_organization_name.length <= 200);
+      assert.ok(body.q_keywords.length <= 250);
+      return { ok: true, status: 200, async json() { return { total_entries: 0, people: [] }; } };
+    },
+  });
+});
+
 test("Apollo people search keeps ID-only results and caps one page at 100", async () => {
   const result = await peopleSearchViaApollo({ limit: 500 }, {
     apiKey: "apollo-secret",
