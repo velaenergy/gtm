@@ -51,9 +51,9 @@ test("local research history stays bounded and independent from team persistence
   assert.equal(history["local-chat"][0].content, "Message 5");
 });
 
-test("research run analytics preserve the full 100-to-ready funnel and duration", () => {
-  const run = { totalFound: 8421, foundCount: 100, auditedCount: 100, readyCount: 28, startedAt: "2026-07-16T00:00:00.000Z", completedAt: "2026-07-16T00:02:05.000Z" };
-  assert.deepEqual(researchFunnel(run).map(({ label, value }) => [label, value]), [["Matched", 8421], ["Pulled", 100], ["Fit checked", 100], ["Ready", 28]]);
+test("research run analytics preserve the full source-to-ready funnel and duration", () => {
+  const run = { totalFound: 8421, sourcePulledCount: 112, foundCount: 100, previouslyContactedCount: 12, auditedCount: 100, readyCount: 28, startedAt: "2026-07-16T00:00:00.000Z", completedAt: "2026-07-16T00:02:05.000Z" };
+  assert.deepEqual(researchFunnel(run).map(({ label, value }) => [label, value]), [["Matched", 8421], ["Pulled", 100], ["Already sent", 12], ["Fit checked", 100], ["Ready", 28]]);
   assert.equal(researchRunMetrics(run).durationMs, 125000);
   assert.equal(formatRunDuration(125000), "2m 05s");
 });
@@ -120,6 +120,10 @@ test("[V43] an empty workspace can render before a research run exists", () => {
     nextPage: 2,
     hasNext: false,
   });
+});
+
+test("[V68] an all-excluded Apollo page can still advance to the next batch", () => {
+  assert.equal(researchBatchPagination({ page: 1, requestedCount: 100, sourcePulledCount: 100, foundCount: 0, totalFound: 300 }).hasNext, true);
 });
 
 test("[V58] Research navigation does not show an unexplained prospect count", async () => {

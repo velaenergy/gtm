@@ -99,6 +99,11 @@ import {
 } from "./lib/runtime-protocol.js";
 import { gmailMessagesAsDeliveryRecords } from "./lib/gmail-gtm-sync.js";
 import {
+  excludePreviouslyContactedProspects,
+  previouslyContactedIdentityKeys,
+  sentResearchIdentityIndex,
+} from "./lib/research-exclusions.js";
+import {
   RESEARCH_AUTOMATION_DUE_STORAGE_KEY,
   RESEARCH_AUTOMATIONS_STORAGE_KEY,
   DEFAULT_RESEARCH_PROMPTS,
@@ -2612,7 +2617,7 @@ function newResearchRun(brief, { page = 1, requestedCount = 300 } = {}) {
   const startedAt = new Date().toISOString();
   state.researchRun = {
     id: crypto.randomUUID(), brief, status: "planning", requestedCount: Math.min(300, Math.max(1, Number(requestedCount) || 300)), page: Math.max(1, Number(page) || 1),
-    totalFound: 0, foundCount: 0, auditedCount: 0, strongCount: 0, reviewCount: 0, skipCount: 0,
+    totalFound: 0, sourcePulledCount: 0, foundCount: 0, previouslyContactedCount: 0, auditedCount: 0, strongCount: 0, reviewCount: 0, skipCount: 0,
     readyCount: 0, needsAttentionCount: 0, enrichedCount: 0, contactOutChecks: 0, durationMs: 0,
     threadId: state.researchThread?.id || "", plan: state.searchPlan || {}, sourceProvider: "apollo", startedAt,
     createdBy: operator.id, operatorName: operator.name, createdAt: startedAt, updatedAt: startedAt, error: "",
@@ -2686,6 +2691,9 @@ async function runDiscoveryPlan(plan, run) {
     return;
   }
   const found = new Map();
+  const sourcePeople = new Set();
+  const excludedPreviouslyContacted = new Set();
+  const sentIdentityIndex = sentResearchIdentityIndex({ prospects: state.queue, deliveryLog: unifiedDeliveryLog() });
   let totalFound = 0;
   let broadened = false;
   try {
@@ -2715,8 +2723,11 @@ async function runDiscoveryPlan(plan, run) {
         state.researchRun = { ...state.researchRun, totalFound, status: "searching", updatedAt: new Date().toISOString() };
         renderResearchRun();
         for (const person of recovery.data?.prospects || []) {
-          const key = person.providerId || person.url || person.email;
-          if (key && !found.has(key)) found.set(key, person);
+          const key = String(person.providerId || person.url || person.email || "").trim().toLowerCase();
+          if (!key || sourcePeople.has(key)) continue;
+          sourcePeople.add(key);
+          if (previouslyContactedIdentityKeys(person, sentIdentityIndex).length) excludedPreviouslyContacted.add(key);
+          else found.set(key, person);
           if (found.size >= run.requestedCount) break;
         }
         if ((recovery.data?.prospects || []).length < Math.min(100, remaining)) break;
@@ -2725,15 +2736,20 @@ async function runDiscoveryPlan(plan, run) {
     }
     state.searching = false;
     if (!found.size) {
-      state.researchRun = { ...state.researchRun, totalFound, foundCount: 0, status: "complete", completedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), error: "" };
+      state.researchRun = { ...state.researchRun, totalFound, sourcePulledCount: sourcePeople.size, foundCount: 0, previouslyContactedCount: excludedPreviouslyContacted.size, status: "complete", completedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), error: "" };
       await syncCurrentResearchRun();
       renderResearchRun();
-      appendResearchEmptyState(run.brief, plan, { broadened });
-      return { empty: true, broadened };
+      if (excludedPreviouslyContacted.size) {
+        const pagination = researchBatchPagination(state.researchRun);
+        const next = pagination.hasNext ? ` Use Research next batch (${pagination.nextPage}) to continue with the next Apollo results.` : " Refine the audience to look for additional people.";
+        appendResearchMessage("assistant", "This batch contained no new people to contact.", `${excludedPreviouslyContacted.size} ${excludedPreviouslyContacted.size === 1 ? "person was" : "people were"} already in the shared sent history and were excluded before fit checks or drafting.${next}`);
+      } else appendResearchEmptyState(run.brief, plan, { broadened });
+      return { empty: true, broadened, previouslyContactedCount: excludedPreviouslyContacted.size };
     }
     const prospects = [...found.values()].map((person) => ({ ...person, researchRunId: run.id, auditStatus: "queued", auditedBy: currentOperator(), updatedAt: new Date().toISOString() }));
-    await addProspects(prospects, `Prepared research batch ${run.page || 1} with ${found.size} people from ${totalFound.toLocaleString()} matches.`);
-    state.researchRun = { ...state.researchRun, totalFound, foundCount: prospects.length, status: "auditing", updatedAt: new Date().toISOString() };
+    const excludedDetail = excludedPreviouslyContacted.size ? ` ${excludedPreviouslyContacted.size} already contacted ${excludedPreviouslyContacted.size === 1 ? "person was" : "people were"} skipped.` : "";
+    await addProspects(prospects, `Prepared research batch ${run.page || 1} with ${found.size} new people from ${totalFound.toLocaleString()} matches.${excludedDetail}`);
+    state.researchRun = { ...state.researchRun, totalFound, sourcePulledCount: sourcePeople.size, foundCount: prospects.length, previouslyContactedCount: excludedPreviouslyContacted.size, status: "auditing", updatedAt: new Date().toISOString() };
     state.keyboardProspectId = state.queue.find((item) => item.researchRunId === run.id)?.id || null;
     await auditDiscoveredProspects(run);
     return { empty: false, broadened };
@@ -2817,12 +2833,15 @@ async function executeResearchPlan(plan, brief, { page = 1, automation = null } 
     const needsAttention = state.queue.filter((prospect) => prospect.researchRunId === run.id && [QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(prospect.status));
     const completedAt = new Date().toISOString();
     const durationMs = Math.max(0, Date.parse(completedAt) - Date.parse(state.researchRun.startedAt || state.researchRun.createdAt));
-    state.researchRun = { ...state.researchRun, status: "complete", readyCount: ready.length, needsAttentionCount: needsAttention.length, enrichedCount: strongIds.length, contactOutChecks: Math.max(0, Number(drafting?.contactOutChecks) || 0), durationMs, completedAt, updatedAt: completedAt, metrics: researchRunMetrics({ ...state.researchRun, readyCount: ready.length, durationMs, completedAt }) };
+    state.researchRun = { ...state.researchRun, status: "complete", readyCount: ready.length, needsAttentionCount: needsAttention.length, enrichedCount: Math.max(0, strongIds.length - (Number(drafting?.previouslyContactedCount) || 0)), contactOutChecks: Math.max(0, Number(drafting?.contactOutChecks) || 0), durationMs, completedAt, updatedAt: completedAt, metrics: researchRunMetrics({ ...state.researchRun, readyCount: ready.length, durationMs, completedAt }) };
     await syncCurrentResearchRun();
     renderResearchRun();
     const batchPagination = researchBatchPagination(state.researchRun);
     const nextBatchDetail = batchPagination.hasNext
       ? ` Use Research next batch (${batchPagination.nextPage}) to pull Apollo results ${(batchPagination.page * batchPagination.perPage + 1).toLocaleString()}–${Math.min(batchPagination.total, batchPagination.nextPage * batchPagination.perPage).toLocaleString()}.`
+      : "";
+    const sentHistoryDetail = state.researchRun.previouslyContactedCount
+      ? ` ${state.researchRun.previouslyContactedCount} already contacted ${state.researchRun.previouslyContactedCount === 1 ? "person was" : "people were"} excluded from this run.`
       : "";
     if (ready.length && automation?.mode === "yolo") {
       const capped = ready.slice(0, Math.max(1, Number(automation.dailySendCap) || 25));
@@ -2833,16 +2852,18 @@ async function executeResearchPlan(plan, brief, { page = 1, automation = null } 
       await sendApproved(capped.map((item) => item.id));
       appendResearchMessage("assistant", `YOLO run sent ${capped.length} approved message${capped.length === 1 ? "" : "s"}.`, `${ready.length - capped.length} stayed in Approvals because of the ${automation.dailySendCap || 25}/day cap.`);
     } else if (ready.length) {
-      appendResearchMessage("assistant", `${ready.length} ${ready.length === 1 ? "person is" : "people are"} ready in Approvals.`, `${needsAttention.length ? `${needsAttention.length} more need contact or research attention and were kept out of the approval batch.` : "Review the audience and drafts, then use Approve & run when you’re ready."}${nextBatchDetail}`);
+      appendResearchMessage("assistant", `${ready.length} ${ready.length === 1 ? "person is" : "people are"} ready in Approvals.`, `${needsAttention.length ? `${needsAttention.length} more need contact or research attention and were kept out of the approval batch.` : "Review the audience and drafts, then use Approve & run when you’re ready."}${sentHistoryDetail}${nextBatchDetail}`);
       setView("review");
     } else if (state.researchRun.strongCount) {
-      appendResearchMessage("assistant", `${state.researchRun.strongCount} people qualified, but none are ready for approval yet.`, `${needsAttention.length ? `${needsAttention.length} need a valid email or successful draft retry. ` : "Drafting paused before the qualified batch was processed. "}Use Draft qualified (${strongIds.length}) in the run card to continue without rerunning Apollo.${nextBatchDetail}`);
+      appendResearchMessage("assistant", `${state.researchRun.strongCount} people qualified, but none are ready for approval yet.`, `${needsAttention.length ? `${needsAttention.length} need a valid email or successful draft retry. ` : "Drafting paused before the qualified batch was processed. "}Use Draft qualified (${state.researchRun.strongCount}) in the run card to continue without rerunning Apollo.${sentHistoryDetail}${nextBatchDetail}`);
+    } else if (state.researchRun.previouslyContactedCount && !state.researchRun.foundCount) {
+      appendResearchMessage("assistant", "This batch contained no new people to approve.", `${state.researchRun.previouslyContactedCount} ${state.researchRun.previouslyContactedCount === 1 ? "person was" : "people were"} already in the shared sent history, so Vela created no duplicate drafts.${nextBatchDetail}`);
     } else {
       const fitSummary = `${state.researchRun.strongCount || 0} strong · ${state.researchRun.reviewCount || 0} review · ${state.researchRun.skipCount || 0} skipped.`;
       const nextStep = discovery?.broadened
         ? "The automatic fallback already widened the Apollo search, so refine the role titles or focus terms before trying again."
         : "Refine the role titles or remove one optional focus term before trying again.";
-      appendResearchMessage("assistant", "The research finished, but nothing qualified for approval.", `${fitSummary} ${needsAttention.length ? `${needsAttention.length} people also need contact or research attention. ` : ""}${nextStep}${nextBatchDetail}`);
+      appendResearchMessage("assistant", "The research finished, but nothing qualified for approval.", `${fitSummary} ${needsAttention.length ? `${needsAttention.length} people also need contact or research attention. ` : ""}${nextStep}${sentHistoryDetail}${nextBatchDetail}`);
     }
   } catch (error) {
     state.researchRun = { ...state.researchRun, status: "error", error: error instanceof Error ? error.message : "Research failed.", updatedAt: new Date().toISOString() };
@@ -3187,13 +3208,64 @@ async function processQueue(ids = null, { contactOutDefault = true, templateId =
         for (const [batchIndex, enrichment] of (response.data || []).entries()) apolloEnrichments.set(batch[batchIndex].id, enrichment);
       }
     }
-    for (let index = 0; index < candidates.length; index += 1) {
-      const current = candidates[index];
-      elements.progressText.textContent = `Researching ${index + 1} of ${candidates.length}`;
+    const sentIdentityIndex = sentResearchIdentityIndex({ prospects: state.queue, deliveryLog: unifiedDeliveryLog() });
+    const candidatesWithApolloEmail = candidates.map((candidate) => {
+      const rawEnrichment = apolloEnrichments.get(candidate.id);
+      if (!rawEnrichment) return candidate;
+      const enrichment = normalizeEnrichmentResponse(rawEnrichment);
+      return {
+        ...candidate,
+        email: enrichment.email || candidate.email,
+        emailSource: enrichment.email ? enrichment.emailSource || "Apollo" : candidate.emailSource,
+        contactDetails: {
+          ...(candidate.contactDetails || {}),
+          emails: [...new Set([...(candidate.contactDetails?.emails || []), ...(enrichment.emails || [])])],
+          workEmails: enrichment.workEmails || candidate.contactDetails?.workEmails || [],
+          personalEmails: enrichment.personalEmails || candidate.contactDetails?.personalEmails || [],
+        },
+      };
+    });
+    const sentHistoryCheck = excludePreviouslyContactedProspects(candidatesWithApolloEmail, sentIdentityIndex);
+    const excludedById = new Map(sentHistoryCheck.excluded.map(({ prospect }) => [prospect.id, prospect]));
+    const excludedFromCurrentRun = sentHistoryCheck.excluded.filter(({ prospect }) => prospect.researchRunId && prospect.researchRunId === state.researchRun?.id).length;
+    if (excludedById.size) {
+      const excludedAt = new Date().toISOString();
+      state.queue = state.queue.map((item) => {
+        const excluded = excludedById.get(item.id);
+        if (!excluded) return item;
+        return {
+          ...item,
+          email: excluded.email || item.email,
+          emailSource: excluded.emailSource || item.emailSource,
+          contactDetails: excluded.contactDetails || item.contactDetails,
+          status: QUEUE_STATUS.SENT,
+          researchRunId: "",
+          error: "",
+          activity: [...(item.activity || []), { type: "already_contacted_excluded", detail: "Excluded from Research because shared sent history already contains this person.", at: excludedAt }].slice(-80),
+          updatedAt: excludedAt,
+        };
+      });
+      await persistQueue({ prospects: queueProspectsById([...excludedById.keys()]) });
+      if (excludedFromCurrentRun) {
+        const remaining = state.queue.filter((item) => item.researchRunId === state.researchRun.id);
+        state.researchRun = {
+          ...state.researchRun,
+          ...researchRunCounts(remaining),
+          previouslyContactedCount: Math.max(0, Number(state.researchRun.previouslyContactedCount) || 0) + excludedFromCurrentRun,
+          updatedAt: excludedAt,
+        };
+        await syncCurrentResearchRun();
+      }
+    }
+    const draftingCandidates = sentHistoryCheck.eligible;
+    contactOutChecks = Math.min(contactOutChecks, draftingCandidates.length);
+    for (let index = 0; index < draftingCandidates.length; index += 1) {
+      const current = draftingCandidates[index];
+      elements.progressText.textContent = `Researching ${index + 1} of ${draftingCandidates.length}`;
       const sourceDetail = /^(ContactOut|Apollo) People Search$/i.test(current.source || "")
         ? "provider profile, contact enrichment, and draft context"
         : "LinkedIn, enrichment providers, and draft context";
-      updateAgentActivity("research", `Researching ${current.name || `prospect ${index + 1}`}`, `Profile ${index + 1} of ${candidates.length} - ${sourceDetail}`);
+      updateAgentActivity("research", `Researching ${current.name || `prospect ${index + 1}`}`, `Profile ${index + 1} of ${draftingCandidates.length} - ${sourceDetail}`);
       state.queue = state.queue.map((item) => item.id === current.id ? { ...item, status: QUEUE_STATUS.PROCESSING, error: "" } : item);
       renderQueue();
       try {
@@ -3207,8 +3279,10 @@ async function processQueue(ids = null, { contactOutDefault = true, templateId =
       await persistQueue({ prospects: queueProspectsById([current.id]) });
       renderQueue();
     }
-    showToast("Target checks and drafts are ready for approval.");
-    return { attempted: candidates.length, contactOutChecks };
+    showToast(excludedById.size
+      ? `${excludedById.size} already contacted ${excludedById.size === 1 ? "person was" : "people were"} skipped; ${draftingCandidates.length ? "new drafts are ready" : "no duplicate drafts were created"}.`
+      : "Target checks and drafts are ready for approval.");
+    return { attempted: draftingCandidates.length, contactOutChecks, previouslyContactedCount: excludedFromCurrentRun };
   } catch (error) {
     showToast(error instanceof Error ? error.message : "Could not research the queue.");
   } finally {
