@@ -348,29 +348,31 @@ test("[V59] deletes only the selected approval prospects from shared storage", a
   };
   const calls = [];
   await deleteSharedProspects([
-    { url: "https://www.linkedin.com/in/greg-miller" },
+    { url: "https://www.linkedin.com/in/greg-miller", email: "greg@example.com" },
     { email: "dane.barhoover@kiewit.com" },
   ], {
     storage,
     fetchImpl: async (url, options) => {
       calls.push({ url: String(url), options });
-      return jsonResponse([
+      return jsonResponse(options.method === "DELETE" ? [
         { identity_key: "linkedin:https://www.linkedin.com/in/greg-miller" },
         { identity_key: "email:dane.barhoover@kiewit.com" },
-      ]);
+      ] : []);
     },
   });
 
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 2);
   assert.equal(calls[0].options.method, "DELETE");
   assert.equal(calls[0].options.headers.Prefer, "return=representation");
+  assert.equal(calls[1].options.method, "GET");
   assert.match(calls[0].url, /select=identity_key/);
   assert.match(decodeURIComponent(calls[0].url), /linkedin:https:\/\/www\.linkedin\.com\/in\/greg-miller/);
+  assert.match(decodeURIComponent(calls[0].url), /email:greg@example\.com/);
   assert.match(decodeURIComponent(calls[0].url), /email:dane\.barhoover@kiewit\.com/);
   assert.doesNotMatch(calls[0].url, /identity_key=not\.is\.null/);
 });
 
-test("[V59] rejects a shared approval delete when Supabase affects no rows", async () => {
+test("[V69] clearing approvals succeeds when shared rows are already absent", async () => {
   const storage = memoryStorage();
   storage.values[SUPABASE_SESSION_STORAGE_KEY] = {
     accessToken: "supabase-access",
@@ -379,12 +381,39 @@ test("[V59] rejects a shared approval delete when Supabase affects no rows", asy
     user: { id: "user-1", email: "tarun@velaenergy.ai" },
   };
 
+  const calls = [];
+  await assert.doesNotReject(deleteSharedProspects(Array.from({ length: 119 }, (_, index) => ({
+    email: `already-absent-${index}@example.com`,
+  })), {
+    storage,
+    fetchImpl: async (_url, options) => {
+      calls.push(options.method);
+      return jsonResponse([]);
+    },
+  }));
+  assert.deepEqual(calls, ["DELETE", "DELETE", "GET", "GET"]);
+});
+
+test("[V69] clearing approvals fails closed when a shared identity remains", async () => {
+  const storage = memoryStorage();
+  storage.values[SUPABASE_SESSION_STORAGE_KEY] = {
+    accessToken: "supabase-access",
+    refreshToken: "supabase-refresh",
+    expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    user: { id: "user-1", email: "tarun@velaenergy.ai" },
+  };
+  let calls = 0;
+
   await assert.rejects(deleteSharedProspects([
     { email: "still-there@example.com" },
   ], {
     storage,
-    fetchImpl: async () => jsonResponse([]),
-  }), /did not delete 1 of 1 approval/);
+    fetchImpl: async (_url, options) => {
+      calls += 1;
+      return jsonResponse(options.method === "DELETE" ? [] : [{ identity_key: "email:still-there@example.com" }]);
+    },
+  }), /still contains 1 matching approval/);
+  assert.equal(calls, 2);
 });
 
 test("reads workspace members in join order through the authenticated team session", async () => {
