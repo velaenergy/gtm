@@ -1035,7 +1035,8 @@ kbd {
 .research-run-copy { min-width:0; display:grid; gap:2px; }
 .research-run-status { width:max-content; color:var(--muted); font-size:10.5px; letter-spacing:.04em; text-transform:uppercase; }
 .research-run-copy p { color:var(--ink); font-size:12.5px; }
-.research-run-next { justify-self:start; min-height:30px; margin-top:7px; padding-inline:10px; font-size:11px; }
+.research-run-actions { display:flex; flex-wrap:wrap; gap:7px; margin-top:7px; }
+.research-run-next { min-height:30px; padding-inline:10px; font-size:11px; }
 .research-run-counts { display:flex; align-items:center; gap:14px; }
 .research-run-counts span { display:grid; gap:1px; min-width:68px; text-align:right; }
 .research-run-counts strong { font-family:var(--mono); font-size:15px; }

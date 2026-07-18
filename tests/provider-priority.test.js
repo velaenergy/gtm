@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   PROVIDER,
   configuredEnrichmentProviders,
+  enrichmentProvidersForAttempt,
   configuredManualEnrichmentProviders,
   configuredSearchProviders,
   preferredProvider,
@@ -40,4 +41,14 @@ test("[V55] manual LinkedIn lookup tries ContactOut before Apollo", () => {
     PROVIDER.APOLLO,
   ]);
   assert.deepEqual(configuredManualEnrichmentProviders({ apolloApiKey: "apollo" }), [PROVIDER.APOLLO]);
+});
+
+test("[V67] declining ContactOut keeps Apollo-only drafting available", () => {
+  const settings = { contactOutSessionEnabled: true, contactOutApiKey: "contactout", apolloApiKey: "apollo" };
+  assert.deepEqual(enrichmentProvidersForAttempt(settings, { contactOutDefault: false }), [PROVIDER.APOLLO]);
+  assert.deepEqual(enrichmentProvidersForAttempt(settings, { contactOutDefault: false, hasInitialApolloResult: true }), []);
+  assert.deepEqual(enrichmentProvidersForAttempt(settings, { contactOutDefault: true, hasInitialApolloResult: true }), [
+    PROVIDER.CONTACTOUT_SESSION,
+    PROVIDER.CONTACTOUT,
+  ]);
 });

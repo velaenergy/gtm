@@ -43,7 +43,7 @@ import {
 } from "./lib/campaigns.js";
 import {
   PROVIDER,
-  configuredEnrichmentProviders,
+  enrichmentProvidersForAttempt,
   preferredProvider,
   providerLabel,
 } from "./lib/provider-priority.js";
@@ -132,7 +132,7 @@ const requestedCampaignId = pageParams.get("campaign") || "";
 const requestedView = pageParams.get("view") || "";
 const WORKSPACE_STATE_STORAGE_KEY = "velaGtmWorkspaceState";
 const elements = Object.fromEntries([
-  "settingsButton", "searchForm", "searchBrief", "planSearchButton", "researchResultLimit", "researchMessages", "researchRunCard", "researchRunStatus", "researchRunProgress", "researchRunCounts", "researchRunBar", "researchRunNextBatchButton",
+  "settingsButton", "searchForm", "searchBrief", "planSearchButton", "researchResultLimit", "researchMessages", "researchRunCard", "researchRunStatus", "researchRunProgress", "researchRunCounts", "researchRunBar", "researchRunDraftButton", "researchRunNextBatchButton",
   "researchThreadSelect", "researchLiveTimer", "newResearchChatButton", "clearResearchChatButton", "openResearchAutomationButton", "researchHistoryCount", "researchHistoryList",
   "researchAutomationDialog", "researchAutomationName", "researchAutomationPrompt", "researchAutomationCadence", "researchAutomationLimit", "researchAutomationMode", "researchAutomationSendCap", "researchAutomationSender", "researchAutomationTemplate", "researchAutomationContactOut", "researchAutomationActive", "saveResearchAutomationButton",
   "openImportButton", "openImportButtonTop", "importDialog", "bulkInput", "importButton", "importHint",
@@ -549,12 +549,19 @@ function renderResearchRun() {
   elements.researchRunCard.hidden = !run;
   if (!run) return;
   const batchPagination = researchBatchPagination(run);
+  const draftableStrong = state.queue.filter((prospect) => prospect.researchRunId === run.id && prospect.targetFit?.verdict === "strong" && [QUEUE_STATUS.NEW, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(prospect.status));
+  elements.researchRunDraftButton.hidden = run.status !== "complete" || state.busy || !draftableStrong.length;
+  elements.researchRunDraftButton.textContent = `Draft qualified (${draftableStrong.length})`;
   elements.researchRunNextBatchButton.hidden = run.status !== "complete" || state.busy || !batchPagination.hasNext;
   elements.researchRunNextBatchButton.textContent = `Research next batch (${batchPagination.nextPage})`;
   const statusLabels = { planning: "Preparing research", searching: "Searching sources", auditing: "Evaluating people", complete: "Ready for approval", error: "Needs attention" };
   elements.researchRunStatus.textContent = run.status === "complete" && !run.foundCount
     ? "No matches yet"
-    : run.status === "complete" && !run.readyCount ? "No qualified results" : statusLabels[run.status] || "Research run";
+    : run.status === "complete" && !run.strongCount
+      ? "No qualified results"
+      : run.status === "complete" && !run.readyCount
+        ? "Qualified · drafting needed"
+        : statusLabels[run.status] || "Research run";
   const totalMatches = Math.max(0, Number(run.totalFound) || 0);
   const pulled = Math.max(0, Number(run.foundCount) || 0);
   const formattedTotal = totalMatches.toLocaleString();
@@ -2805,13 +2812,12 @@ async function executeResearchPlan(plan, brief, { page = 1, automation = null } 
     const strongIds = state.queue
       .filter((prospect) => prospect.researchRunId === run.id && prospect.targetFit?.verdict === "strong" && [QUEUE_STATUS.NEW, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(prospect.status))
       .map((prospect) => prospect.id);
-    if (strongIds.length) await processQueue(strongIds, { contactOutDefault: automation?.contactOutDefault !== false, templateId: automation?.templateId || "" });
+    const drafting = strongIds.length ? await processQueue(strongIds, { contactOutDefault: automation?.contactOutDefault !== false, templateId: automation?.templateId || "" }) : null;
     const ready = state.queue.filter((prospect) => prospect.researchRunId === run.id && prospect.status === QUEUE_STATUS.READY);
     const needsAttention = state.queue.filter((prospect) => prospect.researchRunId === run.id && [QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(prospect.status));
     const completedAt = new Date().toISOString();
     const durationMs = Math.max(0, Date.parse(completedAt) - Date.parse(state.researchRun.startedAt || state.researchRun.createdAt));
-    const contactOutConfigured = Boolean(state.settings.contactOutSessionEnabled || state.settings.contactOutApiKey);
-    state.researchRun = { ...state.researchRun, status: "complete", readyCount: ready.length, needsAttentionCount: needsAttention.length, enrichedCount: strongIds.length, contactOutChecks: automation?.contactOutDefault === false || !contactOutConfigured ? 0 : strongIds.length, durationMs, completedAt, updatedAt: completedAt, metrics: researchRunMetrics({ ...state.researchRun, readyCount: ready.length, durationMs, completedAt }) };
+    state.researchRun = { ...state.researchRun, status: "complete", readyCount: ready.length, needsAttentionCount: needsAttention.length, enrichedCount: strongIds.length, contactOutChecks: Math.max(0, Number(drafting?.contactOutChecks) || 0), durationMs, completedAt, updatedAt: completedAt, metrics: researchRunMetrics({ ...state.researchRun, readyCount: ready.length, durationMs, completedAt }) };
     await syncCurrentResearchRun();
     renderResearchRun();
     const batchPagination = researchBatchPagination(state.researchRun);
@@ -2829,6 +2835,8 @@ async function executeResearchPlan(plan, brief, { page = 1, automation = null } 
     } else if (ready.length) {
       appendResearchMessage("assistant", `${ready.length} ${ready.length === 1 ? "person is" : "people are"} ready in Approvals.`, `${needsAttention.length ? `${needsAttention.length} more need contact or research attention and were kept out of the approval batch.` : "Review the audience and drafts, then use Approve & run when you’re ready."}${nextBatchDetail}`);
       setView("review");
+    } else if (state.researchRun.strongCount) {
+      appendResearchMessage("assistant", `${state.researchRun.strongCount} people qualified, but none are ready for approval yet.`, `${needsAttention.length ? `${needsAttention.length} need a valid email or successful draft retry. ` : "Drafting paused before the qualified batch was processed. "}Use Draft qualified (${strongIds.length}) in the run card to continue without rerunning Apollo.${nextBatchDetail}`);
     } else {
       const fitSummary = `${state.researchRun.strongCount || 0} strong · ${state.researchRun.reviewCount || 0} review · ${state.researchRun.skipCount || 0} skipped.`;
       const nextStep = discovery?.broadened
@@ -2932,7 +2940,7 @@ function mergeEnrichmentResults(primary = {}, secondary = {}) {
 }
 
 async function callEnrichment(profile, { approveSessionReveal = false, contactOutDefault = true, contactOutOnly = false, initialApolloResult = null } = {}) {
-  const providers = configuredEnrichmentProviders(state.settings).filter((provider) => (contactOutOnly || initialApolloResult) ? provider !== PROVIDER.APOLLO : contactOutDefault || provider === PROVIDER.APOLLO);
+  const providers = enrichmentProvidersForAttempt(state.settings, { contactOutDefault, contactOutOnly, hasInitialApolloResult: Boolean(initialApolloResult) });
   if (!providers.length && initialApolloResult) return initialApolloResult;
   if (providers.length) {
     let lastError;
@@ -3147,8 +3155,10 @@ async function processQueue(ids = null, { contactOutDefault = true, templateId =
     showToast("Configure an OpenAI key or AI writer endpoint before researching prospects.");
     return;
   }
+  let contactOutChecks = 0;
   try {
     let approveSessionReveal = false;
+    let useContactOut = contactOutDefault;
     if (contactOutDefault && state.settings.contactOutSessionEnabled) {
       const run = state.researchRun;
       const pulled = Math.max(0, Number(run?.foundCount) || 0);
@@ -3159,7 +3169,10 @@ async function processQueue(ids = null, { contactOutDefault = true, templateId =
         ? `Apollo pulled ${pulled} profiles and Vela completed fit checks for ${audited}. ${candidates.length} were marked strong fits, so ContactOut will preview only those ${candidates.length}; the other ${pulled - candidates.length} will not use email credits.\n\n`
         : "";
       approveSessionReveal = globalThis.confirm(`${fitSummary}ContactOut may use up to ${candidates.length} email credit${candidates.length === 1 ? "" : "s"} if contacts are found. Continue?`);
-      if (!approveSessionReveal) { showToast("ContactOut reveal cancelled. No credits were used."); return; }
+      if (!approveSessionReveal) {
+        useContactOut = false;
+        showToast("Continuing with Apollo only; no ContactOut credits will be used.");
+      } else contactOutChecks = candidates.length;
     }
     if (!state.settings.contactOutApiKey && !state.settings.apolloApiKey && state.settings.endpointUrl && !(await ensureOriginPermission(state.settings.endpointUrl))) throw new Error("Email enrichment access was declined.");
     if (!state.settings.openAIApiKey && state.settings.writerEndpointUrl && !(await ensureOriginPermission(state.settings.writerEndpointUrl))) throw new Error("AI writer access was declined.");
@@ -3184,7 +3197,7 @@ async function processQueue(ids = null, { contactOutDefault = true, templateId =
       state.queue = state.queue.map((item) => item.id === current.id ? { ...item, status: QUEUE_STATUS.PROCESSING, error: "" } : item);
       renderQueue();
       try {
-        const result = await researchProspect(current, { approveSessionReveal, contactOutDefault, templateId, apolloEnrichment: apolloEnrichments.get(current.id) || null });
+        const result = await researchProspect(current, { approveSessionReveal, contactOutDefault: useContactOut, templateId, apolloEnrichment: apolloEnrichments.get(current.id) || null });
         state.queue = state.queue.map((item) => item.id === current.id ? result : item);
       } catch (error) {
         state.queue = state.queue.map((item) => item.id === current.id ? {
@@ -3195,11 +3208,34 @@ async function processQueue(ids = null, { contactOutDefault = true, templateId =
       renderQueue();
     }
     showToast("Target checks and drafts are ready for approval.");
+    return { attempted: candidates.length, contactOutChecks };
   } catch (error) {
     showToast(error instanceof Error ? error.message : "Could not research the queue.");
   } finally {
     setBusy(false);
     renderQueue();
+  }
+}
+
+async function draftCurrentResearchRun() {
+  const run = state.researchRun;
+  if (!run || state.busy) return;
+  const strongIds = state.queue
+    .filter((prospect) => prospect.researchRunId === run.id && prospect.targetFit?.verdict === "strong" && [QUEUE_STATUS.NEW, QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(prospect.status))
+    .map((prospect) => prospect.id);
+  if (!strongIds.length) { showToast("No qualified people are waiting to be drafted."); return; }
+  await processQueue(strongIds);
+  const ready = state.queue.filter((prospect) => prospect.researchRunId === run.id && prospect.status === QUEUE_STATUS.READY);
+  const needsAttention = state.queue.filter((prospect) => prospect.researchRunId === run.id && [QUEUE_STATUS.ERROR, QUEUE_STATUS.NEEDS_EMAIL].includes(prospect.status));
+  const completedAt = new Date().toISOString();
+  state.researchRun = { ...state.researchRun, status: "complete", readyCount: ready.length, needsAttentionCount: needsAttention.length, completedAt, updatedAt: completedAt };
+  await syncCurrentResearchRun();
+  renderResearchRun();
+  if (ready.length) {
+    appendResearchMessage("assistant", `${ready.length} ${ready.length === 1 ? "person is" : "people are"} ready in Approvals.`, needsAttention.length ? `${needsAttention.length} more still need contact or research attention.` : "The qualified batch is drafted and ready to review.");
+    setView("review");
+  } else {
+    appendResearchMessage("assistant", `${state.researchRun.strongCount || strongIds.length} people qualified, but none are ready for approval yet.`, `${needsAttention.length || strongIds.length} need a valid email or a successful draft retry; the audience itself does not need to be broadened.`);
   }
 }
 
@@ -3980,6 +4016,7 @@ function bindEvents() {
     action.catch((error) => showToast(error instanceof Error ? error.message : "Could not start this action."));
   });
   elements.nextResearchBatchButton.addEventListener("click", () => runNextResearchBatch());
+  elements.researchRunDraftButton.addEventListener("click", () => draftCurrentResearchRun());
   elements.researchRunNextBatchButton.addEventListener("click", () => runNextResearchBatch());
   elements.sendAllButton.addEventListener("click", () => openBulkSend(visibleProspects().map((item) => item.id)));
   elements.tableSearch.addEventListener("input", () => {

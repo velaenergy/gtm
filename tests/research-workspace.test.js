@@ -151,9 +151,23 @@ test("[V42] the Research UI binds both next-batch entry points", async () => {
 
 test("[V62] a broadened zero-strong run is not presented as ready or told to broaden again", async () => {
   const dashboardJs = await readFile(new URL("../dashboard.js", import.meta.url), "utf8");
-  assert.match(dashboardJs, /complete" && !run\.readyCount \? "No qualified results"/);
+  assert.match(dashboardJs, /complete" && !run\.strongCount/);
+  assert.match(dashboardJs, /"No qualified results"/);
   assert.match(dashboardJs, /The automatic fallback already widened the Apollo search/);
   assert.doesNotMatch(dashboardJs, /discovery\?\.broadened[\s\S]{0,500}Try broadening the audience/);
+});
+
+test("[V67] a strong batch can resume drafting and ContactOut decline continues Apollo-only", async () => {
+  const [dashboardJs, dashboardHtml] = await Promise.all([
+    readFile(new URL("../dashboard.js", import.meta.url), "utf8"),
+    readFile(new URL("../dashboard.html", import.meta.url), "utf8"),
+  ]);
+  assert.match(dashboardHtml, /id="researchRunDraftButton"/);
+  assert.match(dashboardJs, /researchRunDraftButton\.addEventListener\("click", \(\) => draftCurrentResearchRun\(\)\)/);
+  assert.match(dashboardJs, /researchRunDraftButton\.textContent = `Draft qualified \(\$\{draftableStrong\.length\}\)`/);
+  assert.match(dashboardJs, /Continuing with Apollo only; no ContactOut credits will be used\./);
+  assert.doesNotMatch(dashboardJs, /if \(!approveSessionReveal\) \{ showToast\("ContactOut reveal cancelled\. No credits were used\."\); return; \}/);
+  assert.match(dashboardJs, /people qualified, but none are ready for approval yet/);
 });
 
 test("[V46][V47][V57] sent history and approval actions stay wired to their real data paths", async () => {
