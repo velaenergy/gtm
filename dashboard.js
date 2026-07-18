@@ -746,6 +746,12 @@ async function refreshResearchWorkspace({ quiet = true } = {}) {
   state.researchThreads = (Array.isArray(local[RESEARCH_THREADS_STORAGE_KEY]) ? local[RESEARCH_THREADS_STORAGE_KEY] : []).map(normalizeResearchThread).filter((thread) => thread.id).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
   state.researchMessagesByThread = normalizeLocalResearchMessages(local[RESEARCH_MESSAGES_STORAGE_KEY]);
   state.researchRunHistory = Array.isArray(local[RESEARCH_RUNS_STORAGE_KEY]) ? local[RESEARCH_RUNS_STORAGE_KEY].slice(0, 50) : [];
+  if (!state.researchRun && state.researchRunHistory[0]) {
+    const latestRun = state.researchRunHistory[0];
+    const runProspects = state.queue.filter((prospect) => prospect.researchRunId === latestRun.id);
+    state.researchRun = { ...latestRun, ...researchRunCounts(runProspects) };
+    state.researchRunHistory[0] = state.researchRun;
+  }
   state.researchAutomations = (Array.isArray(local[RESEARCH_AUTOMATIONS_STORAGE_KEY]) ? local[RESEARCH_AUTOMATIONS_STORAGE_KEY] : []).map(normalizeResearchAutomation);
   let lists = null;
   if (isExtension) lists = await chrome.runtime.sendMessage({ type: "VELA_GTM_TEAM_RESEARCH_LISTS_READ" }).catch(() => null);
@@ -757,6 +763,7 @@ async function refreshResearchWorkspace({ quiet = true } = {}) {
   }
   if (!quiet && isExtension && !lists?.ok) showToast("Your research chat is saved locally; the shared final lists are still syncing.");
   renderResearchWorkspaceChrome();
+  renderResearchRun();
 }
 
 function openResearchAutomation() {
@@ -4285,7 +4292,7 @@ async function initialize() {
   const legacySidebarCollapsed = !isExtension && localStorage.getItem("velaGtmSidebarCollapsed") === "true";
   const sidebarCollapsed = previewSidebar === "collapsed" || (previewSidebar !== "expanded" && (savedWorkspace.sidebarCollapsed ?? legacySidebarCollapsed));
   setSidebarCollapsed(Boolean(sidebarCollapsed), { persist: false });
-  state.queue = saved[QUEUE_STORAGE_KEY] || (!isExtension ? upsertProspects([], DEMO_QUEUE) : []);
+  state.queue = upsertProspects([], saved[QUEUE_STORAGE_KEY] || (!isExtension ? DEMO_QUEUE : []));
   state.campaigns = normalizeCampaigns(saved[CAMPAIGNS_STORAGE_KEY] || (!isExtension ? DEMO_CAMPAIGNS : []));
   state.scheduledJobs = normalizeScheduledSends(saved[SCHEDULED_SENDS_STORAGE_KEY] || (!isExtension ? DEMO_SCHEDULED_SENDS : []));
   state.deliveryLog = normalizeDeliveryLog(saved[DELIVERY_LOG_STORAGE_KEY] || (!isExtension ? [...DEMO_SCHEDULED_SENDS, ...DEMO_DELIVERY_LOG] : []));
@@ -4323,7 +4330,7 @@ async function initialize() {
   if (isExtension) state.teamSyncTimer = setInterval(refreshTeamWorkspace, 12_000);
   if (isExtension && chrome.storage?.onChanged) chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "local") return;
-    if (changes[QUEUE_STORAGE_KEY]) state.queue = changes[QUEUE_STORAGE_KEY].newValue || [];
+    if (changes[QUEUE_STORAGE_KEY]) state.queue = upsertProspects([], changes[QUEUE_STORAGE_KEY].newValue || []);
     if (changes[CAMPAIGNS_STORAGE_KEY]) state.campaigns = normalizeCampaigns(changes[CAMPAIGNS_STORAGE_KEY].newValue || []);
     if (changes[SCHEDULED_SENDS_STORAGE_KEY]) state.scheduledJobs = normalizeScheduledSends(changes[SCHEDULED_SENDS_STORAGE_KEY].newValue || []);
     if (changes[DELIVERY_LOG_STORAGE_KEY]) state.deliveryLog = normalizeDeliveryLog(changes[DELIVERY_LOG_STORAGE_KEY].newValue || []);

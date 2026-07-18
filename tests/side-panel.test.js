@@ -123,6 +123,13 @@ test("[V59] shared prospect refreshes never write the merged queue back to Supab
   assert.doesNotMatch(refresh, /persistQueue|VELA_GTM_TEAM_PROSPECTS_SYNC/);
 });
 
+test("[V70] dashboard reload recalibrates stored qualification records", () => {
+  assert.match(dashboardJs, /state\.queue = upsertProspects\(\[\], saved\[QUEUE_STORAGE_KEY\]/);
+  assert.match(dashboardJs, /if \(changes\[QUEUE_STORAGE_KEY\]\) state\.queue = upsertProspects\(\[\], changes\[QUEUE_STORAGE_KEY\]\.newValue \|\| \[\]\)/);
+  assert.match(dashboardJs, /const latestRun = state\.researchRunHistory\[0\][\s\S]*researchRunCounts\(runProspects\)[\s\S]*state\.researchRunHistory\[0\] = state\.researchRun/);
+  assert.match(dashboardJs, /async function refreshResearchWorkspace[\s\S]*renderResearchWorkspaceChrome\(\);\s*renderResearchRun\(\);/);
+});
+
 test("[V59] clear and review deletion wait for a verified shared delete", () => {
   assert.match(dashboardJs, /async function deleteQueueProspects\(prospects = \[\]\)[\s\S]*VELA_GTM_TEAM_PROSPECTS_DELETE[\s\S]*if \(!response\?\.ok\) throw[\s\S]*state\.queue = state\.queue\.filter/);
   assert.match(dashboardJs, /clearProspectsButton\.addEventListener\("click", async \(\) => \{[\s\S]*await deleteQueueProspects\(approvals\)/);

@@ -21,6 +21,18 @@ test("[V62] grounds target auditing in profile facts, the approved audience, and
   assert.equal(request.profile.experiences[0].company, "Atlas");
 });
 
+test("[V70] a thin Apollo profile keeps its search title for qualification", () => {
+  const request = buildProspectAuditRequest({
+    name: "Avery",
+    headline: "Director, Energy Procurement",
+    company: "Industrial Co",
+    profile: { name: "Avery", headline: "", experiences: [], company: null },
+  });
+  assert.equal(request.profile.headline, "Director, Energy Procurement");
+  assert.equal(request.profile.experiences[0].title, "Director, Energy Procurement");
+  assert.equal(request.profile.experiences[0].company, "Industrial Co");
+});
+
 test("audits a batch with bounded workers and preserves per-person failures", async () => {
   let active = 0;
   let peak = 0;

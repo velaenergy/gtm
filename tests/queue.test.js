@@ -49,3 +49,14 @@ test("a teammate's shared sent state promotes an older local approved draft", ()
   assert.equal(refreshed[0].status, QUEUE_STATUS.SENT);
   assert.equal(refreshed[0].emailSentAt, "2026-07-16T20:05:00.000Z");
 });
+
+test("[V70] stored direct energy-role reviews recover without another Apollo pull", () => {
+  const [direct, generic] = upsertProspects([], [
+    { providerId: "apollo-direct", headline: "Director, Energy Procurement", targetFit: { verdict: "review", score: 62, reason: "Thin profile", evidence: ["Director, Energy Procurement"], checkedAt: "2026-07-18T20:00:00.000Z" } },
+    { providerId: "apollo-generic", headline: "Procurement Manager", targetFit: { verdict: "review", score: 62, reason: "Thin profile", evidence: ["Procurement Manager"], checkedAt: "2026-07-18T20:00:00.000Z" } },
+  ]).sort((a, b) => a.providerId.localeCompare(b.providerId));
+
+  assert.equal(direct.targetFit.verdict, "strong");
+  assert.equal(direct.targetFit.checkedAt, "2026-07-18T20:00:00.000Z");
+  assert.equal(generic.targetFit.verdict, "review");
+});
