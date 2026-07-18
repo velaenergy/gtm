@@ -1,6 +1,6 @@
 {
   "name": "vela-gtm",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "private": true,
   "type": "module",
   "description": "Internal Vela prospecting companion for LinkedIn profiles.",
