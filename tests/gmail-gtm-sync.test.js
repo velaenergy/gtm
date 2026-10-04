@@ -21,6 +21,13 @@ test("HTML email extraction decodes entities once and retains encoded literal te
   assert.equal(body, '&lt;script&gt; &quot; <literal> "quoted" \'apostrophe\' &');
 });
 
+test("HTML email extraction ignores attributes on script and style closing tags", () => {
+  const body = gmailMessageBody({ mimeType: "text/html", body: { data: encoded(
+    '<p>Hello</p><script>doNotImport()</script\t\n bar><style>doNotImportStyle</style data-end><p>Goodbye</p>',
+  ) } });
+  assert.equal(body.replace(/\s+/g, " "), "Hello Goodbye");
+});
+
 function gmailMessage({ id, threadId, from, to, subject, body, historyId, at, headers = [], labels = [] }) {
   return {
     id,
