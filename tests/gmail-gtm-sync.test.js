@@ -1,11 +1,32 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { gmailMessagesAsDeliveryRecords, matchGtmTemplate, scanFullGtmMailbox, scanIncrementalGtmMailbox } from "../lib/gmail-gtm-sync.js";
+import { gmailMessageBody, gmailMessagesAsDeliveryRecords, matchGtmTemplate, scanFullGtmMailbox, scanIncrementalGtmMailbox } from "../lib/gmail-gtm-sync.js";
 
 function encoded(value) {
   return Buffer.from(value).toString("base64url");
 }
+
+test("HTML email extraction removes script and style content with spaced closing tags", () => {
+  const body = gmailMessageBody({ mimeType: "text/html", body: { data: encoded(
+    '<p>Hello</p><SCRIPT>doNotImport()</SCRIPT \t><style>.private { color: red; }</style\n><p>Goodbye</p>',
+  ) } });
+  assert.equal(body.replace(/\s+/g, " "), "Hello Goodbye");
+});
+
+test("HTML email extraction decodes entities once and retains encoded literal text", () => {
+  const body = gmailMessageBody({ mimeType: "text/html", body: { data: encoded(
+    '<p>&amp;lt;script&amp;gt; &AMP;quot; &lt;literal&gt; &quot;quoted&quot; &#39;apostrophe&#39;&nbsp;&amp;</p>',
+  ) } });
+  assert.equal(body, '&lt;script&gt; &quot; <literal> "quoted" \'apostrophe\' &');
+});
+
+test("HTML email extraction ignores attributes on script and style closing tags", () => {
+  const body = gmailMessageBody({ mimeType: "text/html", body: { data: encoded(
+    '<p>Hello</p><script>doNotImport()</script\t\n bar><style>doNotImportStyle</style data-end><p>Goodbye</p>',
+  ) } });
+  assert.equal(body.replace(/\s+/g, " "), "Hello Goodbye");
+});
 
 function gmailMessage({ id, threadId, from, to, subject, body, historyId, at, headers = [], labels = [] }) {
   return {

@@ -4,12 +4,31 @@ import test from "node:test";
 import {
   CONTACTOUT_CLIENT_VERSION,
   buildContactOutSessionProfile,
+  contactOutSessionStatus,
   normalizeContactOutSessionReveal,
   previewContactOutSession,
   revealContactOutSession,
   selectContactOutSessionRecord,
   summarizeContactOutSessionUser,
 } from "../lib/contactout-session.js";
+
+test("ContactOut stops before any network request when secure randomness is unavailable", async () => {
+  const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  let requests = 0;
+  const chromeApi = {
+    tabs: { query: async () => { requests += 1; return []; } },
+    scripting: {},
+    storage: { local: { get: async () => ({}) } },
+  };
+  try {
+    Object.defineProperty(globalThis, "crypto", { configurable: true, value: undefined });
+    await assert.rejects(contactOutSessionStatus({ chromeApi }), { code: "secure_random_unavailable" });
+    assert.equal(requests, 0);
+  } finally {
+    if (cryptoDescriptor) Object.defineProperty(globalThis, "crypto", cryptoDescriptor);
+    else delete globalThis.crypto;
+  }
+});
 
 test("builds the bounded profile contract used by ContactOut's browser flow", () => {
   assert.deepEqual(buildContactOutSessionProfile({
